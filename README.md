@@ -7,6 +7,7 @@
 - Windows 10/11
 - Python 3.8+（安装时勾选 “Add Python to PATH”）
 - 首次运行会自动检测并安装依赖；也可手动执行：`pip install -r requirements.txt`
+- 若自动检测仍找不到 Python，可在根目录新建 python_path.txt，第一行填写 Python 可执行文件的完整路径（如 C:\Python313\python.exe）
 
 ## 运行游戏
 

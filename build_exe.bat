@@ -25,7 +25,17 @@ if not defined PY_CMD (
     )
 )
 
-REM 3) python.org 常见安装目录
+REM 3) 用户自定义路径：python_path.txt 第一行（可选）
+if not defined PY_CMD if exist "%~dp0python_path.txt" (
+    set "PY_CMD_FILE="
+    for /f "usebackq delims=" %%p in ("%~dp0python_path.txt") do if not defined PY_CMD_FILE set "PY_CMD_FILE=%%p"
+)
+if not defined PY_CMD_FILE goto :python_common
+if not exist "%PY_CMD_FILE%" goto :python_common
+set "PY_CMD="%PY_CMD_FILE%""
+
+REM 4) python.org 常见安装目录
+:python_common
 for %%V in (313 312 311 310 39 38) do (
     if not defined PY_CMD if exist "%LOCALAPPDATA%\Programs\Python\Python%%V\python.exe" set "PY_CMD="%LOCALAPPDATA%\Programs\Python\Python%%V\python.exe""
     if not defined PY_CMD if exist "%ProgramFiles%\Python\Python%%V\python.exe" set "PY_CMD="%ProgramFiles%\Python\Python%%V\python.exe""

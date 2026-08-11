@@ -15,3 +15,6 @@ backup/
 
 # 临时文件
 *.log
+
+# 本机自定义 Python 路径
+python_path.txt
