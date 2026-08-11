@@ -2,16 +2,22 @@
 
 基于 Hypixel Skyblock 的东方 Project 同人弹幕射击游戏（STG），使用 Python + Pygame 开发。
 
+## 环境要求
+
+- Windows 10/11
+- Python 3.8+（安装时勾选 “Add Python to PATH”）
+- 首次运行会自动检测并安装依赖；也可手动执行：`pip install -r requirements.txt`
+
 ## 运行游戏
 
-- 双击根目录 `启动游戏.bat`
+- 双击根目录 `启动游戏.bat`（自动检测本机 Python，缺少依赖时自动安装）
 - 或命令行执行：`python main.py`
 - 可选难度参数：`python main.py easy|normal|hard|lunatic`
 
 ## 打包 EXE
 
-- 双击 `build_exe.bat`，产物输出到 `dist\TouHouSkyStreet.exe`
-- 等价命令：`python -m PyInstaller --onefile --name TouHouSkyStreet --add-data "assets;assets" --noconsole main.py`
+- 双击 `build_exe.bat`（自动检测本机 Python 并安装 PyInstaller），产物输出到 `dist\TouHouSkyStreet.exe`
+- 等价命令：`pip install -r requirements-build.txt` 后执行 `python -m PyInstaller --onefile --name TouHouSkyStreet --add-data "assets;assets" --noconsole main.py`
 
 ## 目录结构
 
