@@ -7,7 +7,7 @@ cd /d "%~dp0"
 echo Building TouHouSkyStreet.exe...
 echo.
 
-C:\Users\admin\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m PyInstaller --onefile --name "TouHouSkyStreet" --add-data "assets;assets" --noconsole main.py
+python -m PyInstaller --onefile --name "TouHouSkyStreet" --add-data "assets;assets" --noconsole main.py
 
 echo.
 echo Done! EXE is in dist\TouHouSkyStreet.exe
