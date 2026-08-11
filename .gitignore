@@ -1,0 +1,17 @@
+﻿# Python 缓存
+__pycache__/
+*.py[cod]
+*.pyo
+
+# PyInstaller 构建产物
+build/
+dist/
+
+# 工具生成的预览截图
+previews/
+
+# 旧版源码备份
+backup/
+
+# 临时文件
+*.log
