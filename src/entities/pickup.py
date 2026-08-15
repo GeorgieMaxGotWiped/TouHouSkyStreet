@@ -1,34 +1,75 @@
-# 掉落物：红色 Power 方块
-# 击败敌人掉落，向下飘落，拾取后获得 Power
+# Pickups: red Power blocks and boss reward drops.
+# Drops fall downward and are collected by the player.
 
 import math
+import os
 import pygame
 from src.engine import settings as cfg
 
 
-class PowerPickup:
-    """红色 Power 方块"""
+# Boss-specific reward drop identifiers.
+DROP_OVERFLUX_POWER_ORB = "overflux_power_orb"
+DROP_REVIVE_STONE = "revive_stone"
 
-    SIZE = 14            # 方块边长（px）
-    PICKUP_RADIUS = 20   # 拾取判定半径（px）
-    VALUE = 5            # 每个方块提供的 power
-    LAUNCH_SPEED = -3.0  # 爆出时向上抛出的初速度
-    GRAVITY = 0.08       # 抛出阶段重力加速度
-    FALL_SPEED = 2.0     # 落回爆出高度后的均速下落速度
-    SUCK_TIME = 0.2      # 顶部低速吸收耗时（秒），任意位置相同
+
+_pickup_sprite_cache = {}
+
+
+def _get_pickup_sprite(path, target_size):
+    """Load and scale a pickup sprite. Returns None when unavailable."""
+    key = (path, target_size)
+    if key in _pickup_sprite_cache:
+        return _pickup_sprite_cache[key]
+
+    sprite = None
+    try:
+        if os.path.exists(path):
+            img = pygame.image.load(path)
+            if img.get_bitsize() < 24:
+                converted = pygame.Surface(img.get_size(), pygame.SRCALPHA)
+                converted.blit(img, (0, 0))
+                img = converted
+            else:
+                try:
+                    img = img.convert_alpha()
+                except Exception:
+                    pass
+            w, h = img.get_size()
+            if w > 0 and h > 0:
+                scale = target_size / max(w, h)
+                new_w = max(1, round(w * scale))
+                new_h = max(1, round(h * scale))
+                sprite = pygame.transform.smoothscale(img, (new_w, new_h))
+    except Exception as exc:
+        print(f"[Pickup] Failed to load sprite {path}: {exc}")
+
+    _pickup_sprite_cache[key] = sprite
+    return sprite
+
+
+class PowerPickup:
+    """Red Power block."""
+
+    SIZE = 14            # block edge length (px)
+    PICKUP_RADIUS = 20   # pickup radius (px)
+    VALUE = 5            # power granted per block
+    LAUNCH_SPEED = -3.0  # initial upward pop speed
+    GRAVITY = 0.08       # pop phase gravity
+    FALL_SPEED = 2.0     # steady fall speed after popping
+    SUCK_TIME = 0.2      # top-area suction duration (seconds)
 
     def __init__(self, x, y, vx=0.0, value=VALUE):
         self.x = x
         self.y = y
-        self.spawn_y = y      # 爆出高度
+        self.spawn_y = y
         self.vx = 0.0
         self.vy = self.LAUNCH_SPEED
-        self.thrown = True    # 先向上抛出
+        self.thrown = True
         self.value = value
         self.alive = True
         self.age = 0
-        self.sucking = False    # 是否正在被顶部低速吸收
-        self.suck_frames = 0    # 吸收剩余帧数（任意位置相同）
+        self.sucking = False
+        self.suck_frames = 0
 
     def update(self, dt):
         self.age += 1
@@ -36,30 +77,25 @@ class PowerPickup:
         if self.thrown:
             self.vy += self.GRAVITY
             self.y += self.vy
-            # 落回爆出高度后改为均速下落
             if self.vy >= 0 and self.y >= self.spawn_y:
                 self.thrown = False
                 self.y = self.spawn_y
                 self.vy = self.FALL_SPEED
         else:
             self.y += self.vy
-        # 飘出屏幕底部或超时后消失
         if self.y > cfg.BATTLE_AREA_HEIGHT + 40 or self.age > 900:
             self.alive = False
 
     def start_suck(self, frames):
-        """开始吸收：记录固定帧数，任意位置耗时相同"""
         if not self.sucking:
             self.sucking = True
             self.suck_frames = frames
 
     def end_suck(self):
-        """中断吸收：恢复正常下落"""
         self.sucking = False
         self.suck_frames = 0
 
     def suck_toward(self, px, py):
-        """吸收中：按剩余帧数等分距离飞向玩家，最后一帧到达"""
         if not self.sucking:
             return
         dx = px - self.x
@@ -87,3 +123,47 @@ class PowerPickup:
 
     def get_hitbox(self):
         return (self.x, self.y, self.SIZE / 2)
+
+
+class OverfluxPowerOrbPickup(PowerPickup):
+    """Overflux Power Orb: grants +1 bomb and is not cleared at max power."""
+
+    SIZE = 22
+    PICKUP_RADIUS = 22
+    SPRITE_PATH = os.path.join(cfg.SPRITES_DIR, "bullets", "Overflux_Power_Orb.png")
+    FALLBACK_COLOR = (90, 220, 255)
+
+    def __init__(self, x, y, vx=0.0):
+        super().__init__(x, y, vx=vx, value=0)
+
+    def draw(self, screen, offset_x=0, offset_y=0):
+        sprite = _get_pickup_sprite(self.SPRITE_PATH, self.SIZE)
+        px = int(self.x + offset_x)
+        py = int(self.y + offset_y)
+        if sprite is not None:
+            screen.blit(sprite, sprite.get_rect(center=(px, py)))
+            return
+        pygame.draw.circle(screen, self.FALLBACK_COLOR, (px, py), self.SIZE // 2, 0)
+        pygame.draw.circle(screen, cfg.COLOR_WHITE, (px, py), self.SIZE // 2, 2)
+
+
+class ReviveStonePickup(PowerPickup):
+    """Revive Stone: grants +1 life and is not cleared at max power."""
+
+    SIZE = 22
+    PICKUP_RADIUS = 22
+    SPRITE_PATH = os.path.join(cfg.SPRITES_DIR, "bullets", "Revive_Stone.png")
+    FALLBACK_COLOR = (255, 130, 190)
+
+    def __init__(self, x, y, vx=0.0):
+        super().__init__(x, y, vx=vx, value=0)
+
+    def draw(self, screen, offset_x=0, offset_y=0):
+        sprite = _get_pickup_sprite(self.SPRITE_PATH, self.SIZE)
+        px = int(self.x + offset_x)
+        py = int(self.y + offset_y)
+        if sprite is not None:
+            screen.blit(sprite, sprite.get_rect(center=(px, py)))
+            return
+        pygame.draw.circle(screen, self.FALLBACK_COLOR, (px, py), self.SIZE // 2, 0)
+        pygame.draw.circle(screen, cfg.COLOR_WHITE, (px, py), self.SIZE // 2, 2)

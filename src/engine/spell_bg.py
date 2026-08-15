@@ -11,6 +11,7 @@ import numpy as np
 import pygame
 
 from src.engine import settings as cfg
+from src.engine.panorama3d import CylinderPanorama
 
 AREA_W = int(cfg.BATTLE_AREA_WIDTH)       # 576
 AREA_H = int(cfg.BATTLE_AREA_HEIGHT)      # 670
@@ -31,10 +32,12 @@ BASE_COLOR = (7, 9, 20)
 
 class _Layer:
     """一层特效：图案 + 每帧数学变换"""
-    __slots__ = ("pattern", "rot_speed", "scale", "pulse", "freq", "scroll", "blend", "orbit", "pos")
+    __slots__ = ("pattern", "rot_speed", "scale", "pulse", "freq", "scroll", "blend",
+                 "orbit", "pos", "panorama", "image")
 
     def __init__(self, pattern, rot_speed=0.0, scale=1.0, pulse=0.0, freq=0.0,
-                 scroll=None, blend="add", orbit=None, pos=None):
+                 scroll=None, blend="add", orbit=None, pos=None, panorama=None,
+                 image=None):
         self.pattern = pattern          # 图案 key（见 _PATTERN_MAKERS）
         self.rot_speed = rot_speed      # 旋转速度（度/帧）
         self.scale = scale              # 基准缩放
@@ -44,11 +47,31 @@ class _Layer:
         self.blend = blend              # "add"=叠加发光 / "alpha"=普通透明混合
         self.orbit = orbit              # 环绕 (半径, 角速度度/帧)；None 表示居中旋转
         self.pos = pos                  # 固定绘制位置 (x, y)（画布坐标）；None 表示居中/环绕
+        self.panorama = panorama        # 伪3D环形全景配置 dict（key/speed/fov...）；None 表示普通层
+        self.image = image              # 全屏背景贴图 key（见 IMAGE_TEXTURES）；None 表示普通层
 
 
 # --- 图案生成（程序化 + 贴图染色，均缓存） ---
 
 _pattern_cache = {}
+
+# 全景贴图注册表：key -> 左右无缝的 360° 环形全景图路径
+PANORAMA_TEXTURES = {
+    "stage3_bg1": os.path.join(cfg.BACKGROUNDS_DIR, "stage3", "bg1.png"),
+    "scarf": os.path.join(cfg.BACKGROUNDS_DIR, "stage4", "scarf", "bg_scarf.png"),
+    "sadan": os.path.join(cfg.BACKGROUNDS_DIR, "stage4", "sadan", "bg_sadan.png"),
+    "professor": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "professor", "bg_professor.png"),
+    "necron": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "necron", "bg_necron.png"),
+    "thorn": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "thorn", "bg_thorn.png"),
+    "livid": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "livid", "bg_livid.png"),
+}
+
+# 全屏背景贴图注册表：key -> 符卡期间整幅铺满战斗区域的背景图路径
+IMAGE_TEXTURES = {
+    "maxor": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "maxor", "bg.png"),
+    "storm": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "storm", "bg.png"),
+    "goldor": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "goldor", "bg.png"),
+}
 
 
 def _make_web_pattern(color, arms=8, rings=5):
@@ -417,6 +440,20 @@ def _make_glow(w, h, cx, cy, radius, color):
     return surf
 
 
+def _scale_cover(surf, w, h):
+    """等比放大到铺满 w x h 后居中裁剪（保留整幅观感，不留黑边）"""
+    sw, sh = surf.get_size()
+    scale = max(w / float(sw), h / float(sh))
+    nw, nh = max(1, int(round(sw * scale))), max(1, int(round(sh * scale)))
+    try:
+        scaled = pygame.transform.smoothscale(surf, (nw, nh))
+    except Exception:
+        scaled = pygame.transform.scale(surf, (nw, nh))
+    x = (nw - w) // 2
+    y = (nh - h) // 2
+    return scaled.subsurface((x, y, w, h)).copy()
+
+
 # --- 符卡风格配置 ---
 # 每张符卡按名字印象选择一套“旋转/缩放/扭曲/流动”的组合
 
@@ -558,7 +595,10 @@ STYLES = {
         "ring": (150, 230, 120),
         "dim": 0.52,
         "layers": [
-            _Layer("catacomb_floor", scroll=(0.0, 0.28), blend="alpha"),
+            _Layer(None, panorama=dict(key="stage3_bg1", speed=16.0, fov=60,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           "stage3", "bossfloor1.png")),
+                   blend="alpha"),
             _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
             _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
             _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
@@ -571,12 +611,138 @@ STYLES = {
         "ring": (255, 140, 200),
         "dim": 0.45,
         "layers": [
-            _Layer("catacomb_floor", scroll=(0.0, 0.30), blend="alpha"),
+            _Layer(None, panorama=dict(key="stage3_bg1", speed=28.0, fov=60,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           "stage3", "bossfloor1.png")),
+                   blend="alpha"),
             _Layer("spiral_red", rot_speed=0.80, scale=2.1, pulse=0.10, freq=0.45),
             _Layer("soul_fire", rot_speed=-0.40, scale=1.8, pulse=0.06, freq=0.30),
             _Layer("icon_balloon", rot_speed=0.45, scale=0.60, pulse=0.07, freq=0.40),
             _Layer("icon_balloon_cyan", rot_speed=1.20, scale=0.38, pulse=0.09, freq=0.55, orbit=(140, 0.9)),
             _Layer("icon_balloon_gold", rot_speed=-0.90, scale=0.34, pulse=0.08, freq=0.50, orbit=(172, -0.7)),
+        ],
+    },
+    "scarf": {  # 队符「Necrotic Squad」：Scarf 专属（暂复制 Bonzo 背景占位）
+        "base": (7, 9, 8),
+        "glow": (18, 26, 16),
+        "ring": (150, 230, 120),
+        "dim": 0.52,
+        "layers": [
+            _Layer(None, panorama=dict(key="scarf", speed=16.0, fov=60,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           "stage4", "scarf", "fl_scarf.png")),
+                   blend="alpha"),
+            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
+            _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
+            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
+            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
+        ],
+    },
+    "sadan": {  # Sadan 亡灵符卡专属（暂复制 Bonzo 背景占位）
+        "base": (7, 9, 8),
+        "glow": (18, 26, 16),
+        "ring": (150, 230, 120),
+        "dim": 0.52,
+        "layers": [
+            _Layer(None, panorama=dict(key="sadan", speed=16.0, fov=60,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           "stage4", "sadan", "fl_sadan.png")),
+                   blend="alpha"),
+            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
+            _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
+            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
+            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
+        ],
+    },
+    "professor": {  # Professor 专属：绿色护符环形大厅
+        "base": (7, 9, 8),
+        "glow": (18, 26, 16),
+        "ring": (150, 230, 120),
+        "dim": 0.52,
+        "layers": [
+            _Layer(None, panorama=dict(key="professor", speed=16.0, fov=60,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           "stage5", "professor", "fl_professor.png")),
+                   blend="alpha"),
+            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
+            _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
+            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
+            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
+        ],
+    },
+    "necron": {  # Necron 凋符专属（暂复制 Bonzo 背景占位）
+        "base": (7, 9, 8),
+        "glow": (18, 26, 16),
+        "ring": (150, 230, 120),
+        "dim": 0.52,
+        "layers": [
+            _Layer(None, panorama=dict(key="necron", speed=16.0, fov=60,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           "stage5", "necron", "fl_necron.png")),
+                   blend="alpha"),
+            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
+            _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
+            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
+            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
+        ],
+    },
+    "thorn": {  # Thorn 专属（暂复制 Bonzo 背景占位）
+        "base": (7, 9, 8),
+        "glow": (18, 26, 16),
+        "ring": (150, 230, 120),
+        "dim": 0.52,
+        "layers": [
+            _Layer(None, panorama=dict(key="thorn", speed=16.0, fov=60,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           "stage5", "thorn", "fl_thorn.png")),
+                   blend="alpha"),
+            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
+            _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
+            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
+            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
+        ],
+    },
+    "livid": {  # Livid 专属（暂复制 Bonzo 背景占位）
+        "base": (7, 9, 8),
+        "glow": (18, 26, 16),
+        "ring": (150, 230, 120),
+        "dim": 0.52,
+        "layers": [
+            _Layer(None, panorama=dict(key="livid", speed=16.0, fov=60,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           "stage5", "livid", "fl_livid.png")),
+                   blend="alpha"),
+            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
+            _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
+            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
+            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
+        ],
+    },
+    "maxor": {  # Maxor 专属：凋零竞技场全屏背景
+        "base": (9, 6, 6),
+        "glow": (26, 14, 8),
+        "ring": (255, 150, 70),
+        "dim": 0.75,
+        "layers": [
+            _Layer(None, image="maxor"),
+        ],
+    },
+    "storm": {  # Storm 专属：雷霆祭坛全屏背景
+        "base": (6, 8, 14),
+        "glow": (10, 20, 34),
+        "ring": (170, 220, 255),
+        "dim": 0.75,
+        "layers": [
+            _Layer(None, image="storm"),
+        ],
+    },
+    "goldor": {  # Goldor 专属：金甲堡垒全屏背景
+        "base": (10, 9, 5),
+        "glow": (28, 22, 8),
+        "ring": (255, 210, 90),
+        "dim": 0.78,
+        "layers": [
+            _Layer(None, image="goldor"),
         ],
     },
 }
@@ -626,6 +792,43 @@ class SpellBackground:
 
         self.layers = conf["layers"]
         self.ring_color = conf["ring"]
+
+        # 伪3D环形全景层：为带 panorama 配置的层创建渲染器（贴图缺失时回退普通层）
+        self.panoramas = []
+        for layer in self.layers:
+            if layer.panorama is None:
+                self.panoramas.append(None)
+                continue
+            pconf = dict(layer.panorama)
+            path = PANORAMA_TEXTURES.get(pconf.pop("key", None))
+            if not path or not os.path.exists(path):
+                self.panoramas.append(None)
+                continue
+            self.panoramas.append(CylinderPanorama(
+                path, AREA_W, AREA_H,
+                fov=pconf.get("fov", 115.0),
+                speed=pconf.get("speed", 12.0),
+                yaw=pconf.get("yaw", 0.0),
+                projection=pconf.get("projection", "cylinder"),
+                floor_texture_path=pconf.get("floor"),
+                floor_junction_v=pconf.get("floor_junction_v"),
+                floor_depth_repeat=pconf.get("floor_depth_repeat")))
+        # 全屏背景贴图层：为带 image 配置的层预缩放/裁剪到战斗区域尺寸
+        self.images = []
+        for layer in self.layers:
+            if layer.image is None:
+                self.images.append(None)
+                continue
+            path = IMAGE_TEXTURES.get(layer.image)
+            if not path or not os.path.exists(path):
+                self.images.append(None)
+                continue
+            try:
+                img = pygame.image.load(path).convert()
+            except Exception:
+                self.images.append(None)
+                continue
+            self.images.append(_scale_cover(img, AREA_W, AREA_H))
         self.base_color = conf["base"]
         self.glow = _make_glow(AREA_W, AREA_H, *EFFECT_CENTER, AREA_H * 0.62, conf["glow"])
         self.vignette = _make_vignette(AREA_W, AREA_H)
@@ -665,6 +868,10 @@ class SpellBackground:
         if self.done:
             return
         self.timer += 1
+        # 全景环绕独立推进（结符淡出期间也继续旋转）
+        for pan in self.panoramas:
+            if pan is not None:
+                pan.update(dt)
         if self.fading:
             self.fade_out_t += 1
             if self.fade_out_t >= FADE_OUT:
@@ -678,6 +885,16 @@ class SpellBackground:
         else:
             k = min(1.0, self.timer / float(FADE_IN))
         return int(max(0, min(255, 255 * k)))
+
+    def set_panorama_speed(self, speed, duration=0.0):
+        """设置全景环绕速度（度/秒）；duration>0 时平滑过渡，便于符卡编排。"""
+        for pan in self.panoramas:
+            if pan is None:
+                continue
+            if duration > 0:
+                pan.ramp_speed(speed, duration)
+            else:
+                pan.set_speed(speed)
 
     def _draw_sprite(self, canvas, layer, t, cx, cy):
         pat = _get_pattern(layer.pattern)
@@ -752,8 +969,16 @@ class SpellBackground:
         canvas.fill(self.base_color)
 
         cx, cy = EFFECT_CENTER
-        for layer in self.layers:
-            if layer.scroll is not None:
+        for i, layer in enumerate(self.layers):
+            if layer.panorama is not None:
+                pan = self.panoramas[i] if i < len(self.panoramas) else None
+                if pan is not None:
+                    pan.draw(canvas)
+            elif layer.image is not None:
+                img = self.images[i] if i < len(self.images) else None
+                if img is not None:
+                    canvas.blit(img, (0, 0))
+            elif layer.scroll is not None:
                 self._draw_tiled(canvas, layer, t)
             else:
                 self._draw_sprite(canvas, layer, t, cx, cy)

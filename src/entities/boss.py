@@ -112,6 +112,31 @@ def _get_bullet_mask(radius):
     return _bullet_mask_cache[r]
 
 
+_sadan_sword_sprite_cache = {}
+
+
+def _get_sadan_sword_sprite(path, target_height):
+    """Loads the diamond sword asset and rotates it to fall vertically.
+
+    The source icon is a square with a diagonal sword, so it is scaled to
+    target_height / sqrt(2) and then rotated +45 degrees. The returned surface
+    has the sword blade running straight down.
+    """
+    key = (path, target_height)
+    if key in _sadan_sword_sprite_cache:
+        return _sadan_sword_sprite_cache[key]
+    sprite = None
+    try:
+        side = max(1, int(round(target_height / math.sqrt(2))))
+        source = _get_boss_sprite(path, side)
+        if source is not None:
+            sprite = pygame.transform.rotate(source, 45)
+    except Exception as e:
+        print(f"[Boss] Failed to load Sadan sword sprite {path}: {e}")
+    _sadan_sword_sprite_cache[key] = sprite
+    return sprite
+
+
 def _with_alpha(surf, alpha):
     """返回带整体透明度 alpha(0-255) 的表面副本（不修改原表面）"""
     if alpha >= 255:
@@ -119,6 +144,27 @@ def _with_alpha(surf, alpha):
     result = surf.copy()
     result.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
     return result
+
+
+# 亡灵展品柔光层缓存：key = (半径, 颜色)
+_watcher_glow_cache = {}
+
+
+def _get_watcher_glow(radius, color):
+    """生成亡灵展品的圆形柔光层：中心亮、边缘淡的幽蓝光晕（SRCALPHA 叠加）"""
+    key = (radius, color)
+    if key in _watcher_glow_cache:
+        return _watcher_glow_cache[key]
+    size = radius * 2 + 2
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    cx = cy = size // 2
+    steps = max(4, radius)
+    for i in range(steps):
+        rr = max(1, int(radius * (1.0 - i / steps)))
+        alpha = int(8 + 60 * (i / steps))   # 边缘淡、中心亮（同心圆叠加）
+        pygame.draw.circle(surf, (*color, alpha), (cx, cy), rr)
+    _watcher_glow_cache[key] = surf
+    return surf
 
 
 # 幻影龙柔光层缓存：key = (目标高度, 光晕半径, 颜色)
@@ -162,12 +208,14 @@ SPELL_BANNER_DROP = 36            # 淡出时向下平移距离（px）
 class SpellCard:
     """符卡（一个攻击阶段）"""
     def __init__(self, name, pattern_func, hp_threshold=None, end_hp_threshold=None,
-                 bg_style=None):
+                 bg_style=None, direct_next=False, time_spell=False):
         self.name = name
         self.pattern_func = pattern_func
         self.hp_threshold = hp_threshold
         self.end_hp_threshold = end_hp_threshold   # 独立结束阈值（None 时用下一张符的 hp_threshold）
         self.bg_style = bg_style   # 符卡背景风格（None 时按名字自动判断）
+        self.direct_next = direct_next   # True 时结束后不进入非符，直接开下一张符卡
+        self.time_spell = time_spell     # 时符：无 Boss 血量，攻击不会提前结束符卡
         self.timer = 0
         self.active = False
         self.completed = False
@@ -240,11 +288,35 @@ class Boss:
         self.last_spell = None
         self.last_spell_active = False
         self.last_spell_hp = 3600        # 超符「Superiority」展开时补充的黄金领域血量
+        self.revive_after_spell_idx = None  # 指定符卡被击破后进入复活演出（None=不复活）
+        self.revive_hp = None              # 复活后回满的血量（None=使用 max_hp）
+        self.revive_max_hp = None           # 复活后重新计算阈值使用的 max_hp（None=沿用原 max_hp）
+        self.revive_duration = 180         # 复活演出持续帧数（60FPS 下约 3 秒）
+        self.revive_timer = 0
+        self.revive_skips_non_spell = False  # ????????????????????
         self.superior_circles = []       # 超符黄金魔法阵（位置/旋转/生命由符卡每帧更新）
         self.protector_barriers = []     # 石符固定石柱结界（位置固定，由符卡维护）
         self.protector_shock = None      # 石符震荡冲击环（绘制用动画状态）
         self.protector_fortress = False  # 石符岩石堡垒轮廓是否绘制
         self.protector_pulse_dir = 1     # 石符震荡方向：+1 扩散 / -1 收缩        # 状态
+        self.watcher_exhibits = []     # 展符亡灵展品（位置/贴图/预警由符卡维护，纯视觉无判定）
+        self.bonzo_undeads = []        # 死符 Undead Revival 的 Undead（生命周期由符卡维护）
+        self.bonzo_dreadlord_skulls = []   # 骸符 Skull Dreadlord 的骷髅头阵列（生命周期由符卡维护）
+        self.bonzo_dreadlord_rebuild = 0   # 骸符骷髅全部消散后的重建等待帧数
+        self.bonzo_dreadlord_wave = 0       # 骸符骷髅阵列轮次（骨刺隔波交替用）
+        self.bonzo_masks = []          # 戏符 Grand Illusion 的小丑面具幻象节点（生命周期由符卡维护）
+        self.scarf_squad = []          # 队符「Necrotic Squad」的四名亡灵固定成员（生命周期由符卡维护）
+        self.scarf_active_squad = None # 队符当前主攻击职业名（Warrior/Archer/Mage/Priest）
+        self.scarf_buff_circle = None  # 兼容旧单法阵引用（保留但不再由符卡写入）
+        self.scarf_buff_circles = []   # 队符中牧师生成的多个紫色强化法阵（生命周期由符卡维护）
+        self.sadan_army = []           # 兵符「Terracotta Army」的兵马俑军阵（生命周期由符卡维护）
+        self.sadan_giant_state = {}    # Giant cycle visual state for "Precursors' Return" spell card.
+        self.bridge_worlds_state = None  # 终符「Bridge Between Worlds」的桥与黑暗遮罩状态
+        self.frenzy_state = None       # Phase1「Maxor's Frenzy」主状态（None=未展开）
+        self.frenzy_tnts = []          # Frenzy TNT 标记（延迟爆炸，纯视觉）
+        self.frenzy_crystals = []      # Frenzy power crystal 收集物
+        self.frenzy_shockwaves = []    # Frenzy 冲击波视觉环（TNT 爆炸 / 大型冲击波 / 拾取闪光）
+        self.frenzy_laser = None       # Frenzy 解封红色激光状态
         self.entering = True
         self.entry_timer = 120
         self.invincible = False
@@ -280,6 +352,11 @@ class Boss:
         """Last Spell 进行中：Bomb 禁用、Miss 强制结束不损残机"""
         return (self.last_spell is not None and self.last_spell_active
                 and self.phase == "spell" and self.current_spell is self.last_spell)
+
+    def _is_time_spell_active(self):
+        """时符进行中：没有 Boss 血量，玩家攻击不会使符卡提前结束。"""
+        return (self.phase == "spell" and self.current_spell is not None
+                and getattr(self.current_spell, "time_spell", False))
 
     def force_end_last_spell(self):
         """Last Spell 被 Miss 时强制结束：Boss 视为已被击破（不扣残机）"""
@@ -380,6 +457,21 @@ class Boss:
             if self.current_spell:
                 self.current_spell.update(self, bullet_manager, dt, player_x, player_y)
 
+        elif self.phase == "reviving":
+            self.revive_timer -= 1
+            if self.revive_timer <= 0:
+                if self.revive_max_hp is not None:
+                    self.max_hp = self.revive_max_hp
+                self.hp = self.revive_hp if self.revive_hp is not None else self.max_hp
+                self.invincible = False
+                self.invincible_timer = 0
+                if self.revive_skips_non_spell:
+                    self._start_spell()
+                else:
+                    self.phase = "non_spell"
+                    self.non_spell_timer = 0
+                    self.non_spell_duration = 240
+
         elif self.phase == "defeated":
             pass
 
@@ -467,6 +559,27 @@ class Boss:
         self.protector_shock = None
         self.protector_fortress = False
         self.protector_pulse_dir = 1
+        self.watcher_exhibits = []
+        self.bonzo_undeads = []
+        self.bonzo_dreadlord_skulls = []
+        self.bonzo_dreadlord_rebuild = 0
+        self.bonzo_dreadlord_wave = 0
+        self.bonzo_masks = []
+        self.scarf_squad = []
+        self.scarf_active_squad = None
+        self.scarf_buff_circle = None
+        self.scarf_buff_circles = []
+        self.sadan_army = []
+        self.sadan_giant_state = {}
+        self.bridge_worlds_state = None
+        self.frenzy_state = None
+        self.frenzy_tnts = []
+        self.frenzy_crystals = []
+        self.frenzy_shockwaves = []
+        self.frenzy_laser = None
+        self.storm_giga = None
+        self.goldor_terminal = None
+        self.goldor_rage = None
         if spell is None:
             if self.current_spell_idx >= len(self.spell_cards):
                 return
@@ -492,7 +605,10 @@ class Boss:
         self.last_spell_active = (spell is self.last_spell)
         # Last Spell 展开：血量已打空，补充黄金领域独立血量并清空旧阵
         if self.last_spell_active:
-            self.hp = self.last_spell_hp
+            if getattr(spell, "time_spell", False):
+                self.hp = 0
+            else:
+                self.hp = self.last_spell_hp
             self.superior_circles = []
     def _clear_spell_effects(self):
         """Boss 战败时清除符卡视觉残留（黄金魔法阵/幻影龙/石柱等）"""
@@ -502,17 +618,72 @@ class Boss:
         self.protector_shock = None
         self.protector_fortress = False
         self.protector_pulse_dir = 1
+        self.watcher_exhibits = []
+        self.bonzo_undeads = []
+        self.bonzo_dreadlord_skulls = []
+        self.bonzo_dreadlord_rebuild = 0
+        self.bonzo_dreadlord_wave = 0
+        self.bonzo_masks = []
+        self.scarf_squad = []
+        self.scarf_active_squad = None
+        self.scarf_buff_circle = None
+        self.scarf_buff_circles = []
+        self.sadan_army = []
+        self.sadan_giant_state = {}
+        self.bridge_worlds_state = None
+        self.frenzy_state = None
+        self.frenzy_tnts = []
+        self.frenzy_crystals = []
+        self.frenzy_shockwaves = []
+        self.frenzy_laser = None
+        self.storm_giga = None
+        self.goldor_terminal = None
+        self.goldor_rage = None
 
     def _end_spell(self):
         self._cancel_screen_bullets()   # 结符：清屏
         self._begin_spell_bg_fade()     # 结符：特殊背景淡出
+        self.bonzo_undeads = []         # 结符：清空死符召唤的 Undead
+        self.bonzo_dreadlord_skulls = []   # 结符：清空骸符骷髅头
+        self.bonzo_dreadlord_rebuild = 0
+        self.bonzo_dreadlord_wave = 0
+        self.bonzo_masks = []           # 结符：清空戏符面具幻象
+        self.scarf_squad = []           # 结符：清空队符小队
+        self.scarf_active_squad = None
+        self.scarf_buff_circle = None   # 结符：清空牧师强化法阵
+        self.scarf_buff_circles = []    # 结符：清空多个牧师强化法阵
+        self.sadan_army = []            # 结符：清空兵马俑军阵
+        self.sadan_giant_state = {}   # Clear giant cycle visual state at spell end.
+        self.bridge_worlds_state = None  # 结符：清空终符桥与黑暗遮罩状态
+        self.frenzy_state = None
+        self.frenzy_tnts = []
+        self.frenzy_crystals = []
+        self.frenzy_shockwaves = []
+        self.frenzy_laser = None
+        self.storm_giga = None
+        self.goldor_rage = None
         self.current_spell_idx += 1
         self.current_spell = None
+        restore_sprite = getattr(self, "_spell_sprite_restore", None)
+        if restore_sprite is not None:
+            self.sprite_path, self.sprite_height = restore_sprite
+            del self._spell_sprite_restore
         self.resistance = 1.0
         self.last_spell_active = False
+        if (self.revive_after_spell_idx is not None
+                and self.current_spell_idx == self.revive_after_spell_idx):
+            self.phase = "reviving"
+            self.revive_timer = self.revive_duration
+            self.invincible = True
+            self.invincible_timer = self.revive_duration
+            return
+        if (0 < self.current_spell_idx < len(self.spell_cards)
+                and self.spell_cards[self.current_spell_idx - 1].direct_next):
+            self._start_spell(self.spell_cards[self.current_spell_idx])
+            return
         if self.current_spell_idx >= len(self.spell_cards):
             if self.last_spell is not None:
-                # 三张通常符全部击破：立即展开 Last Spell（彩蛋挑战）
+                # 所有通常符全部击破：立即展开 Last Spell（彩蛋挑战）
                 self._start_spell(self.last_spell)
             else:
                 self.phase = "defeated"
@@ -523,7 +694,10 @@ class Boss:
             self.non_spell_duration = 240
 
     def take_damage(self, damage):
-        if self.entering or self.invincible or not self.combat_enabled:
+        if (self.entering or self.invincible or not self.combat_enabled
+                or self.phase == "reviving"):
+            return False
+        if self._is_time_spell_active():
             return False
         self.hp -= damage * self.resistance
         # 血量钳制：确保三张符卡按序完整演出，Boss不会在最后一张符前被击杀
@@ -578,6 +752,24 @@ class Boss:
         self._draw_superior_circles(screen, offset_x, offset_y)
         # 石符：石柱结界与堡垒石环（绘制在 Boss 本体之下）
         self._draw_protector_effects(screen, offset_x, offset_y)
+        # 展符：亡灵展品（绘制在 Boss 本体之下）
+        self._draw_watcher_exhibits(screen, offset_x, offset_y)
+        # 死符：Bonzo 召唤的 Undead（绘制在 Boss 本体之下）
+        self._draw_bonzo_undeads(screen, offset_x, offset_y)
+        # 骸符：Bonzo 的骷髅头阵列（绘制在 Boss 本体之下）
+        self._draw_bonzo_dreadlord_skulls(screen, offset_x, offset_y)
+        # 戏符：Bonzo 的小丑面具幻象节点（绘制在 Boss 本体之下）
+        self._draw_bonzo_masks(screen, offset_x, offset_y)
+        # 队符：Scarf 的四名亡灵成员与牧师强化法阵（绘制在 Boss 本体之下）
+        self._draw_scarf_squad(screen, offset_x, offset_y)
+        # 兵符：Sadan 的兵马俑军阵（绘制在 Boss 本体之下）
+        self._draw_sadan_army(screen, offset_x, offset_y)
+        # Sadan giant cycle visual layer: draw below Boss body.
+        self._draw_sadan_giants(screen, offset_x, offset_y)
+        # 机械符：金色环路走廊、终端与追击标记（绘制在 Boss 本体之下）
+        if getattr(self, "goldor_terminal", None) is not None:
+            from src.stages.goldor_terminal import _gt_draw_boss_layer
+            _gt_draw_boss_layer(screen, self, offset_x, offset_y)
         # 超符：金色龙之核心光环（Last Spell 展开时）
         if self.is_last_spell_active():
             self._draw_core_aura(screen, px, py)
@@ -591,8 +783,8 @@ class Boss:
         else:
             self._draw_boss_body(screen, px, py)
 
-        # HP条（屏幕顶端）——未开战（对话阶段）不显示；战败后不再显示
-        if self.combat_enabled and self.alive:
+        # HP条（屏幕顶端）——未开战（对话阶段）不显示；战败后不再显示；时符无血量也不显示
+        if self.combat_enabled and self.alive and not self._is_time_spell_active():
             self._draw_hp_bar(screen, offset_y + HP_BAR_TOP, offset_x)
 
         # 符卡名：与 Boss 名同一高度，顶格战斗框右侧
@@ -716,6 +908,595 @@ class Boss:
             col = tuple(int(c * (0.55 + 0.45 * (1.0 - prog))) for c in _STONE_COLOR)
             pygame.draw.circle(screen, col,
                                (int(self.x + offset_x), int(self.y + offset_y)), r, 2)
+
+    def _draw_watcher_exhibits(self, screen, offset_x=0, offset_y=0):
+        """展符亡灵展品：屏幕上方一排亡灵幻影（贴图发光渲染 + 预警光环，纯视觉无判定）"""
+        if not self.watcher_exhibits:
+            return
+        for ex in self.watcher_exhibits:
+            height = ex.get("height", 56)
+            sprite = _get_boss_sprite(ex["sprite"], height)
+            if sprite is None:
+                continue
+            px = int(ex["x"] + offset_x)
+            py = int(ex["y"] + offset_y)
+            # 常驻幽蓝亡灵能量光晕
+            glow = _get_watcher_glow(int(height * 0.95),
+                                     ex.get("glow_color", (70, 110, 200)))
+            if glow is not None:
+                screen.blit(glow, (px - glow.get_width() // 2, py - glow.get_height() // 2))
+            # 预警：幽蓝脉冲光环（符卡点亮 ex["warn"] 期间持续闪烁）
+            if ex.get("warn"):
+                pulse = (pygame.time.get_ticks() * 0.012) % (math.tau)
+                rr = int(height * 0.62) + int(math.sin(pulse) * 6)
+                warn_col = ex.get("warn_color", (130, 220, 255))
+                pygame.draw.circle(screen, warn_col, (px, py), rr, 2)
+                pygame.draw.circle(screen, (240, 250, 255), (px, py), max(4, rr - 9), 1)
+            # 亡灵幻影贴图：加法混合发光渲染（黑色背景不叠加）
+            screen.blit(sprite, (px - sprite.get_width() // 2, py - sprite.get_height() // 2),
+                        special_flags=pygame.BLEND_ADD)
+
+    def _draw_revival_circle(self, screen, px, py, prog, color, now):
+        """亡灵魔法阵：旋转六芒星紫环 + 内圈亮纹（Undead 召唤/复活共用，纯视觉）"""
+        r = 15 + int(8 * (1.0 - prog))
+        rot = now * 0.004
+        bright = tuple(min(255, c + 60) for c in color)
+        pygame.draw.circle(screen, color, (px, py), r, 2)
+        pygame.draw.circle(screen, bright, (px, py), max(3, r - 5), 1)
+
+        def _triangle(radius, offset):
+            pts = [
+                (px + math.cos(rot + offset + k * math.tau / 3) * radius,
+                 py + math.sin(rot + offset + k * math.tau / 3) * radius)
+                for k in range(3)
+            ]
+            pygame.draw.polygon(screen, color, pts, 1)
+
+        _triangle(r, 0.0)
+        _triangle(max(3, int(r * 0.6)), math.pi / 3)
+
+    def _draw_bonzo_undeads(self, screen, offset_x=0, offset_y=0):
+        """死符「Undead Revival」的 Undead 四态渲染：
+        summoning 召唤魔法阵淡入 -> active 存活发光 -> dying 灵魂消散 -> reviving 魔法阵重组。
+        纯视觉（含召唤/复活魔法阵、消散收缩、灵魂光点），命中与发射判定由符卡负责。"""
+        if not self.bonzo_undeads:
+            return
+        now = pygame.time.get_ticks()
+        for u in self.bonzo_undeads:
+            height = u.get("height", 46)
+            sprite = _get_boss_sprite(u["sprite"], height)
+            px = int(u["x"] + offset_x)
+            py = int(u["y"] + offset_y)
+            phase = u["phase"]
+            timer = u["timer"]
+            glow_color = u.get("glow_color", (160, 80, 220))
+            summon_color = u.get("summon_color", (180, 95, 235))
+            soul_color = u.get("soul_color", (100, 225, 190))
+
+            # 常驻亡灵能量光晕（所有状态都有一层淡紫柔光）
+            glow = _get_watcher_glow(int(height * 0.9), glow_color)
+            if glow is not None:
+                screen.blit(glow, (px - glow.get_width() // 2, py - glow.get_height() // 2))
+
+            if phase == "summoning":
+                # 召唤魔法阵 + 贴图随进度淡入（期间不可命中、不发射）
+                prog = min(1.0, timer / max(1, u.get("summon_time", 24)))
+                self._draw_revival_circle(screen, px, py, prog, summon_color, now)
+                if sprite is not None:
+                    sprite = _with_alpha(sprite, int(255 * prog))
+                    screen.blit(sprite, (px - sprite.get_width() // 2,
+                                         py - sprite.get_height() // 2))
+            elif phase == "active":
+                # 存活：贴图 + 青绿灵魂火核心
+                if sprite is not None:
+                    screen.blit(sprite, (px - sprite.get_width() // 2,
+                                         py - sprite.get_height() // 2))
+                pygame.draw.circle(screen, soul_color, (px, py), 4, 1)
+            elif phase == "dying":
+                # 灵魂消散：贴图淡出收缩 + 青绿残焰
+                prog = 1.0 - min(1.0, timer / max(1, u.get("die_time", 22)))
+                if sprite is not None:
+                    w = max(1, int(sprite.get_width() * max(0.4, prog)))
+                    h = max(1, int(sprite.get_height() * max(0.4, prog)))
+                    small = pygame.transform.smoothscale(sprite, (w, h))
+                    small = _with_alpha(small, int(255 * prog))
+                    screen.blit(small, (px - w // 2, py - h // 2))
+                pygame.draw.circle(screen, soul_color, (px, py),
+                                   max(2, int(8 * prog)), 1)
+            elif phase == "reviving":
+                # 亡灵魔法阵重组：紫环旋转 + 青绿灵魂能量朝中心汇聚
+                prog = min(1.0, timer / max(1, u.get("revive_time", 90)))
+                self._draw_revival_circle(screen, px, py, prog, summon_color, now)
+                for k in range(4):
+                    a = now * 0.004 + k * math.pi / 2
+                    rr = 6 + (1.0 - prog) * 26
+                    gx = px + math.cos(a) * rr
+                    gy = py + math.sin(a) * rr
+                    pygame.draw.circle(screen, soul_color, (int(gx), int(gy)), 2, 0)
+
+    def _draw_bonzo_dreadlord_skulls(self, screen, offset_x=0, offset_y=0):
+        """骸符「Skull Dreadlord」的巨大骷髅头印记（纯视觉，弹幕判定由符卡负责）：
+        预警浮现（紫色召唤环 + 脉冲光环）→ 张嘴（下颌开合 + 青色灵魂火眼窝/口）
+        → 待命 → 消散淡出。"""
+        if not self.bonzo_dreadlord_skulls:
+            return
+        now = pygame.time.get_ticks()
+        for sk in self.bonzo_dreadlord_skulls:
+            if not sk.get("alive", True):
+                continue
+            px = int(sk["x"] + offset_x)
+            py = int(sk["y"] + offset_y)
+            r = sk.get("radius", 17)
+            phase = sk["phase"]
+            timer = sk["timer"]
+            bone = sk.get("bone_color", (250, 246, 235))
+            teal = sk.get("soul_teal", (110, 235, 210))
+            purple = sk.get("soul_purple", (170, 95, 235))
+            warn = sk.get("warn_color", (150, 220, 255))
+            mouth = max(0.0, min(1.0, sk.get("mouth", 0.0)))
+
+            # 常驻亡灵能量光晕（柔和紫光）
+            glow = _get_watcher_glow(int(r * 2.2), purple)
+            if glow is not None:
+                screen.blit(glow, (px - glow.get_width() // 2, py - glow.get_height() // 2))
+
+            # 预警：扩张的紫色召唤环 + 脉冲光环（骷髅淡入浮现）
+            alpha = 255
+            scale = 1.0
+            if phase == "warn":
+                prog = min(1.0, timer / max(1, sk.get("warn_frames", 30)))
+                ring_r = int(r * (1.3 + (1.0 - prog) * 2.0))
+                pygame.draw.circle(screen, purple, (px, py), ring_r, 2)
+                pulse = 0.5 + 0.5 * math.sin(now * 0.02)
+                pygame.draw.circle(screen, warn, (px, py), int(r * (1.15 + pulse * 0.55)), 1)
+                alpha = int(255 * min(1.0, prog * 1.5))
+            elif phase == "despawn":
+                prog = min(1.0, timer / max(1, sk.get("despawn_frames", 36)))
+                alpha = int(255 * (1.0 - prog))
+                scale = 1.0 - 0.4 * prog
+
+            # 喷射闪光：嘴部一亮（纯视觉）
+            flash = sk.get("flash", 0)
+            if flash > 0:
+                fl = min(1.0, flash / 6.0)
+                pygame.draw.circle(screen, (215, 245, 255), (px, py),
+                                   int(r * (0.9 + 0.6 * (1.0 - fl))), 1)
+
+            if alpha <= 0:
+                continue
+
+            # 骷髅头绘制到临时表面（支持整体淡入淡出 / 缩小）
+            size = int(r * 2.7) + 8
+            surf = pygame.Surface((size, size), pygame.SRCALPHA)
+            cx = cy = size // 2
+            rr = r
+            bone_dim = tuple(int(c * 0.80) for c in bone)
+            socket = (26, 15, 42)
+            mouth_dark = (20, 12, 32)
+
+            # 颅顶骨冠（骷髅王尖刺）
+            for k in (-2, -1, 1, 2):
+                spx = cx + k * int(rr * 0.30)
+                spy = int(cy - rr * 0.98)
+                tip = (spx, spy - int(rr * (0.42 - abs(k) * 0.06)))
+                base_l = (spx - int(rr * 0.16), spy + int(rr * 0.10))
+                base_r = (spx + int(rr * 0.16), spy + int(rr * 0.10))
+                pygame.draw.polygon(surf, bone, [tip, base_l, base_r])
+                pygame.draw.polygon(surf, purple, [tip, base_l, base_r], 1)
+            # 颅顶圆 + 颧骨/上颌（头骨下半变宽）
+            pygame.draw.circle(surf, bone, (cx, int(cy - rr * 0.32)), int(rr * 0.78))
+            for sx in (-1, 1):
+                pygame.draw.circle(surf, bone, (cx + sx * int(rr * 0.42), int(cy + rr * 0.10)),
+                                   int(rr * 0.42))
+            # 骨缝线（颅顶细线）
+            pygame.draw.line(surf, bone_dim, (cx - int(rr * 0.30), int(cy - rr * 0.62)),
+                             (cx + int(rr * 0.30), int(cy - rr * 0.62)), 1)
+
+            # 眼窝 + 青色灵魂火
+            for sx in (-1, 1):
+                ex = cx + sx * int(rr * 0.33)
+                ey = int(cy - rr * 0.16)
+                pygame.draw.circle(surf, socket, (ex, ey), int(rr * 0.24))
+                flicker = 0.75 + 0.25 * math.sin(now * 0.02 + sx * 2.1)
+                pygame.draw.circle(surf, teal, (ex, ey), max(2, int(rr * 0.13 * flicker)))
+                pygame.draw.circle(surf, (205, 255, 235),
+                                   (ex - int(rr * 0.06), ey - int(rr * 0.06)),
+                                   max(1, int(rr * 0.04)))
+                pygame.draw.circle(surf, purple, (ex, ey), int(rr * 0.24), 1)
+
+            # 鼻洞（倒三角）
+            nose_top = (cx, int(cy + rr * 0.06))
+            nose_l = (cx - int(rr * 0.10), int(cy + rr * 0.22))
+            nose_r = (cx + int(rr * 0.10), int(cy + rr * 0.22))
+            pygame.draw.polygon(surf, socket, [nose_top, nose_l, nose_r])
+
+            # 嘴部：开口高度随 mouth 张合，含上下牙齿与口腔灵魂火
+            mouth_top = int(cy + rr * 0.52)
+            gap = int(rr * 0.45 * mouth)
+            mouth_bottom = mouth_top + gap
+            mouth_w = int(rr * 0.66)
+            pygame.draw.rect(surf, mouth_dark,
+                             (cx - mouth_w // 2, mouth_top, mouth_w, max(1, gap)))
+            if mouth > 0.02:
+                if mouth > 0.3:
+                    flame_r = max(2, int(rr * 0.18 * mouth))
+                    pygame.draw.circle(surf, teal, (cx, mouth_top + gap // 2), flame_r)
+                teeth = 5
+                for k in range(teeth):
+                    tx = cx + (k - (teeth - 1) / 2) * int(rr * 0.15)
+                    tw = max(2, int(rr * 0.09))
+                    th = max(2, int(rr * 0.13))
+                    pygame.draw.rect(surf, bone, (tx - tw // 2, mouth_top - th // 2, tw, th))
+                    pygame.draw.rect(surf, bone, (tx - tw // 2, mouth_bottom - th // 2, tw, th))
+                pygame.draw.rect(surf, purple, (cx - mouth_w // 2, mouth_top,
+                                                mouth_w, max(1, gap)), 1)
+
+            # 下颌骨（随开口下移）
+            jaw_cy = int(cy + rr * 0.62 + gap)
+            pygame.draw.ellipse(surf, bone, (cx - int(rr * 0.55), jaw_cy - int(rr * 0.30),
+                                             int(rr * 1.10), int(rr * 0.60)))
+            pygame.draw.ellipse(surf, purple, (cx - int(rr * 0.55), jaw_cy - int(rr * 0.30),
+                                               int(rr * 1.10), int(rr * 0.60)), 1)
+
+            # 颅骨外轮廓（紫色描边）
+            pygame.draw.circle(surf, purple, (cx, int(cy - rr * 0.32)), int(rr * 0.78), 1)
+            for sx in (-1, 1):
+                pygame.draw.circle(surf, purple, (cx + sx * int(rr * 0.42), int(cy + rr * 0.10)),
+                                   int(rr * 0.42), 1)
+
+            # 整体淡入淡出 / 缩放后贴回屏幕
+            if scale != 1.0:
+                new_w = max(1, int(size * scale))
+                surf = pygame.transform.smoothscale(surf, (new_w, new_w))
+            if alpha < 255:
+                surf = _with_alpha(surf, alpha)
+            screen.blit(surf, (px - surf.get_width() // 2, py - surf.get_height() // 2))
+
+    def _draw_bonzo_masks(self, screen, offset_x=0, offset_y=0):
+        """戏符「Grand Illusion」的小丑面具幻象节点：
+        紫色柔光 + Bonzo 面具贴图，消失/重生时按 alpha 淡入淡出。纯视觉，无判定。"""
+        if not self.bonzo_masks:
+            return
+        now = pygame.time.get_ticks()
+        for mask in self.bonzo_masks:
+            x = mask.get("x")
+            y = mask.get("y")
+            if x is None or y is None:
+                continue
+            px = int(x + offset_x)
+            py = int(y + offset_y)
+            height = mask.get("height", 54)
+            alpha = mask.get("alpha", 255)
+            if alpha <= 0:
+                continue
+            color = mask.get("glow_color", (205, 105, 245))
+            glow = _get_watcher_glow(int(height * 0.95), color)
+            if glow is not None:
+                screen.blit(glow, (px - glow.get_width() // 2,
+                                   py - glow.get_height() // 2))
+            # 存活期间缓慢呼吸的紫色外环
+            pulse = 0.5 + 0.5 * math.sin(now * 0.006 + mask.get("phase", 0.0))
+            ring_r = int(height * 0.58 + pulse * 5)
+            pygame.draw.circle(screen, color, (px, py), ring_r, 1)
+            sprite = _get_boss_sprite(cfg.STAGE3_BONZO_MASK_SPRITE, height)
+            if sprite is None:
+                continue
+            if alpha < 255:
+                sprite = _with_alpha(sprite, alpha)
+            screen.blit(sprite, (px - sprite.get_width() // 2,
+                                 py - sprite.get_height() // 2),
+                        special_flags=pygame.BLEND_ADD)
+
+    def _draw_scarf_squad(self, screen, offset_x=0, offset_y=0):
+        """队符「Necrotic Squad」的小队视觉层：
+        四名亡灵固定站位；当前主攻成员有脉冲光环和名字标识；
+        牧师紫色强化法阵旋转显示（纯视觉，命中与强化判定由符卡负责）。"""
+        now = pygame.time.get_ticks()
+
+        # 牧师强化法阵：多个小法阵，均绘制外环、内圈符文辐条并在生命末端淡出。
+        for circle in self.scarf_buff_circles:
+            cx = int(circle["x"] + offset_x)
+            cy = int(circle["y"] + offset_y)
+            r = int(circle["radius"])
+            max_life = max(1, circle.get("max_life", 1))
+            fade = min(1.0, circle.get("life", 0) / min(45.0, max_life * 0.12))
+            bright = tuple(int(ch * (0.45 + 0.55 * fade)) for ch in (180, 95, 240))
+            dim = tuple(int(ch * 0.55) for ch in bright)
+            pulse = 0.5 + 0.5 * math.sin(now * 0.006 + circle["x"] * 0.02)
+            pygame.draw.circle(screen, bright, (cx, cy), r, 2)
+            pygame.draw.circle(screen, dim, (cx, cy), int(r * 0.82), 1)
+            rot = now * 0.0012
+            for i in range(8):
+                a = rot + i * math.tau / 8
+                x0 = cx + math.cos(a) * r * 0.60
+                y0 = cy + math.sin(a) * r * 0.60
+                x1 = cx + math.cos(a) * r * (0.90 + pulse * 0.08)
+                y1 = cy + math.sin(a) * r * (0.90 + pulse * 0.08)
+                pygame.draw.line(screen, dim, (int(x0), int(y0)),
+                                 (int(x1), int(y1)), 1)
+            pygame.draw.circle(screen, bright, (cx, cy), 4, 0)
+
+        if not self.scarf_squad:
+            return
+
+        font = _get_font(11)
+        for idx, member in enumerate(self.scarf_squad):
+            px = int(member["x"] + offset_x)
+            py = int(member["y"] + offset_y)
+            height = member.get("height", 64)
+            color = member.get("color", (200, 200, 200))
+            active = bool(member.get("active", False))
+
+            # 亡灵成员常驻柔和光晕。
+            glow = _get_watcher_glow(int(height * 0.95), color)
+            if glow is not None:
+                screen.blit(glow, (px - glow.get_width() // 2,
+                                   py - glow.get_height() // 2))
+
+            # 当前主攻成员：脉冲光环 + 高亮小核。
+            if active:
+                pulse = 0.5 + 0.5 * math.sin(now * 0.008 + idx * 0.9)
+                ring_r = int(height * 0.58 + pulse * 7)
+                pygame.draw.circle(screen, color, (px, py), ring_r, 2)
+                pygame.draw.circle(screen, (255, 255, 255),
+                                   (px, py), max(3, ring_r - 6), 1)
+                pygame.draw.circle(screen, (255, 255, 255), (px, py), 3, 0)
+
+            sprite = _get_boss_sprite(member["sprite"], height)
+            if sprite is not None:
+                screen.blit(sprite, (px - sprite.get_width() // 2,
+                                     py - sprite.get_height() // 2))
+
+            # 当前主攻者名字：让玩家能明确识别这一轮是谁在攻击。
+            if active and member.get("label"):
+                text = font.render(member["label"], True, cfg.COLOR_WHITE)
+                screen.blit(text, (px - text.get_width() // 2,
+                                   py + int(height * 0.52) + 2))
+
+    def _draw_sadan_army(self, screen, offset_x=0, offset_y=0):
+        """兵符「Terracotta Army」的兵马俑军阵视觉层。
+        active 存活/冲锋、down 石质头骨标记、reviving 复活法阵。
+        纯视觉，命中与发射判定由 stage4 符卡函数负责。"""
+        if not self.sadan_army:
+            return
+        now = pygame.time.get_ticks()
+        for s in self.sadan_army:
+            px = int(s["x"] + offset_x)
+            py = int(s["y"] + offset_y)
+            phase = s.get("phase", "active")
+            timer = s.get("timer", 0)
+            attack_active = bool(s.get("attack_active", False))
+
+            if phase == "down":
+                self._draw_terracotta_skull(screen, px, py, timer,
+                                            s.get("down_time", 190))
+                continue
+            if phase == "reviving":
+                prog = min(1.0, timer / max(1, s.get("revive_time", 38)))
+                self._draw_revival_circle(screen, px, py, prog,
+                                          (206, 126, 74), now)
+                self._draw_terracotta_soldier(screen, px, py, s, now,
+                                              alpha=70 + int(150 * prog),
+                                              attack_active=False)
+                continue
+            self._draw_terracotta_soldier(screen, px, py, s, now,
+                                          alpha=255,
+                                          attack_active=attack_active)
+
+    def _draw_sadan_giants(self, screen, offset_x=0, offset_y=0):
+        """Visual layer for Sadan's "Precursors' Return" giant cycle.
+
+        The state machine and all collision bullets are handled by stage4.
+        This layer only draws the telegraph, giant sprites, laser warnings,
+        shockwave fronts and the oversized boulder frame.
+        """
+        state = getattr(self, "sadan_giant_state", None)
+        if not state:
+            return
+        now = pygame.time.get_ticks()
+
+        # Shockwave fronts: non-collision animation rings managed by the spell.
+        for wave in state.get("waves", []):
+            x = wave.get("x")
+            y = wave.get("y")
+            life = wave.get("life", 0)
+            if x is None or y is None or life <= 0:
+                continue
+            max_life = max(1, wave.get("max_life", life))
+            prog = 1.0 - life / max_life
+            start_r = wave.get("start_radius", 18)
+            end_r = wave.get("end_radius", 210)
+            r = int(start_r + prog * (end_r - start_r))
+            alpha = int(255 * (1.0 - prog))
+            if alpha <= 0:
+                continue
+            color = wave.get("color", (255, 255, 255))
+            width = max(1, wave.get("width", 2))
+            cx = int(x + offset_x)
+            cy = int(y + offset_y)
+            pygame.draw.circle(screen, color, (cx, cy), max(1, r), width)
+            if r > 7:
+                pygame.draw.circle(screen, color, (cx, cy), max(1, r - 6), 1)
+
+        # Telegraph: player can identify the next giant and its fixed spawn slot.
+        telegraph = state.get("telegraph")
+        if telegraph:
+            px = int(telegraph["x"] + offset_x)
+            py = int(telegraph["y"] + offset_y)
+            pulse = 0.5 + 0.5 * math.sin(now * 0.012 + telegraph.get("phase", 0.0))
+            radius = int(telegraph.get("radius", 30) + pulse * 8)
+            color = telegraph.get("color", (255, 220, 150))
+            pygame.draw.circle(screen, color, (px, py), radius, 2)
+            pygame.draw.circle(screen, (255, 255, 255), (px, py), max(4, radius - 7), 1)
+            pygame.draw.circle(screen, color, (px, py), 4, 0)
+            label = telegraph.get("label")
+            if label:
+                font = _get_font(11)
+                text = font.render(label, True, color)
+                screen.blit(text, (px - text.get_width() // 2, py - radius - 12))
+
+        # L.A.S.R. laser warning line and eye glow.
+        laser = state.get("laser")
+        if laser:
+            self._draw_sadan_laser_visual(screen, laser, now, offset_x, offset_y)
+
+        # Diamond Giant: square frames around all live boulders.
+        for ref in state.get("boulder_refs", []):
+            boulder = ref.get("b") if isinstance(ref, dict) else ref
+            if boulder is None or not getattr(boulder, "alive", False):
+                continue
+            bx = int(boulder.x + offset_x)
+            by = int(boulder.y + offset_y)
+            half = 12
+            pygame.draw.rect(screen, (120, 205, 255),
+                             (bx - half, by - half, half * 2, half * 2), 3)
+            pygame.draw.rect(screen, (230, 245, 255),
+                             (bx - half + 3, by - half + 3,
+                              half * 2 - 6, half * 2 - 6), 1)
+
+        # Diamond Giant's falling sword is visual-only; the landing burst is
+        # created by stage4 when its y coordinate reaches land_y.
+        sword = state.get("sword")
+        if sword:
+            sx = int(sword.get("x", cfg.BATTLE_AREA_WIDTH / 2) + offset_x)
+            sy = int(sword.get("y", -200) + offset_y)
+            sword_sprite = _get_sadan_sword_sprite(
+                sword.get("sprite"), int(sword.get("height", 660)))
+            if sword_sprite is not None:
+                screen.blit(sword_sprite,
+                            (sx - sword_sprite.get_width() // 2,
+                             sy - sword_sprite.get_height() // 2))
+            else:
+                half_w = 18
+                sword_h = int(sword.get("height", 660))
+                pygame.draw.rect(screen, (140, 215, 255),
+                                 (sx - half_w, sy - sword_h, half_w * 2, sword_h), 3)
+
+        if state.get("hide_giant"):
+            return
+        giant = state.get("giant")
+        if not giant:
+            return
+        x = giant.get("x")
+        y = giant.get("y")
+        if x is None or y is None:
+            return
+        px = int(x + offset_x)
+        py = int(y + offset_y)
+        height = giant.get("height", 150)
+        alpha = int(giant.get("alpha", 255))
+        if alpha <= 0:
+            return
+        color = giant.get("color", (200, 180, 150))
+        sprite_path = giant.get("sprite")
+        sprite = _get_boss_sprite(sprite_path, height) if sprite_path else None
+
+        glow = _get_watcher_glow(int(height * 0.85), color)
+        if glow is not None:
+            draw_glow = glow if alpha >= 255 else _with_alpha(glow, alpha)
+            screen.blit(draw_glow, (px - draw_glow.get_width() // 2,
+                                    py - draw_glow.get_height() // 2))
+
+        if sprite is not None:
+            draw_sprite = sprite if alpha >= 255 else _with_alpha(sprite, alpha)
+            screen.blit(draw_sprite, (px - draw_sprite.get_width() // 2,
+                                      py - draw_sprite.get_height() // 2))
+        else:
+            # Distinct colored silhouette fallback if a sprite is missing.
+            hw = max(1, int(height * 0.22))
+            hh = max(1, int(height * 0.50))
+            pygame.draw.ellipse(screen, color, (px - hw, py - hh, hw * 2, hh * 2))
+            pygame.draw.circle(screen, color, (px, py - int(height * 0.36)),
+                               max(1, int(height * 0.14)), 0)
+
+        label = giant.get("label")
+        if label and giant.get("phase") in ("entering", "attack"):
+            font = _get_font(11)
+            text = font.render(label, True, cfg.COLOR_WHITE)
+            label_y = py + int(height * 0.52) + 2
+            screen.blit(text, (px - text.get_width() // 2, label_y))
+
+            max_hp = max(1, int(giant.get("max_hp", 1)))
+            hp = max(0, int(giant.get("hp", max_hp)))
+            bar_w = int(height * 0.46)
+            bar_h = 6
+            bar_x = px - bar_w // 2
+            bar_y = label_y + 14
+            pygame.draw.rect(screen, (24, 26, 36), (bar_x, bar_y, bar_w, bar_h))
+            fill_w = int(bar_w * min(1.0, hp / max_hp))
+            pygame.draw.rect(screen, color, (bar_x, bar_y, fill_w, bar_h))
+            pygame.draw.rect(screen, cfg.COLOR_WHITE,
+                             (bar_x, bar_y, bar_w, bar_h), 1)
+
+    def _draw_sadan_laser_visual(self, screen, laser, now, offset_x=0, offset_y=0):
+        """Draws L.A.S.R.'s warning line and eye source without re-adding collision."""
+        x = int(laser["x"] + offset_x)
+        y = int(laser["y"] + offset_y)
+        angle = laser.get("angle", 0.0)
+        length = laser.get("length", 0.0)
+        ex = int(x + math.cos(angle) * length)
+        ey = int(y + math.sin(angle) * length)
+        color = laser.get("color", (255, 70, 70))
+        phase = laser.get("phase")
+
+        if phase == "warn":
+            pulse = 0.5 + 0.5 * math.sin(now * 0.02)
+            bright = tuple(int(ch * (0.35 + 0.65 * pulse)) for ch in color)
+            pygame.draw.line(screen, bright, (x, y), (ex, ey), 5)
+            pygame.draw.line(screen, (255, 255, 255), (x, y), (ex, ey), 1)
+        elif phase == "active":
+            pygame.draw.line(screen, color, (x, y), (ex, ey), 8)
+            pygame.draw.circle(screen, (255, 255, 255), (x, y), 5, 0)
+        elif phase == "recover":
+            pygame.draw.line(screen, color, (x, y), (ex, ey), 2)
+
+        if phase in ("warn", "active", "recover"):
+            r = 6 if phase == "active" else 5
+            pygame.draw.circle(screen, color, (x, y), r, 1)
+
+    def _draw_terracotta_soldier(self, screen, px, py, s, now, alpha=255,
+                                 attack_active=False):
+        """兵马俑贴图渲染；贴图缺失时回退到简单陶土人形。"""
+        sprite_path = s.get("sprite", cfg.STAGE4_TERRACOTTA_SPRITE)
+        height = s.get("sprite_height", 38)
+        sprite = _get_boss_sprite(sprite_path, height)
+
+        if sprite is not None:
+            draw_sprite = sprite if alpha >= 255 else _with_alpha(sprite, alpha)
+            screen.blit(draw_sprite,
+                        (px - draw_sprite.get_width() // 2,
+                         py - draw_sprite.get_height() // 2))
+        else:
+            pygame.draw.ellipse(screen, (35, 25, 22),
+                                (px - 11, py - 12, 22, 26))
+            pygame.draw.rect(screen, (196, 112, 62),
+                             (px - 7, py - 6, 14, 18), border_radius=4)
+            pygame.draw.circle(screen, (196, 112, 62), (px, py - 12), 7)
+
+        if attack_active and alpha >= 255:
+            pulse = 0.5 + 0.5 * math.sin(now * 0.012 + px * 0.03)
+            ring = int(14 + pulse * 3)
+            pygame.draw.circle(screen, (255, 190, 120), (px, py), ring, 1)
+
+    def _draw_terracotta_skull(self, screen, px, py, timer, down_time):
+        """被击破后留在原阵位的石质头骨标记，外圈显示复活进度。"""
+        base = (122, 102, 88)
+        dark = (40, 34, 30)
+        light = (188, 146, 106)
+
+        pygame.draw.ellipse(screen, (45, 38, 33), (px - 9, py - 8, 18, 18))
+        pygame.draw.circle(screen, base, (px, py), 9)
+        pygame.draw.rect(screen, base, (px - 6, py + 1, 12, 7), border_radius=2)
+        pygame.draw.circle(screen, dark, (px - 3, py - 2), 2)
+        pygame.draw.circle(screen, dark, (px + 3, py - 2), 2)
+        pygame.draw.line(screen, dark, (px - 2, py + 6), (px + 2, py + 6), 1)
+
+        prog = min(1.0, timer / max(1, down_time))
+        rect = (px - 12, py - 12, 24, 24)
+        start = math.pi / 2
+        end = start + math.tau * prog
+        pygame.draw.arc(screen, light, rect, start, end, 2)
+
     def _draw_boss_body(self, screen, px, py):
         """Boss 本体（八角形 + 魔法阵光环）"""
         r = self.size

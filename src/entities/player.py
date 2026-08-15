@@ -6,6 +6,73 @@ import pygame
 from src.engine import settings as cfg
 from src.engine.collision import circle_collision
 
+
+_player_sprite_cache = {}
+_player_sprite_attempted = set()
+_player_glow_cache = {}
+
+
+def _load_player_sprite(path):
+    key = path
+    if key in _player_sprite_attempted:
+        return _player_sprite_cache.get(key)
+    _player_sprite_attempted.add(key)
+    try:
+        img = pygame.image.load(path).convert_alpha()
+        bbox = img.get_bounding_rect(min_alpha=8)
+        if bbox.width <= 0 or bbox.height <= 0:
+            bbox = img.get_rect()
+        img = img.subsurface(bbox)
+        target_h = max(1, cfg.PLAYER_SPRITE_HEIGHT)
+        target_w = max(1, int(round(img.get_width() * target_h / img.get_height())))
+        _player_sprite_cache[key] = pygame.transform.smoothscale(img, (target_w, target_h))
+    except Exception as exc:
+        print(f"[Player] Failed to load sprite {path}: {exc}")
+        _player_sprite_cache[key] = None
+    return _player_sprite_cache[key]
+
+
+def _get_player_sprite(path, flipped=False):
+    base = _load_player_sprite(path)
+    if base is None:
+        return None
+    key = (path, flipped)
+    if key not in _player_sprite_cache:
+        _player_sprite_cache[key] = (
+            pygame.transform.flip(base, True, False) if flipped else base
+        )
+    return _player_sprite_cache[key]
+
+
+def _get_player_glow(path, flipped=False):
+    sprite = _get_player_sprite(path, flipped)
+    if sprite is None:
+        return None
+
+    key = ("glow", path, flipped)
+    if key in _player_glow_cache:
+        return _player_glow_cache[key]
+
+    try:
+        radius = max(1, cfg.PLAYER_SPRITE_GLOW_RADIUS)
+        sw, sh = sprite.get_size()
+        glow = pygame.Surface((sw + radius * 2, sh + radius * 2), pygame.SRCALPHA)
+        mask = pygame.mask.from_surface(sprite, threshold=32)
+        silhouette = mask.to_surface(setcolor=(255, 255, 255, 255), unsetcolor=(0, 0, 0, 0))
+        max_alpha = max(1, cfg.PLAYER_SPRITE_GLOW_ALPHA)
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                dist = math.hypot(dx, dy)
+                if dist <= radius:
+                    t = dist / radius
+                    silhouette.set_alpha(int(max_alpha * (1.0 - t)))
+                    glow.blit(silhouette, (radius + dx, radius + dy))
+        _player_glow_cache[key] = glow
+    except Exception as exc:
+        print(f"[Player] Failed to build glow for {path}: {exc}")
+        _player_glow_cache[key] = None
+    return _player_glow_cache[key]
+
 class Player:
     def __init__(self, x, y):
         self.x = x
@@ -22,6 +89,7 @@ class Player:
         # 状态
         self.focused = False       # 低速模式
         self.invincible = 0        # 无敌帧数
+        self.spell_invincible = False  # Bomb/自机符卡期间免疫攻击
         self.dead = False
         self.respawning = False
 
@@ -94,7 +162,7 @@ class Player:
         return False
 
     def can_be_hit(self):
-        return self.invincible <= 0 and not self.dead
+        return self.invincible <= 0 and not self.spell_invincible and not self.dead
 
     def hit(self):
         """被击中处理"""
@@ -103,16 +171,56 @@ class Player:
         self.invincible = 120  # 2秒无敌
         return True
 
-    def draw(self, screen, offset_x=0, offset_y=0):
-        """绘制玩家"""
+    def _current_sprite_spec(self):
+        if self.vx < 0:
+            return cfg.PLAYER_SPRITE_MOVE, True
+        if self.vx > 0:
+            return cfg.PLAYER_SPRITE_MOVE, False
+        return cfg.PLAYER_SPRITE_IDLE, False
+
+    def _current_sprite(self):
+        path, flipped = self._current_sprite_spec()
+        return _get_player_sprite(path, flipped)
+
+    def draw_sprite(self, screen, offset_x=0, offset_y=0):
         px = int(self.x + offset_x)
         py = int(self.y + offset_y)
 
-        # 无敌闪烁
         if self.invincible > 0 and self.invincible % 6 < 3:
             return
 
-        # 绘制身体（菱形）
+        path, flipped = self._current_sprite_spec()
+        sprite = _get_player_sprite(path, flipped)
+        if sprite is None:
+            self._draw_placeholder(screen, px, py)
+            return
+
+        sprite_h = sprite.get_height()
+        anchor_y = int(round(sprite_h * cfg.PLAYER_SPRITE_HITBOX_Y_RATIO))
+        sprite_x = px - sprite.get_width() // 2
+        sprite_y = py - anchor_y
+
+        glow = _get_player_glow(path, flipped)
+        if glow is not None:
+            radius = max(1, cfg.PLAYER_SPRITE_GLOW_RADIUS)
+            screen.blit(glow, (sprite_x - radius, sprite_y - radius))
+
+        screen.blit(sprite, (sprite_x, sprite_y))
+
+    def draw_hitbox(self, screen, offset_x=0, offset_y=0):
+        if self.invincible > 0 and self.invincible % 6 < 3:
+            return
+
+        px = int(self.x + offset_x)
+        py = int(self.y + offset_y)
+        dot_radius = int(round(self.hitbox_radius * cfg.PLAYER_HITBOX_DRAW_RADIUS_FACTOR))
+        pygame.draw.circle(screen, cfg.COLOR_WHITE, (px, py), dot_radius, 0)
+        if self.hitbox_visible:
+            pygame.draw.circle(screen, cfg.COLOR_RED, (px, py), dot_radius, 1)
+        if self.focused:
+            pygame.draw.circle(screen, cfg.COLOR_GREEN, (px, py), int(self.graze_radius), 1)
+
+    def _draw_placeholder(self, screen, px, py):
         points = [
             (px, py - 6),
             (px + 4, py),
@@ -122,13 +230,9 @@ class Player:
         color = cfg.COLOR_BLUE if not self.focused else cfg.COLOR_RED
         pygame.draw.polygon(screen, color, points, 0)
 
-        # 判定点
-        if self.hitbox_visible:
-            pygame.draw.circle(screen, cfg.COLOR_RED, (px, py), int(self.hitbox_radius), 1)
-
-        # 擦弹圈
-        if self.focused:
-            pygame.draw.circle(screen, cfg.COLOR_GREEN, (px, py), int(self.graze_radius), 1)
+    def draw(self, screen, offset_x=0, offset_y=0):
+        self.draw_sprite(screen, offset_x, offset_y)
+        self.draw_hitbox(screen, offset_x, offset_y)
 
     def reset_position(self):
         """复活回到屏幕底部中央"""

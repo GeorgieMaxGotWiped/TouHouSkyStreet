@@ -4,6 +4,7 @@
 
 import os
 import sys
+import json
 
 # --- 路径 ---
 # PyInstaller 打包后使用 _MEIPASS 解压目录，源码运行时使用项目根
@@ -16,6 +17,41 @@ SOUNDS_DIR = os.path.join(ASSETS_DIR, "sounds")
 MUSIC_DIR = os.path.join(SOUNDS_DIR, "musics")
 BACKGROUNDS_DIR = os.path.join(ASSETS_DIR, "backgrounds")
 SRC_DIR = os.path.join(BASE_DIR, "src")
+
+# --- 用户配置（音量等）：源码运行保存到项目根目录，打包后保存到 exe 同目录 ---
+DEFAULT_MUSIC_VOLUME = 0.8
+
+if getattr(sys, 'frozen', False):
+    CONFIG_DIR = os.path.dirname(sys.executable)
+else:
+    CONFIG_DIR = BASE_DIR
+CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+
+
+def load_user_config():
+    """读取用户配置（音量等），文件缺失或损坏时返回默认值"""
+    config = {
+        "music_volume": DEFAULT_MUSIC_VOLUME,
+    }
+    try:
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data.get("music_volume"), (int, float)):
+                config["music_volume"] = max(0.0, min(1.0, float(data["music_volume"])))
+    except Exception as e:
+        print(f"[Config] Failed to load {CONFIG_PATH}: {e}")
+    return config
+
+
+def save_user_config(config):
+    """保存用户配置（音量等）到 config.json"""
+    try:
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[Config] Failed to save {CONFIG_PATH}: {e}")
+
 
 # --- 窗口（宽度固定）---
 SCREEN_WIDTH = 960
@@ -44,12 +80,20 @@ STAGE2_WALL = os.path.join(BACKGROUNDS_DIR, "stage2", "wall1.png")
 # --- 伪3D背景贴图（第3面：地下墓穴 / Catacombs） ---
 STAGE3_FLOOR = os.path.join(BACKGROUNDS_DIR, "stage3", "floor.png")
 STAGE3_WALL = os.path.join(BACKGROUNDS_DIR, "stage3", "wall.png")
+# --- 伪3D背景贴图（第4面：地下墓穴深处 / The Catacombs） ---
+STAGE4_FLOOR = os.path.join(BACKGROUNDS_DIR, "stage4", "floor.png")
+STAGE4_WALL = os.path.join(BACKGROUNDS_DIR, "stage4", "wall.png")
+# --- 伪3D背景贴图（第5面：凋零之厅 / BOSS RUSH，暂复用四面背景） ---
+STAGE5_FLOOR = STAGE4_FLOOR
+STAGE5_WALL = STAGE4_WALL
 
 # --- 关卡标题 ---
 TITLES_DIR = os.path.join(ASSETS_DIR, "titles")
 STAGE1_TITLE = os.path.join(TITLES_DIR, "stage1.png")
 STAGE2_TITLE = os.path.join(TITLES_DIR, "stage2.png")
 STAGE3_TITLE = os.path.join(TITLES_DIR, "stage3.png")
+STAGE4_TITLE = os.path.join(TITLES_DIR, "stage4.png")
+STAGE5_TITLE = os.path.join(TITLES_DIR, "stage5.png")
 
 # 关卡标题显示时长（帧，60FPS）
 STAGE_TITLE_DURATION = 180
@@ -60,28 +104,39 @@ STAGE_TITLE_SHADOW_ALPHA = 150
 
 # --- 贴图 ---
 SPRITES_DIR = os.path.join(ASSETS_DIR, "sprites")
+ITEMS_DIR = os.path.join(ASSETS_DIR, "items")
 PLAYER_BULLET_SPRITE = os.path.join(SPRITES_DIR, "bullets", "Frozen_Scythe_Projectile.png")
 PLAYER_BULLET_SPRITE_SIZE = 30   # 玩家子弹贴图显示尺寸（px）
 # 敌弹贴图图集：一整张 etama.png（256x256），按格子裁剪使用
 ENEMY_BULLET_ATLAS = os.path.join(SPRITES_DIR, "bullets", "etama.png")
-# 弹种 → 图集槽位（裁剪区域见 src/entities/bullet_atlas.SLOT_RECTS）
-# 第 1 带方块（s0/s1/...）保留给线条渲染；圆形子弹用第 4 带 c0~c7；米弹/箭弹/刀弹用珍珠；大弹用 big0~big7（32x32 大圆）
+# 弹种 → 基础图集槽位（完整槽位见 src/entities/bullet_atlas.SLOT_RECTS）
+# etama.png 默认行名：
+#   第1行 激光、第2行 麟弹、第3行 环玉、第4行 小玉、
+#   第5行 米弹、第6行 苦无弹、第7行 针弹、第8行 大玉，再往下 飞刀。
+# 实际绘制时会按子弹颜色从同排原图变体中选最接近的槽位，不再染色。
 ENEMY_BULLET_SPRITE_MAP = {
-    "circle": "c0",   # 普通圆形子弹：第 4 带圆形（c0~c7 同形异色，可换）
-    "rice": "s2",     # 米弹：珍珠
-    "arrow": "s3",    # 箭弹：珍珠（第 1 带方块 s0/s1/... 保留给线条渲染，不用作子弹）
-    "knife": "s6",    # 刀弹：珍珠
-    "big": "big0",    # 大玉：32x32 大圆（big0~big7 同形异色）
+    "circle": "g03_00",  # 小玉：第 4 行（16x16）
+    "rice": "g04_00",    # 米弹：第 5 行（16x16）
+    "arrow": "g06_00",   # 针弹：第 7 行（16x16）
+    "knife": "g05_00",   # 苦无弹：第 6 行（16x16）
+    "big": "big0",       # 大玉：第 8 行（32x32，big0~big7 同形异色）
 }
-# 弹幕按 etama.png 原始像素尺寸渲染（小弹 16x16、大弹 64x32），不再随 radius 缩放
+# 弹幕按 etama.png 原始像素尺寸渲染（小弹 16x16、大弹 32x32），不再随 radius 缩放
 # 超过该视觉半径的敌弹（如预警光环 radius 6/7.5 这类大半径敌弹）继续用图元绘制
 ENEMY_BULLET_SPRITE_MAX_RADIUS = 9.0
 # 判定半径 = 贴图视觉半径（min(宽,高)/2）× 该系数；0.5=判定直径约为贴图一半，1.0=判定与贴图等大
 ENEMY_BULLET_HITBOX_FACTOR = 0.5
-# 是否按子弹颜色染色（保留弹幕的颜色区分度）
-ENEMY_BULLET_SPRITE_TINT = True
+# 敌弹已改为“原图颜色匹配”，不再染色；此开关保留给开发预览工具使用。
+ENEMY_BULLET_SPRITE_TINT = False
 ARACHNE_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "arachne.png")
 SELF_SPRITE = os.path.join(SPRITES_DIR, "self", "self1.png")
+PLAYER_SPRITE_IDLE = os.path.join(SPRITES_DIR, "self", "stg1.png")
+PLAYER_SPRITE_MOVE = os.path.join(SPRITES_DIR, "self", "stg2.png")
+PLAYER_SPRITE_HEIGHT = 70
+PLAYER_SPRITE_HITBOX_Y_RATIO = 0.38
+PLAYER_HITBOX_DRAW_RADIUS_FACTOR = 3
+PLAYER_SPRITE_GLOW_RADIUS = 6
+PLAYER_SPRITE_GLOW_ALPHA = 28
 
 # --- 贴图（第2面：末地 / Dragon's Nest） ---
 END_DRAGON_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "ender_dragon.png")
@@ -109,6 +164,50 @@ STAGE3_FAIRY_SPRITE_HEIGHT = 36
 STAGE3_SPIRIT_SPRITE_HEIGHT = 80
 STAGE3_GUARD_SPRITE_HEIGHT = 96
 STAGE3_CASTER_SPRITE_HEIGHT = 88
+# 展符「Undead Exhibition」亡灵展品贴图（Watcher 召唤物图标，黑色背景发光渲染）
+STAGE3_WATCHER_SUMMONINGS_DIR = os.path.join(BACKGROUNDS_DIR, "stage3", "Watcher_summonings")
+STAGE3_WATCHER_SUMMONINGS = [
+    os.path.join(STAGE3_WATCHER_SUMMONINGS_DIR, name) for name in (
+        "Cannibal.png", "Flamer.png", "Frost.png", "Mute.png", "Ooze.png",
+        "Psycho.png", "Putrid.png", "Revoker.png", "Skull.png", "Tear.png",
+        "Vader.png", "Walker.png",
+    )
+]
+# 戏符「Grand Illusion」的小丑面具节点（Bonzo 头部面具贴图）
+STAGE3_BONZO_MASK_SPRITE = os.path.join(BACKGROUNDS_DIR, "stage3", "Bonzo_Head.png")
+# --- 贴图（第4面：地下墓穴深处 / The Catacombs） ---
+SCARF_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "scarf.png")
+SADAN_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "sadan.png")
+ENEMY_SPRITES_DIR_STAGE4 = os.path.join(SPRITES_DIR, "enemies", "stage4")
+STAGE4_FAIRY_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE4, "undead.png")]
+STAGE4_SPIRIT_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE4, "soul.png")]
+STAGE4_GUARD_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE4, "skeleton.png")]
+STAGE4_CASTER_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE4, "caster.png")]
+STAGE4_SKELETOR_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE4, "skeletor.png")]
+STAGE4_TERRACOTTA_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE4, "terracotta.png")
+# Giant sprites for "Precursors' Return" spell card.
+STAGE4_BIGFOOT_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE4, "Bigfoot.png")
+STAGE4_DIAMOND_GIANT_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE4, "The_Diamond_Giant.png")
+STAGE4_LASR_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE4, "L.A.S.R.png")
+STAGE4_JOLLY_PINK_GIANT_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE4, "Jolly_Pink_Giant.png")
+STAGE4_DIAMOND_SWORD_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE4, "Diamond_Sword.png")
+STAGE4_THE_GIANT_ONE_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE4, "TheGiantOne.png")
+# 四面小怪渲染高度（贴图比例与三面一致）
+STAGE4_FAIRY_SPRITE_HEIGHT = 36
+STAGE4_SPIRIT_SPRITE_HEIGHT = 80
+STAGE4_GUARD_SPRITE_HEIGHT = 96
+STAGE4_CASTER_SPRITE_HEIGHT = 88
+STAGE4_SKELETOR_SPRITE_HEIGHT = 96
+
+# --- 五面 Boss 贴图（BOSS RUSH：The Watcher / Wither Lords 与前置 Boss） ---
+STAGE5_WATCHER_BOSS_SPRITE = WATCHER_BOSS_SPRITE
+STAGE5_PROFESSOR_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "professor.png")
+STAGE5_THORN_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "thorn.png")
+STAGE5_LIVID_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "livid.png")
+STAGE5_MAXOR_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "maxor.png")
+STAGE5_STORM_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "storm.png")
+STAGE5_GOLDOR_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "goldor.png")
+STAGE5_NECRON_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "necron.png")
 
 # --- 小怪贴图（第1面） ---
 ENEMY_SPRITES_DIR = os.path.join(SPRITES_DIR, "enemies", "stage1")
@@ -158,6 +257,8 @@ PLAYER_HITBOX_RADIUS = 2.0
 PLAYER_GRAZE_RADIUS = 24    # 擦弹判定半径（px）
 PLAYER_START_LIVES = 3
 PLAYER_START_BOMBS = 3
+PLAYER_MAX_LIVES = 12
+PLAYER_MAX_BOMBS = 12
 PLAYER_SHOOT_COOLDOWN = 4       # 帧
 
 # --- 子弹 ---
@@ -200,6 +301,29 @@ STAGE3_BOSS_MUSIC_LOOP = os.path.join(MUSIC_DIR, "3_2_loop.wav")
 # 曲名（每面开始 / Boss战开始时显示当前播放的音乐名）
 STAGE3_MUSIC_NAME = "墓穴回响 ~ Echoes of the Catacombs"
 STAGE3_BOSS_MUSIC_NAME = "小丑嘉年华 ~ Bonzo's Carnival"
+
+
+# 音乐（第4面）——当前复用三面音乐文件；后续可替换为四面专属曲
+STAGE4_MUSIC_START = STAGE3_MUSIC_START
+STAGE4_MUSIC_LOOP = STAGE3_MUSIC_LOOP
+STAGE4_MUSIC = STAGE3_MUSIC
+STAGE4_BOSS_MUSIC_START = STAGE3_BOSS_MUSIC_START
+STAGE4_BOSS_MUSIC_LOOP = STAGE3_BOSS_MUSIC_LOOP
+
+# 曲名（每面开始 / Boss战开始时显示当前播放的音乐名）
+STAGE4_MUSIC_NAME = "墓穴深处 ~ The Catacombs"
+STAGE4_BOSS_MUSIC_NAME = "死灵王的狂宴 ~ Necromancer's Feast"
+
+# 音乐（第5面）——当前复用四面 Boss 战音乐；后续可替换为五面专属曲
+STAGE5_MUSIC_START = STAGE4_BOSS_MUSIC_START
+STAGE5_MUSIC_LOOP = STAGE4_BOSS_MUSIC_LOOP
+STAGE5_MUSIC = STAGE5_MUSIC_START
+STAGE5_BOSS_MUSIC_START = STAGE4_BOSS_MUSIC_START
+STAGE5_BOSS_MUSIC_LOOP = STAGE4_BOSS_MUSIC_LOOP
+
+# 曲名（每面开始 / Boss战开始时显示当前播放的音乐名）
+STAGE5_MUSIC_NAME = "凋零之厅 ~ Hall of the Wither Lords"
+STAGE5_BOSS_MUSIC_NAME = "凋零之厅 ~ Hall of the Wither Lords"
 
 # 曲名横幅显示时长（帧，60FPS）
 MUSIC_BANNER_DURATION = 300

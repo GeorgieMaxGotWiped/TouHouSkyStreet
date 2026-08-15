@@ -17,6 +17,20 @@ class HUD:
         self.panel_x = cfg.PANEL_LEFT
         self.panel_w = cfg.PANEL_WIDTH
 
+    def _draw_icon_row(self, screen, icon, count, color, y, max_width):
+        """?????????????????????????? 12 ??????"""
+        if count <= 0:
+            return
+        surf = self.font_medium.render(icon, True, color)
+        icon_w = surf.get_width()
+        if icon_w * count > max_width:
+            surf = self.font_small.render(icon, True, color)
+            icon_w = surf.get_width()
+        x = self.panel_x + self.panel_w - 24 - icon_w * count
+        for _ in range(count):
+            screen.blit(surf, (x, y))
+            x += icon_w
+
     def draw(self, screen, player, score, lives, bombs, power, graze, stage_name="", stage_timer=0, boss=None):
         """绘制右侧信息面板"""
         # 面板背景
@@ -59,17 +73,15 @@ class HUD:
         screen.blit(lives_label, (self.panel_x + 24, y))
         # 内部残机仍为 PLAYER_START_LIVES(3)，但界面从 2 颗心开始显示
         # （少显示 1 条隐藏命）：3->2 心，2->1 心，1->0 心，0 即 GameOver
-        lives_icons = "♥" * max(0, lives - 1)
-        lives_text = self.font_medium.render(lives_icons, True, cfg.COLOR_RED)
-        screen.blit(lives_text, (self.panel_x + self.panel_w - 24 - lives_text.get_width(), y))
+        self._draw_icon_row(screen, "♥", max(0, lives - 1), cfg.COLOR_RED,
+                             y, self.panel_w - 48)
         y += 34
 
         # --- 炸弹 ---
         bombs_label = self.font_small.render("炸弹", True, cfg.COLOR_GRAY)
         screen.blit(bombs_label, (self.panel_x + 24, y))
-        bombs_icons = "✿" * max(0, bombs)
-        bombs_text = self.font_medium.render(bombs_icons, True, cfg.COLOR_ORANGE)
-        screen.blit(bombs_text, (self.panel_x + self.panel_w - 24 - bombs_text.get_width(), y))
+        self._draw_icon_row(screen, "✿", bombs, cfg.COLOR_ORANGE,
+                             y, self.panel_w - 48)
         y += 34
 
         # --- Power ---
@@ -216,9 +228,15 @@ class HUD:
         popup.fill((24, 28, 48))
         screen.blit(popup, (x, y))
 
+        try:
+            from src.systems.item_icons import draw_item_icon
+            draw_item_icon(screen, item.id, x + 8, y + 10, size=32)
+        except Exception:
+            pass
+
         rarity_color = item.rarity_color if hasattr(item, 'rarity_color') else cfg.COLOR_WHITE
         item_text = self.font_small.render(item.name, True, rarity_color)
-        screen.blit(item_text, (x + 10, y + 6))
+        screen.blit(item_text, (x + 48, y + 6))
 
         type_text = self.font_small.render(f"{item.rarity} {item.item_type}", True, cfg.COLOR_GRAY)
-        screen.blit(type_text, (x + 10, y + 28))
+        screen.blit(type_text, (x + 48, y + 28))

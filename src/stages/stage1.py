@@ -234,6 +234,10 @@ class Stage:
         if self.boss and (self.boss.alive or self.phase == "defeat_dialogue"):
             self.boss.draw(screen, offset_x, offset_y)
 
+    def draw_foreground(self, screen, offset_x=0, offset_y=0):
+        """子弹与自机之后的战斗区前景层，供关卡/符卡绘制覆盖特效。"""
+        pass
+
     def is_cleared(self):
         return self.phase == "cleared"
 
@@ -358,17 +362,18 @@ class Stage1_SkyblockHub(Stage):
 
     def setup_mid_boss(self):
         """47s 出场的道中Boss：蜘蛛女王 Arachne（仅一张符卡）"""
-        self.mid_boss = Boss("Arachne", hp=1600,
+        self.mid_boss = Boss("Arachne", hp=2400,
                              x=cfg.BATTLE_AREA_WIDTH / 2, y=-40,
                              size=22, color=cfg.COLOR_PURPLE,
                              spell_by_hp_only=True, spell_resistance=0.5, non_spell_level=1,
                              sprite_path=cfg.ARACHNE_BOSS_SPRITE,
                              sprite_scale=2.2)
+        self.mid_boss.bonus_drops = ["overflux_power_orb"]
         self.mid_boss.move_to(cfg.BATTLE_AREA_WIDTH / 2, 110)
         # 符卡：血量到 50% 时才打出，开符后受伤变为 50%
         self.mid_boss.add_spell_card(SpellCard(
             "罠符「Luxurious Spool」", spell_luxurious_spool,
-            hp_threshold=0.5
+            hp_threshold=1.0 / 3.0
         ))
 
     def _add_post_midboss_waves(self):

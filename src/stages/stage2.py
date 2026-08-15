@@ -66,28 +66,74 @@ def _guard(x, y):
 
 
 def _non_spell_stone_protector(boss, bullet_manager, timer, player_x, player_y):
-    """末地石守护者专属非符「磐石镇魂」：
-    三连自机狙大玉 + 顶部落石雨 + 周期性扩散镇魂环，沉稳但压迫"""
-    # 三连自机狙末地石大玉（间隔递进速度，玩家需横向移动）
-    if timer % 26 == 0:
+    """End Stone Protector non-spell: obsidian fans, ender-stone rings, shard rain, and splitting guardian stones."""
+    # Two mirrored rotating obsidian arrow fans.
+    if timer % 30 == 0:
+        base = timer * 0.052
+        for side in (-1, 1):
+            arm = base + (math.pi if side < 0 else 0.0)
+            for i in range(4):
+                a = arm + side * i * 0.16
+                b = create_bullet_angle(boss.x, boss.y, a, 2.45,
+                                        Bullet.TYPE_ARROW, radius=2.6,
+                                        color=(96, 74, 128) if side < 0 else (150, 108, 190))
+                b.turn_rate = side * 0.008
+                bullet_manager.add_enemy_bullet(b)
+
+    # Ender-stone / amethyst double-color ring with gentle wobble.
+    if timer % 120 == 0:
+        base = timer * 0.018
+        for i in range(12):
+            a = base + i * math.tau / 12
+            b = create_bullet_angle(boss.x, boss.y, a, 1.85,
+                                    Bullet.TYPE_CIRCLE, radius=2.3,
+                                    color=(205, 190, 128) if i % 2 == 0 else (150, 116, 188))
+            b.wobble_amp = 9
+            b.wobble_freq = 0.05
+            bullet_manager.add_enemy_bullet(b)
+
+    # Obsidian shard rain from above, drifting around the guardian.
+    if timer % 95 == 0:
+        center_x = max(70, min(cfg.BATTLE_AREA_WIDTH - 70,
+                               boss.x + random.uniform(-80, 80)))
+        for col in (-1, 0, 1):
+            x = min(max(28, center_x + col * 46), cfg.BATTLE_AREA_WIDTH - 28)
+            b = create_bullet_angle(x, -14, math.pi / 2, random.uniform(2.4, 3.0),
+                                    Bullet.TYPE_KNIFE, radius=2.2,
+                                    color=(120, 98, 150))
+            bullet_manager.add_enemy_bullet(b)
+
+    # Three orbiting guardian stones bloom into radial rice shards.
+    if timer % 220 == 0:
+        base = timer * 0.045
         for i in range(3):
-            b = create_bullet_aimed(boss.x, boss.y, player_x, player_y, 2.1 + i * 0.3,
-                                    Bullet.TYPE_BIG, radius=4, color=(198, 186, 142))
+            a = base + i * math.tau / 3
+            b = create_bullet_angle(boss.x, boss.y, a, 0.0,
+                                    Bullet.TYPE_BIG, radius=3.2,
+                                    color=(150, 116, 175))
+            b.orbit_center = (boss.x, boss.y)
+            b.orbit_radius = 48
+            b.orbit_angle = a
+            b.orbit_speed = 0.05
+            b.orbit_grow = 0.42
+            b.orbit_break = 118
+            b.orbit_break_speed = 1.2
+            b.manager = bullet_manager
+            b.split_spec = {
+                "timer": 80,
+                "base_angle": a + 80 * 0.05,
+                "count": 5,
+                "spread": math.tau / 5,
+                "speed": 1.95,
+                "type": Bullet.TYPE_RICE,
+                "radius": 2.1,
+                "color": (190, 160, 210),
+                "aimed": False,
+            }
+            b.lifetime = 360
             bullet_manager.add_enemy_bullet(b)
-    # 顶部随机列坠下的黑曜石箭弹（落石雨）
-    if timer % 48 == 0:
-        x = random.uniform(50, cfg.BATTLE_AREA_WIDTH - 50)
-        b = create_bullet_angle(x, -14, math.pi / 2, random.uniform(2.0, 2.8),
-                                Bullet.TYPE_ARROW, radius=3, color=(150, 110, 190))
-        bullet_manager.add_enemy_bullet(b)
-    # 镇魂环：每 3.5s 向外扩散一圈末影珍珠青圆弹
-    if timer % 210 == 0:
-        for i in range(14):
-            angle = i * math.pi * 2 / 14 + timer * 0.02
-            b = create_bullet_angle(boss.x, boss.y, angle, 0.9,
-                                    Bullet.TYPE_CIRCLE, radius=2.5, color=(86, 206, 200))
-            bullet_manager.add_enemy_bullet(b)
-    # 偶尔小幅横移，保持“不动”的压迫感
+
+    # Slow guardian drift keeps the wall of fire from feeling static.
     if timer % 300 == 0:
         boss.target_x = max(120, min(cfg.BATTLE_AREA_WIDTH - 120,
                                      boss.x + random.uniform(-70, 70)))
@@ -220,6 +266,7 @@ class Stage2_DragonsNest(Stage):
                              hp_bar_inset=16,
                              sprite_path=cfg.END_STONE_PROTECTOR_SPRITE,
                              sprite_scale=2.6)
+        self.mid_boss.bonus_drops = ["overflux_power_orb"]
         self.mid_boss.move_to(cfg.BATTLE_AREA_WIDTH / 2, 110)
         # 符卡：血量到 1/3 时打出，专属非符阶段同样不简单
         self.mid_boss.add_spell_card(SpellCard(

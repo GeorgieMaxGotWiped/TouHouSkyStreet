@@ -18,3 +18,9 @@ backup/
 
 # 本机自定义 Python 路径
 python_path.txt
+
+# 用户运行时配置（音量等）
+config.json
+
+# 工具脚本生成的启动日志
+tools/_boot_*.txt

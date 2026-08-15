@@ -62,7 +62,7 @@ assert stage.mid_boss.name == "The Watcher"
 mb = stage.mid_boss
 print(f"[3] Watcher spawned at t={stage.timer} hp={mb.hp}")
 
-# --- 4. Watcher 完整流程：非符 -> 眼符 -> 击破 ---
+# --- 4. Watcher 完整流程：非符 -> 展符 -> 击破 ---
 seen = []
 while stage.phase == "mid_boss" and mb.alive and guard < 60 * 60:
     run(stage, bm, 30, damage=mb)
@@ -72,7 +72,7 @@ while stage.phase == "mid_boss" and mb.alive and guard < 60 * 60:
         print(f"    watcher spell active: {mb.current_spell.name} (phase={mb.phase})")
 assert not mb.alive, "watcher defeated"
 assert stage.phase == "post_midboss"
-assert any("Gaze of the Watcher" in s for s in seen), f"watcher spell seen: {seen}"
+assert any("Undead Exhibition" in s for s in seen), f"watcher spell seen: {seen}"
 print(f"[4] Watcher defeated at t={stage.timer} (spells={seen})")
 
 stage.draw(screen, cfg.BATTLE_OFFSET_X, cfg.BATTLE_OFFSET_Y)
@@ -88,7 +88,7 @@ assert stage.boss is not None and stage.boss.alive and not stage.boss.combat_ena
 assert stage.boss.name == "Bonzo"
 print(f"[5] dialogue at t={stage.timer}, Bonzo entered (combat off)")
 
-# --- 6. Bonzo 双阶段：一阶段两符 -> 复活 -> 球符 -> 击破 ---
+# --- 6. Bonzo 双阶段：一阶段三符 -> 死亡复活 -> 气符 -> 秘仪 -> 击破 ---
 stage.on_dialogue_end()
 assert stage.phase == "boss" and (stage.boss.combat_enabled or stage.boss.combat_delay > 0)
 bonzo = stage.boss
@@ -102,15 +102,16 @@ while stage.phase not in ("cleared", "defeat_dialogue") and guard < 60 * 90:
         if not spell_names or spell_names[-1] != nm:
             spell_names.append(nm)
             print(f"    bonzo phase: {bonzo.phase} spell={nm} hp={bonzo.hp:.0f}/{bonzo.max_hp}")
-        if nm == "球符「Balloon Barrage」" and not revive_seen:
-            revive_seen = True
-            assert bonzo.hp == BONZO_REVIVE_HP, f"revive hp {bonzo.hp} != {BONZO_REVIVE_HP}"
-            print(f"    REVIVED -> full hp {bonzo.hp}")
+    if bonzo.phase == "reviving" and not revive_seen:
+        revive_seen = True
+        assert bonzo.hp == 0, f"revive start hp {bonzo.hp} != 0"
+        print("    REVIVING")
 if stage.phase == "defeat_dialogue":
     stage.on_defeat_dialogue_end()
 assert stage.phase == "cleared", f"cleared (phase={stage.phase} t={stage.timer})"
-assert revive_seen, "Bonzo revived via Last Spell"
-assert len(spell_names) == 3 and all(k in s for k, s in zip(("Undead Legion", "Wither Skull", "Balloon"), spell_names)), spell_names
+assert revive_seen, "Bonzo revived"
+expected = ("Undead Revival", "Skull Dreadlord", "Grand Illusion", "Balloon", "Showtime")
+assert len(spell_names) == 5 and all(k in s for k, s in zip(expected, spell_names)), spell_names
 print(f"[6] Bonzo defeated after revive (spells={spell_names})")
 
 # --- 7. PlayingState 渲染（含标题卡/曲名）---

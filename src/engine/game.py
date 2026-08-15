@@ -1,4 +1,4 @@
-# 东方天空街 - 游戏主引擎
+﻿# 东方天空街 - 游戏主引擎
 # 管理游戏主循环、状态切换、场景调度
 
 import sys
@@ -30,6 +30,15 @@ class Game:
         except Exception as e:
             print(f"[Audio] Mixer init failed, audio disabled: {e}")
 
+        # 音量（从 config.json 读取并立即应用）
+        self.user_config = load_user_config()
+        self.music_volume = float(self.user_config.get("music_volume", DEFAULT_MUSIC_VOLUME))
+        if self.audio_ok:
+            try:
+                pygame.mixer.music.set_volume(self.music_volume)
+            except Exception:
+                pass
+
         # 音乐自然播放结束的事件（用于Boss战开场曲播完后切换循环曲）
         self.music_end_event = pygame.USEREVENT + 1
 
@@ -46,6 +55,10 @@ class Game:
         self.keys = {}
         self.keys_just_pressed = {}
         self.keys_held = {}
+        # 鼠标输入（终端破解 GUI 等用）
+        self.mouse_pos = (0, 0)
+        self.mouse_buttons_just_pressed = {}
+        self.mouse_buttons_held = {}
 
         # 游戏状态栈
         self.states = []
@@ -73,7 +86,10 @@ class Game:
                 "ENCHANTING": {"xp": 0, "level": 0},
                 "ALCHEMY": {"xp": 0, "level": 0},
             },
+            "coins": 0,
             "inventory": [],
+            "equipment": {},
+            "reforges": {},
             "active_effects": [],
         }
 
@@ -151,6 +167,17 @@ class Game:
         except Exception:
             return False
 
+    def set_music_volume(self, volume):
+        """设置背景音乐音量（0.0 ~ 1.0）并保存配置"""
+        self.music_volume = max(0.0, min(1.0, float(volume)))
+        self.user_config["music_volume"] = self.music_volume
+        save_user_config(self.user_config)
+        if self.audio_ok:
+            try:
+                pygame.mixer.music.set_volume(self.music_volume)
+            except Exception:
+                pass
+
     def toggle_fullscreen(self):
         """F11????? / ????"""
         self.fullscreen = not self.fullscreen
@@ -183,9 +210,28 @@ class Game:
 
         self.quit()
 
+    def _unscale_mouse(self, pos):
+        """把窗口坐标换算回 960x720 逻辑坐标（全屏缩放时使用）"""
+        mx, my = pos
+        if self.screen is not self.window:
+            try:
+                win_w, win_h = self.window.get_size()
+                scale = min(win_w / SCREEN_WIDTH, win_h / SCREEN_HEIGHT)
+                new_w = max(1, round(SCREEN_WIDTH * scale))
+                new_h = max(1, round(SCREEN_HEIGHT * scale))
+                ox = (win_w - new_w) // 2
+                oy = (win_h - new_h) // 2
+                if scale > 0:
+                    mx = (mx - ox) / scale
+                    my = (my - oy) / scale
+            except Exception:
+                pass
+        return (mx, my)
+
     def _handle_events(self):
         """处理输入事件"""
         self.keys_just_pressed = {}
+        self.mouse_buttons_just_pressed = {}
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
@@ -196,12 +242,18 @@ class Game:
                     self.toggle_fullscreen()
             elif event.type == pygame.KEYUP:
                 self.keys_held[event.key] = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                self.mouse_buttons_just_pressed[event.button] = True
+                self.mouse_buttons_held[event.button] = True
+            elif event.type == pygame.MOUSEBUTTONUP:
+                self.mouse_buttons_held[event.button] = False
             elif event.type == self.music_end_event:
                 # 背景音乐自然播放结束（无限循环曲不会触发）
                 if self.current_state:
                     self.current_state.on_music_end()
 
         self.keys = pygame.key.get_pressed()
+        self.mouse_pos = self._unscale_mouse(pygame.mouse.get_pos())
 
     def _update(self):
         if self.current_state:
