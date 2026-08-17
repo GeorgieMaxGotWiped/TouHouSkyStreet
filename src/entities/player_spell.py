@@ -90,12 +90,13 @@ class PlayerSpellCard:
     name = SPELL_NAME
 
     def __init__(self, player, bullet_manager, stage, game, on_enemy_killed=None,
-                 deathbomb=False):
+                 deathbomb=False, damage_mult=1.0):
         self.player = player
         self.bullet_manager = bullet_manager
         self.stage = stage
         self.game = game
         self.on_enemy_killed = on_enemy_killed
+        self.damage_mult = float(damage_mult or 1.0)
 
         if deathbomb:
             self.strike_count = DEATH_STRIKE_COUNT
@@ -226,7 +227,8 @@ class PlayerSpellCard:
             ex, ey = getattr(enemy, "x", 0.0), getattr(enemy, "y", 0.0)
             body_radius = max(10.0, getattr(enemy, "size", 12.0) * 0.85)
             if point_segment_distance(ex, ey, sx, sy, tx, ty) <= PATH_HIT_RADIUS + body_radius:
-                killed = enemy.take_damage(DAMAGE_PER_STRIKE)
+                strike_damage = int(round(DAMAGE_PER_STRIKE * self.damage_mult))
+                killed = enemy.take_damage(strike_damage)
                 if killed and self.on_enemy_killed is not None:
                     self.on_enemy_killed(enemy)
 

@@ -1,14 +1,17 @@
-﻿# 菜单界面
+# 菜单界面
 
 import os
 import math
 import random
 import pygame
 from src.engine import settings as cfg
-from src.engine.collision import circle_collision
+from src.engine.collision import circle_collision, point_segment_distance
 from src.engine.game import GameState
 from src.entities.player_spell import PlayerSpellCard
-from src.systems.item_system import BOSS_REWARD_POOLS
+from src.systems.item_system import BOSS_REWARD_POOLS, C_SKILLS
+from src.systems.item_effects import aggregate_effects
+
+WITHER_BOSS_NAMES = {"Maxor", "Storm", "Goldor", "Necron", "Kaeman"}
 
 DEATHBOMB_WINDOW_FRAMES = 24
 
@@ -92,6 +95,16 @@ class MenuState(GameState):
         if ((held.get(pygame.K_5, False) or held.get(pygame.K_KP5, False))
                 and held.get(pygame.K_m, False)):
             self._debug_stage5_maxor_dialogue()
+            return
+        # 隐藏调试：同时按住 S + K + 6 直接进入六面 Final Approach（power=400）
+        if (held.get(pygame.K_s, False) and held.get(pygame.K_k, False)
+                and (held.get(pygame.K_6, False) or held.get(pygame.K_KP6, False))):
+            self._debug_start_stage6()
+            return
+        # 隐藏调试：同时按住 6 + M 直接进入六面 Kaeman 战前对话（满power）
+        if ((held.get(pygame.K_6, False) or held.get(pygame.K_KP6, False))
+                and held.get(pygame.K_m, False)):
+            self._debug_stage6_boss_dialogue()
             return
 
         keys = self.game.keys_just_pressed
@@ -208,6 +221,31 @@ class MenuState(GameState):
         stage._start_maxor_dialogue()
         self.game.switch_state(PlayingState(self.game, stage, skip_title=True))
 
+    def _debug_start_stage6(self):
+        """隐藏调试：直接进入六面最终进军，power 设为满值（400）。"""
+        from src.stages.stage6 import Stage6_FinalApproach
+        self.game.global_data["score"] = 0
+        self.game.global_data["lives"] = cfg.PLAYER_START_LIVES
+        self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
+        self.game.global_data["power"] = 400
+        self.game.global_data["graze"] = 0
+        stage = Stage6_FinalApproach()
+        stage.setup_waves()
+        self.game.switch_state(PlayingState(self.game, stage))
+
+    def _debug_stage6_boss_dialogue(self):
+        """隐藏调试：直接进入六面 Kaeman（The Wither King）战前对话，power 满（400）。"""
+        from src.stages.stage6 import Stage6_FinalApproach
+        self.game.global_data["score"] = 0
+        self.game.global_data["lives"] = cfg.PLAYER_START_LIVES
+        self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
+        self.game.global_data["power"] = 400
+        self.game.global_data["graze"] = 0
+        stage = Stage6_FinalApproach()
+        # 直接进入关底对话：Kaeman 入场但不攻击、不显示血条，跳过进军全流程
+        stage._start_final_dialogue()
+        self.game.switch_state(PlayingState(self.game, stage, skip_title=True))
+
     def _debug_stage2_boss_dialogue(self):
         """隐藏调试：直接进入二面关底Boss战前对话，power 满（400）"""
         from src.stages.stage2 import Stage2_DragonsNest
@@ -223,25 +261,16 @@ class MenuState(GameState):
 
     def _select(self):
         if self.options[self.selected] == "Start Game":
-            # 新游戏：重置全局数据
-            self.game.global_data["score"] = 0
-            self.game.global_data["lives"] = cfg.PLAYER_START_LIVES
-            self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
-            self.game.global_data["power"] = 0
-            self.game.global_data["graze"] = 0
-            from src.systems.item_system import ItemInventory
-            empty_inventory = ItemInventory()
-            empty_inventory.save_to_global_data(self.game.global_data)
-            from src.stages import get_stage_class
-            stage = get_stage_class(1)()
-            stage.setup_waves()
-            self.game.switch_state(PlayingState(self.game, stage))
+            # 新游戏：先进仓库出征准备，选择携带物品与金币
+            from src.ui.loadout import LoadoutState
+            self.game.switch_state(LoadoutState(self.game))
         elif self.options[self.selected] == "Quit":
             self.game.running = False
         elif self.options[self.selected] == "Settings":
             self.game.push_state(SettingsState(self.game))
         elif self.options[self.selected] == "Practice":
-            pass  # TODO
+            from src.ui.practice import PracticeSelectState
+            self.game.push_state(PracticeSelectState(self.game))
 
     def draw(self, screen):
         if self.background:
@@ -271,8 +300,15 @@ class MenuState(GameState):
             screen.blit(text, (x, y))
 
         # 底部版本
-        version_text = self.game.font_small.render("v1.1.0 - Codex CLI Project", True, cfg.COLOR_DARK_GRAY)
+        version_text = self.game.font_small.render("v1.4.2 - Codex CLI Project", True, cfg.COLOR_DARK_GRAY)
         screen.blit(version_text, (10, cfg.SCREEN_HEIGHT - 18))
+
+        # 撤离 / 操作提示（一次性通知）
+        notice = getattr(self.game, "notice", None)
+        if notice:
+            notice_text = self.game.font_small.render(notice, True, cfg.COLOR_GREEN)
+            screen.blit(notice_text, ((cfg.SCREEN_WIDTH - notice_text.get_width()) // 2,
+                                      cfg.SCREEN_HEIGHT - 64))
 
 
 
@@ -373,10 +409,14 @@ class SettingsState(GameState):
 
 class PlayingState(GameState):
     """游戏主状态"""
-    def __init__(self, game, stage, skip_title=False):
+    def __init__(self, game, stage, skip_title=False, practice_info=None):
         super().__init__(game)
         self.stage = stage
         self.skip_title = skip_title
+        # 练习模式信息（None 表示正常通关流程）
+        self.practice_info = practice_info
+        self.practice_done = False
+        self.practice_done_timer = 0
         from src.entities.bullet import BulletManager
         from src.entities.player import Player
         from src.ui.hud import HUD
@@ -410,6 +450,30 @@ class PlayingState(GameState):
         self.item_inventory = ItemInventory.from_global_data(self.game.global_data)
         self.equipment_stats = self.item_inventory.get_equipped_stats()
         self.pending_boss_reward_pool = None
+
+        # 物品被动效果聚合（装备在休整期间才会变化，本关内保持不变）
+        self.item_effects = aggregate_effects(self.item_inventory, self.stage.stage_num)
+        self.c_skill_id = self.item_inventory.get_c_skill_equipped_id()
+        self.c_uses = {}
+        self.c_skill_message = ""
+        self.c_skill_message_timer = 0
+        self.bad_health_timer = 0
+        self.arack_timer = 0
+        self.spider_timer = 0
+        self.spirit_bow_timer = 0
+        self.end_stone_timer = 0
+        self.precursor_timer = 0
+        self.lives_lost_this_stage = 0
+        self.kill_counter = 0
+        self.shadow_damage = 0.0
+        self.wither_shields = []
+        self.bonzo_balloons = []
+        self.fot_roses = []
+        self.overflux_orbs = []
+        self.summoned_minions = []
+        # 判定点缩放（Maxor's Boots）
+        self.player.hitbox_radius = cfg.PLAYER_HITBOX_RADIUS * self.item_effects["hitbox_scale"]
+        self._apply_stage_start_bonuses()
         self.skill_manager = SkillManager()
         skills_data = self.game.global_data.get("skills", {})
         if skills_data:
@@ -449,6 +513,10 @@ class PlayingState(GameState):
         self.bomb_blocked_timer = 0
 
     def enter(self, game):
+        # 练习模式：直接播放 Boss 战音乐，不显示关卡标题
+        if self.practice_info:
+            self._enter_practice()
+            return
         # 道中Boss音乐标记复位（重进本面时重新生效）
         self.mid_boss_music_started = False
         # 播放本面道中曲
@@ -559,7 +627,224 @@ class PlayingState(GameState):
         self.stage_title_image.set_alpha(alpha)
         screen.blit(self.stage_title_image, (self.offset_x, self.offset_y))
 
+    # ================= 符卡练习模式 =================
+
+    def _enter_practice(self):
+        """练习模式进入：直接播放 Boss 战音乐并显示曲名。"""
+        self.mid_boss_music_started = True
+        self.stage_music_intro = False
+        self.boss_music_intro = True
+        self.game.play_music(self.stage.boss_music_start_path, loops=0)
+        self._show_music_name(self.stage.boss_music_name)
+
+    def _update_practice(self, dt, keys):
+        """练习模式更新：单符卡循环 + 击破结算 / 重试 / 下一张 / 返回。"""
+        # 击破结算
+        if self.practice_done:
+            self.practice_done_timer += 1
+            if (keys.get(pygame.K_r, False) or keys.get(pygame.K_z, False)
+                    or keys.get(pygame.K_SPACE, False)):
+                self._practice_restart()
+            elif keys.get(pygame.K_n, False):
+                self._practice_next_card()
+            elif (keys.get(pygame.K_ESCAPE, False)
+                  or keys.get(pygame.K_BACKSPACE, False)):
+                self._practice_back_to_select()
+            return
+
+        # 中途退出
+        if (keys.get(pygame.K_ESCAPE, False)
+                or keys.get(pygame.K_BACKSPACE, False)):
+            self._practice_back_to_select()
+            return
+
+        # 玩家输入（机械符等中央演出期间锁定）
+        if not getattr(self.stage, "player_input_locked", False):
+            self.player.handle_input(self.game.keys, self.game.keys_held,
+                                     self.game.keys_just_pressed)
+        else:
+            self.player.want_bomb = False
+            self.player.vx = 0.0
+            self.player.vy = 0.0
+            self.player.shooting = False
+
+        # 移动速度修正与限制
+        self._apply_speed_effects()
+        if self.end_stone_timer > 0:
+            self.player.vx = 0.0
+            self.player.vy = 0.0
+
+        # Bomb（Last Spell 挑战中禁用）
+        if (self.player.want_bomb and self.bombs > 0
+                and not self.bomb_active and self.player_spell is None):
+            if self.stage.boss is not None and self.stage.boss.is_last_spell_active():
+                self.bomb_blocked_timer = 50
+            else:
+                self._use_bomb()
+        if self.bomb_blocked_timer > 0:
+            self.bomb_blocked_timer -= 1
+
+        # 决死Bomb窗口
+        if self.death_window > 0:
+            self.death_window -= 1
+            if self.death_window <= 0:
+                self._player_die()
+            return
+
+        # Bomb/自机符卡效果
+        if self.player_spell is not None:
+            self.player_spell.update(dt)
+            if self.player_spell.done:
+                self.player_spell = None
+                self.bomb_active = False
+                self.bomb_timer = 0
+                self.player.spell_invincible = False
+
+        # 更新玩家
+        self.player.update(dt)
+        tp = getattr(self.stage, "player_teleport_target", None)
+        if tp is not None:
+            self.player.x, self.player.y = tp
+            self.stage.player_teleport_target = None
+        constrain = getattr(self.stage, "constrain_player", None)
+        if constrain is not None:
+            self.player.x, self.player.y = constrain(self.player.x, self.player.y)
+
+        # 射击 / 弹幕
+        if self.player.can_shoot():
+            self._player_shoot()
+        self.bullet_manager.update(dt, self.player.x, self.player.y)
+        self._update_homing_bullets()
+        self._update_c_skills()
+        self._update_power_items()
+        self._update_bonus_items()
+
+        # 更新练习舞台（转发鼠标/按键供机械符等使用）
+        self.stage.mouse_pos = self.game.mouse_pos
+        self.stage.mouse_buttons_just_pressed = self.game.mouse_buttons_just_pressed
+        self.stage.mouse_buttons_held = self.game.mouse_buttons_held
+        self.stage.keys_just_pressed = self.game.keys_just_pressed
+        self.stage.keys_held = self.game.keys_held
+        self.stage.update(dt, self.bullet_manager, self.player.x, self.player.y)
+
+        # 碰撞检测
+        self._check_collisions()
+
+        # 符卡击破：显示结算并清屏
+        boss = getattr(self.stage, "boss", None)
+        if boss is not None and not boss.alive and not self.practice_done:
+            self.practice_done = True
+            self.practice_done_timer = 0
+            self.bullet_manager.clear_all()
+            self.player_spell = None
+            self.bomb_active = False
+            self.bomb_timer = 0
+            self.player.spell_invincible = False
+            self.game.stop_music()
+
+        # 曲名横幅递减
+        if self.music_banner_timer > 0:
+            self.music_banner_timer -= 1
+
+        # 掉落弹窗
+        for popup in self.item_popups[:]:
+            popup["timer"] += 1
+            if popup["timer"] > 180:
+                self.item_popups.remove(popup)
+
+    def _practice_restart(self):
+        """重试当前符卡：重建练习舞台与自机状态。"""
+        from src.entities.bullet import BulletManager
+        from src.entities.player import Player
+        from src.ui.practice import build_practice_boss, PracticeStage
+        entry = self.practice_info["entry"]
+        card_index = self.practice_info["card_index"]
+        stage, boss = build_practice_boss(entry, card_index)
+        self.stage = PracticeStage(stage, boss)
+
+        self.bullet_manager = BulletManager()
+        self.player = Player(cfg.BATTLE_AREA_WIDTH / 2,
+                             cfg.BATTLE_AREA_HEIGHT - 80)
+        self.player.hitbox_radius = (cfg.PLAYER_HITBOX_RADIUS
+                                     * self.item_effects["hitbox_scale"])
+
+        # 练习模式固定满火力 3 残机 3 雷
+        self.score = 0
+        self.lives = cfg.PLAYER_START_LIVES
+        self.bombs = cfg.PLAYER_START_BOMBS
+        self.power = 400
+        self.graze = 0
+
+        # 重置状态
+        self.practice_done = False
+        self.practice_done_timer = 0
+        self.bomb_active = False
+        self.bomb_timer = 0
+        self.player_spell = None
+        self.player.spell_invincible = False
+        self.death_window = 0
+        self.bomb_blocked_timer = 0
+        self.item_popups.clear()
+        self.power_items.clear()
+        self.bonus_items.clear()
+        self.homing_shot_skip = False
+        self.dialogue = None
+        self.c_skill_message = ""
+        self.c_skill_message_timer = 0
+
+        # 重播 Boss 战音乐
+        self.game.stop_music()
+        pygame.event.clear(self.game.music_end_event)
+        self.boss_music_intro = True
+        self.stage_music_intro = False
+        self.game.play_music(self.stage.boss_music_start_path, loops=0)
+        self._show_music_name(self.stage.boss_music_name)
+
+    def _practice_next_card(self):
+        """切到下一张符卡（同一 Boss，最后一张后回到第一张）。"""
+        entry = self.practice_info["entry"]
+        n = len(entry["cards"])
+        self.practice_info["card_index"] = (
+            self.practice_info["card_index"] + 1) % n
+        self.practice_info["card_name"] = (
+            entry["cards"][self.practice_info["card_index"]]["name"])
+        self._practice_restart()
+
+    def _practice_back_to_select(self):
+        """返回符卡练习选择界面。"""
+        from src.ui.practice import PracticeSelectState
+        self.game.switch_state(PracticeSelectState(self.game))
+
+    def _draw_practice_overlay(self, screen):
+        """练习模式 HUD 提示与符卡击破结算。"""
+        # 战斗中提示退出方式（战斗区左上角）
+        if not self.practice_done:
+            hint = self.game.font_small.render(
+                "符卡练习  Esc 返回选择", True, cfg.COLOR_GRAY)
+            screen.blit(hint, (self.offset_x + 10,
+                               self.offset_y + cfg.BATTLE_AREA_HEIGHT - 20))
+            return
+        # 击破结算
+        overlay = pygame.Surface((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
+                                 pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 160))
+        screen.blit(overlay, (0, 0))
+        title = self.game.font_large.render("符卡击破！", True, cfg.COLOR_GREEN)
+        card_name = self.practice_info["card_name"]
+        last_tag = "（Last Spell）" if self.practice_info.get("last") else ""
+        card = self.game.font_medium.render(
+            card_name + last_tag, True, cfg.COLOR_YELLOW)
+        screen.blit(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 240))
+        screen.blit(card, ((cfg.SCREEN_WIDTH - card.get_width()) // 2, 320))
+        hint = self.game.font_small.render(
+            "[R] 重试    [N] 下一张    [Esc] 返回选择", True, cfg.COLOR_WHITE)
+        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 384))
+
     def exit(self):
+        # 练习模式不写回存档数据，避免污染主线进度
+        if self.practice_info:
+            self.game.stop_music()
+            return
         # 保存状态到全局数据
         self.game.global_data["score"] = self.score
         self.game.global_data["lives"] = self.lives
@@ -572,6 +857,10 @@ class PlayingState(GameState):
 
     def update(self, dt):
         keys = self.game.keys_just_pressed
+        # 练习模式：单符卡循环与击破/重试/返回结算
+        if self.practice_info:
+            self._update_practice(dt, keys)
+            return
         dialogue_was_active = self.dialogue is not None
 
         # Stage3 debug skip: G during Bonzo pre-battle dialogue -> revived phase 2.
@@ -621,6 +910,25 @@ class PlayingState(GameState):
                     stage5_skip_done = True
                     break
         if stage5_skip_done:
+            self.dialogue = None
+            self.game.stop_music()
+            pygame.event.clear(self.game.music_end_event)
+            self.boss_music_intro = True
+            self.stage_music_intro = False
+            self.game.play_music(self.stage.boss_music_start_path, loops=0)
+            self._show_music_name(self.stage.boss_music_name)
+
+        # Stage6 debug skip: 1~6 during Kaeman pre-battle dialogue -> spell cards 1~6.
+        stage6_skip_done = False
+        if (self.dialogue is not None
+                and not getattr(self.stage, "dialogue_is_defeat", False)
+                and getattr(self.stage, "skip_to_kaeman_spell", None) is not None):
+            for key, idx in ((pygame.K_1, 1), (pygame.K_2, 2), (pygame.K_3, 3),
+                             (pygame.K_4, 4), (pygame.K_5, 5), (pygame.K_6, 6)):
+                if keys.get(key, False) and self.stage.skip_to_kaeman_spell(idx):
+                    stage6_skip_done = True
+                    break
+        if stage6_skip_done:
             self.dialogue = None
             self.game.stop_music()
             pygame.event.clear(self.game.music_end_event)
@@ -715,6 +1023,19 @@ class PlayingState(GameState):
             self.player.vy = 0.0
             self.player.shooting = False
 
+        # C 技能（按 C 释放装备的 C 技能物品）
+        if (not getattr(self.stage, "player_input_locked", False)
+                and self.death_window <= 0 and not self.game_over
+                and keys.get(pygame.K_c, False)):
+            self._use_c_skill()
+
+        # 移动速度修正（装备效果：Heavy Armor 减速 / Maxor's Boots 加速等）
+        self._apply_speed_effects()
+        # End Stone Sword：C 技能期间无法移动（仍可射击）
+        if self.end_stone_timer > 0:
+            self.player.vx = 0.0
+            self.player.vy = 0.0
+
         # Bomb（Last Spell 挑战中禁用）；中弹后短暂窗口内触发决死Bomb。
         if self.death_window > 0:
             if self.player.want_bomb and self.bombs > 0:
@@ -767,6 +1088,9 @@ class PlayingState(GameState):
         # 追踪弹自动转向
         self._update_homing_bullets()
 
+        # C 技能实体与计时器更新
+        self._update_c_skills()
+
         # 掉落物下落与拾取
         self._update_power_items()
         self._update_bonus_items()
@@ -778,6 +1102,11 @@ class PlayingState(GameState):
         self.stage.keys_just_pressed = self.game.keys_just_pressed
         self.stage.keys_held = self.game.keys_held
         self.stage.update(dt, self.bullet_manager, self.player.x, self.player.y)
+
+        # 为 Sadan 兵马俑（兵符小怪）挂接掉落回调（新 Boss 实例只挂一次）
+        cur_boss = self.stage.boss
+        if cur_boss is not None and getattr(cur_boss, "terracotta_drop_callback", None) is None:
+            cur_boss.terracotta_drop_callback = self._roll_terracotta_drops
 
         # 道中Boss出场：切换到该面配置的道中Boss音乐（与当前曲相同则不重启，避免重头播放）
         if self.stage.phase == "mid_boss" and not self.mid_boss_music_started:
@@ -791,7 +1120,9 @@ class PlayingState(GameState):
             from src.ui.dialogue import DialogueBox
             self.dialogue = DialogueBox(self.game, self.stage.dialogue_lines,
                                         portraits=self.stage.dialogue_portraits,
-                                        portrait_sides=getattr(self.stage, "dialogue_portrait_sides", {}))
+                                        portrait_sides=getattr(self.stage, "dialogue_portrait_sides", {}),
+                                        portrait_scales=getattr(self.stage, "dialogue_portrait_scales", {}),
+                                        portrait_offsets=getattr(self.stage, "dialogue_portrait_offsets", {}))
 
         # 碰撞检测
         self._check_collisions()
@@ -812,6 +1143,17 @@ class PlayingState(GameState):
             self.game.global_data["power"] = self.power
             self.game.global_data["graze"] = self.graze
             self.game.global_data["skills"] = self.skill_manager.to_dict()
+            # Necromancer Lord Leggings：关卡结束未失残机 -> +1残机 +1BOMB
+            eff = self.item_effects
+            if self.lives_lost_this_stage <= 0 and (eff["end_no_hit_lives"] or eff["end_no_hit_bombs"]):
+                self.lives = min(cfg.PLAYER_MAX_LIVES, self.lives + int(eff["end_no_hit_lives"]))
+                self.bombs = min(cfg.PLAYER_MAX_BOMBS, self.bombs + int(eff["end_no_hit_bombs"]))
+                self.game.global_data["lives"] = self.lives
+                self.game.global_data["bombs"] = self.bombs
+            # Tarantula Helmet：关卡结束时若失去残机>1，获得1BOMB
+            if self.lives_lost_this_stage > 1 and eff["end_lost_over1_bombs"]:
+                self.bombs = min(cfg.PLAYER_MAX_BOMBS, self.bombs + int(eff["end_lost_over1_bombs"]))
+                self.game.global_data["bombs"] = self.bombs
             self._save_item_inventory()
             if self.pending_boss_reward_pool:
                 # 关底 Boss 已击破：先进入 4 选 1 奖励，再进入休整
@@ -830,54 +1172,85 @@ class PlayingState(GameState):
                 self.item_popups.remove(popup)
 
     def _player_shoot(self):
-        """玩家射击：按 power 升级弹幕形态（单线->两线->三线）+ 追踪弹"""
+        """玩家射击：按 power 升级弹幕形态（单线->两线->三线）+ 追踪弹
+
+        装备效果影响：散射夹角（Terminator）、固定/追踪弹道数（Loving）、
+        追踪领域（Spirit Bow）、追踪/非追踪弹伤害加成。
+        """
         from src.entities import bullet as bm
         power_level = self.power // 100  # 0-4
-        weapon_damage = self._weapon_damage()
+        eff = self.item_effects
+        spirit_active = self.spirit_bow_timer > 0
 
-        # 主射击：单线 -> 两线 -> 三线
+        # 主射击：单线 -> 两线 -> 三线（Loving 减少1条固定弹）
         px = self.player.x
         py = self.player.y - 8
-        # 侧翼弹道向外倾斜，两弹道夹角 4.5 度（单侧 2.25 度）
-        tilt_vx = 0.47
+        lines = max(1, min(3, power_level + 1 + int(eff["fixed_bullet_add"])))
+        # 侧翼弹道向外倾斜（Terminator 修改夹角）
+        if eff["terminator"]:
+            per_side_deg = 4.5 if not self.player.focused else 0.5
+        else:
+            per_side_deg = 2.25
+        tilt_vx = math.tan(math.radians(per_side_deg)) * 12.0
         tilt_vy = -11.96
-        if power_level >= 2:
+        if lines >= 3:
             # 三线：左倾、直射、右倾
             b = bm.create_player_bullet(px - 10, py, -tilt_vx, tilt_vy)
-            b.damage = weapon_damage
+            b.damage = self._bullet_damage(homing=spirit_active)
+            b.homing = spirit_active
             self.bullet_manager.add_player_bullet(b)
             b = bm.create_player_bullet(px, py)
-            b.damage = weapon_damage
+            b.damage = self._bullet_damage(homing=spirit_active)
+            b.homing = spirit_active
             self.bullet_manager.add_player_bullet(b)
             b = bm.create_player_bullet(px + 10, py, tilt_vx, tilt_vy)
-            b.damage = weapon_damage
+            b.damage = self._bullet_damage(homing=spirit_active)
+            b.homing = spirit_active
             self.bullet_manager.add_player_bullet(b)
-        elif power_level >= 1:
+        elif lines == 2:
             # 两线：左右向外倾斜
             b = bm.create_player_bullet(px - 10, py, -tilt_vx, tilt_vy)
-            b.damage = weapon_damage
+            b.damage = self._bullet_damage(homing=spirit_active)
+            b.homing = spirit_active
             self.bullet_manager.add_player_bullet(b)
             b = bm.create_player_bullet(px + 10, py, tilt_vx, tilt_vy)
-            b.damage = weapon_damage
+            b.damage = self._bullet_damage(homing=spirit_active)
+            b.homing = spirit_active
             self.bullet_manager.add_player_bullet(b)
         else:
             # 单线：中间一条
             b = bm.create_player_bullet(px, py)
-            b.damage = weapon_damage
+            b.damage = self._bullet_damage(homing=spirit_active)
+            b.homing = spirit_active
             self.bullet_manager.add_player_bullet(b)
 
-        # 追踪弹：始终只有 1 列；power>=15 开始产生，射速为正常一半；
+        # 追踪弹：power>=15 开始产生，射速为正常一半（Loving 增加1条追踪弹）；
         # 伤害随 power 从正常 1/3 提升到 2/3；power 满（400）时射速恢复正常（每帧发射）
+        track_count = 1 + int(eff["tracking_bullet_add"])
         if self.power >= 15:
             full_power = self.power >= self.player.max_power
             if full_power or not self.homing_shot_skip:
-                base = weapon_damage
+                base = self._bullet_damage(homing=True)
                 ratio = 1 / 3 + (1 / 3) * (self.power - 15) / (self.player.max_power - 15)
-                hb = bm.create_player_bullet(px, py - 4, homing=True)
-                hb.damage = round(base * ratio, 1)
-                self.bullet_manager.add_player_bullet(hb)
+                offsets = (-4, 4) if track_count >= 2 else (0,)
+                for off in offsets:
+                    hb = bm.create_player_bullet(px + off, py - 4, homing=True)
+                    hb.damage = round(base * ratio, 1)
+                    self.bullet_manager.add_player_bullet(hb)
             if not full_power:
                 self.homing_shot_skip = not self.homing_shot_skip
+
+    def _bullet_damage(self, homing):
+        """单发子弹伤害（含追踪/非追踪弹伤害加成）。"""
+        base = self._weapon_damage()
+        eff = self.item_effects
+        if homing:
+            mult = 1.0 + eff["tracking_damage_pct"] / 100.0
+            if not self.player.focused:
+                mult += eff["tracking_high_speed_damage_pct"] / 100.0
+        else:
+            mult = 1.0 + eff["non_tracking_damage_pct"] / 100.0
+        return base * mult
 
     def _update_homing_bullets(self):
         """追踪弹自动瞄准最近的敌人"""
@@ -1019,39 +1392,69 @@ class PlayingState(GameState):
         self.equipment_stats = self.item_inventory.get_equipped_stats()
 
     def _gain_item(self, item):
-        """将掉落物品计入背包；SkyBlock Coin 直接转换为金币。"""
+        """将掉落物品计入背包；SkyBlock Coin 直接转换为金币（+1M，受Coin掉落加成）。"""
         if item.id == "skyblock_coin":
-            self.item_inventory.add_coins(100)
+            base = 1000000
+            amount = int(base * (1.0 + self.item_effects["coin_drop_pct"] / 100.0))
+            self.item_inventory.add_coins(amount)
         else:
             self.item_inventory.add_item(item.id)
         self._save_item_inventory()
 
     def _weapon_damage(self):
-        """当前玩家弹幕基础伤害。
-
-        暂时禁用所有物品词条对战斗的影响（后续重做物品效果时再接入）。
-        """
-
-        return cfg.BULLET_PLAYER_DAMAGE
+        """当前玩家弹幕基础伤害（含伤害%加算与触发性加成）。"""
+        eff = self.item_effects
+        pct = eff["damage_pct"] + self.shadow_damage
+        if self.bad_health_timer > 0:
+            pct += 200.0
+        if self.arack_timer > 0:
+            pct += eff["arack_pct"]
+        return cfg.BULLET_PLAYER_DAMAGE * (1.0 + pct / 100.0)
 
     def _reward_enemy_kill(self, enemy):
-        """敌人被击破后的奖励结算（分数/技能经验/掉落）"""
+        """敌人被击破后的奖励结算（分数/技能经验/掉落/击杀计数）"""
+        if self.practice_info:
+            return
         from src.entities.boss import Boss
         self.score += enemy.score
         self.skill_manager.add_xp("COMBAT", enemy.score // 10)
+        eff = self.item_effects
+        is_boss = isinstance(enemy, Boss)
+
+        # 击杀计数与效果（Maddox Batphone / Baby Yeti Pet / Shadow Assassin / Lapis）
+        self.kill_counter += 1
+        if eff["kill50_bombs"] and self.kill_counter % 50 == 0:
+            self.bombs = min(cfg.PLAYER_MAX_BOMBS, self.bombs + 1)
+            self.game.global_data["bombs"] = self.bombs
+        if eff["kill50_lives"] and self.kill_counter % 50 == 0:
+            self.lives = min(cfg.PLAYER_MAX_LIVES, self.lives + 1)
+            self.game.global_data["lives"] = self.lives
+        if is_boss:
+            self.shadow_damage += eff["kill_boss_damage_pct"]
+            if eff["kill_boss_coins"]:
+                self.item_inventory.add_coins(int(eff["kill_boss_coins"]))
+        else:
+            self.shadow_damage += eff["kill_small_damage_pct"]
+            if eff["kill_small_coins"]:
+                self.item_inventory.add_coins(int(eff["kill_small_coins"]))
+
+        chance_mult = eff["drop_rate_mult"]
+        epic_mult = eff["epic_drop_rate_mult"]
         dropped_ids = set()
         drops = []
         for key in self._enemy_drop_keys(enemy):
-            for item in self.item_manager.roll_drops(key):
+            for item in self.item_manager.roll_drops(key, chance_mult, epic_mult):
                 if item.id not in dropped_ids:
                     dropped_ids.add(item.id)
                     drops.append(item)
-        if isinstance(enemy, Boss):
-            # 关底 Boss 被真正击破时登记 4 选 1 奖励池（防复活/重复触发）
+        if is_boss:
+            # 关底最终 Boss 被真正击破时登记 3 选 1 奖励池（防复活/重复触发；
+            # 五面 Boss Rush 只有 Necron 计入，避免中途弹出奖励/误掷最终掉落）
             if (enemy is self.stage.boss and self.pending_boss_reward_pool is None
-                    and self.stage.stage_num in BOSS_REWARD_POOLS):
+                    and self.stage.stage_num in BOSS_REWARD_POOLS
+                    and self._is_final_stage_boss(enemy)):
                 self.pending_boss_reward_pool = BOSS_REWARD_POOLS[self.stage.stage_num]
-            for item in self.item_manager.roll_drops("Boss"):
+            for item in self.item_manager.roll_drops("Boss", chance_mult, epic_mult):
                 if item.id not in dropped_ids:
                     dropped_ids.add(item.id)
                     drops.append(item)
@@ -1061,6 +1464,18 @@ class PlayingState(GameState):
         self._spawn_power_drops(enemy)
         self._spawn_bonus_drops(enemy)
 
+    def _is_final_stage_boss(self, boss):
+        """该 Boss 是否为关底最终 Boss（只有它被击破才发放三选一奖励）。
+
+        五面是连续 Boss Rush：每个 Boss 都会短暂成为 stage.boss，
+        只有最后一个 Necron 计入；其余关卡 stage.boss 即最终 Boss。
+        """
+        stage = self.stage
+        bid = getattr(stage, "current_boss_id", None)
+        if stage.stage_num == 5 and bid:
+            return bid == "necron"
+        return boss is stage.boss
+
     def _register_boss_reward(self):
         """兜底登记关底 Boss 的 4 选 1 奖励。
 
@@ -1068,18 +1483,24 @@ class PlayingState(GameState):
         这里只处理 Last Spell 超时 / Miss 强退等未经过 _reward_enemy_kill 的死亡路径，
         并顺带补发该 Boss 专属掉落表与 Boss 通用掉落的掉落。
         """
+        if self.practice_info:
+            return
         if self.pending_boss_reward_pool is not None:
             return
         boss = getattr(self.stage, "boss", None)
         if boss is None or boss.alive:
+            return
+        if not self._is_final_stage_boss(boss):
             return
         stage_num = self.stage.stage_num
         if stage_num not in BOSS_REWARD_POOLS:
             return
         self.pending_boss_reward_pool = BOSS_REWARD_POOLS[stage_num]
         granted = set()
+        chance_mult = self.item_effects["drop_rate_mult"]
+        epic_mult = self.item_effects["epic_drop_rate_mult"]
         for key in (f"stage{stage_num}_final_boss", "Boss"):
-            for item in self.item_manager.roll_drops(key):
+            for item in self.item_manager.roll_drops(key, chance_mult, epic_mult):
                 if item.id in granted:
                     continue
                 granted.add(item.id)
@@ -1148,8 +1569,10 @@ class PlayingState(GameState):
             # Roll drop tables for this enemy, de-duplicated per enemy exactly
             # like _reward_enemy_kill does.
             rolled = set()
+            chance_mult = self.item_effects["drop_rate_mult"]
+            epic_mult = self.item_effects["epic_drop_rate_mult"]
             for key in self._enemy_drop_keys(enemy):
-                for item in self.item_manager.roll_drops(key):
+                for item in self.item_manager.roll_drops(key, chance_mult, epic_mult):
                     if item.id in rolled:
                         continue
                     rolled.add(item.id)
@@ -1184,21 +1607,29 @@ class PlayingState(GameState):
 
     def _enemy_drop_keys(self, enemy):
         """推导掉落表 key：
-        优先敌人实例上的 drop_group；其次按身份（关底/道中Boss/小怪）推
-        stage{N}_xxx；最后回退到类型名与基类名，保证子类小怪也能吃到掉落。"""
+        - 敌人实例配置 drop_group 时按该分组掷（五面按 Boss 身份分组）；
+        - 否则按身份推 stage{N}_final_boss / midboss / minion；
+        - 所有敌人额外掷 stage{N}_any（该面任意敌人通用表）；
+        - 最后回退到类型名与基类名，保证子类小怪也能吃到掉落。"""
         from src.entities.boss import Boss
         keys = []
+        stage_num = self.stage.stage_num
         group = getattr(enemy, "drop_group", None)
         if group:
-            keys.append(group)
-        stage_num = self.stage.stage_num
-        if isinstance(enemy, Boss):
+            groups = group if isinstance(group, (list, tuple)) else [group]
+            for g in groups:
+                if g and g not in keys:
+                    keys.append(g)
+        elif isinstance(enemy, Boss):
             if enemy is self.stage.boss:
                 keys.append(f"stage{stage_num}_final_boss")
             elif enemy is self.stage.mid_boss:
                 keys.append(f"stage{stage_num}_midboss")
         else:
             keys.append(f"stage{stage_num}_minion")
+        keys.append(f"stage{stage_num}_any")
+        if isinstance(enemy, Boss) and enemy is self.stage.mid_boss:
+            keys.append("MidBoss")
         keys.append(type(enemy).__name__)
         for klass in type(enemy).__mro__[1:]:
             keys.append(klass.__name__)
@@ -1211,6 +1642,9 @@ class PlayingState(GameState):
         else:
             cost = 1
         self.bombs -= cost
+        # Hyperion：使用决死Bomb并消耗2B时回复1B
+        if deathbomb and cost == 2 and int(self.item_effects["deathbomb_refund"]) > 0:
+            self.bombs = min(cfg.PLAYER_MAX_BOMBS, self.bombs + 1)
         self.game.global_data["bombs"] = self.bombs
         self.bomb_active = True
         self.bomb_timer = 0
@@ -1219,6 +1653,7 @@ class PlayingState(GameState):
         # Bomb 本身也是符卡：开场立即清屏，展开自机符卡而不进入Boss符卡阶段。
         self.bullet_manager.cancel_all_enemy_bullets()
         self.player.spell_invincible = True
+        bomb_mult = 1.0 + self.item_effects["bomb_damage_pct"] / 100.0
         self.player_spell = PlayerSpellCard(
             self.player,
             self.bullet_manager,
@@ -1226,6 +1661,7 @@ class PlayingState(GameState):
             self.game,
             on_enemy_killed=self._reward_enemy_kill,
             deathbomb=deathbomb,
+            damage_mult=bomb_mult,
         )
 
     def _check_collisions(self):
@@ -1238,10 +1674,61 @@ class PlayingState(GameState):
                     continue
                 if enemy.collides_with_bullet(pb.x, pb.y, pb.collision_radius):
                     pb.alive = False
-                    killed = enemy.take_damage(pb.damage)
+                    # 目标类型伤害加成：小怪（Undead Sword）/ 道中Boss（Catacombs）/
+                    # 凋零（Wither Relic）
+                    dmg = pb.damage * self._target_damage_mult(enemy)
+                    # 命中来源标记：焚符等“持续输出”类机制据此判定压制力，
+                    # 追踪弹自动命中不应能无脑维持压制。
+                    if isinstance(enemy, Boss):
+                        killed = enemy.take_damage(
+                            dmg, source="homing" if pb.homing else "main")
+                    else:
+                        killed = enemy.take_damage(dmg)
                     if killed:
                         self._reward_enemy_kill(enemy)
                     break
+
+        # 召唤小怪弹幕：可以抵消敌弹
+        for pb in self.bullet_manager.player_bullets[:]:
+            if not getattr(pb, "cancels_bullets", False) or not pb.alive:
+                continue
+            for eb in self.bullet_manager.enemy_bullets[:]:
+                if not eb.alive or eb.cancel_timer > 0:
+                    continue
+                if circle_collision(pb.x, pb.y, max(4.0, pb.collision_radius),
+                                    eb.x, eb.y, eb.collision_radius):
+                    eb.start_cancel()
+                    pb.alive = False
+                    break
+
+        # 凋零护盾：碰到敌弹将其抵消并失去该护盾
+        if self.wither_shields:
+            for shield in self.wither_shields[:]:
+                if not shield.alive:
+                    continue
+                for eb in self.bullet_manager.enemy_bullets[:]:
+                    if not eb.alive or eb.cancel_timer > 0:
+                        continue
+                    if circle_collision(shield.x, shield.y, shield.size + 2,
+                                        eb.x, eb.y, eb.collision_radius):
+                        eb.start_cancel()
+                        shield.alive = False
+                        break
+            self.wither_shields = [s for s in self.wither_shields if s.alive]
+
+        # Bonzo 气球：碰到敌弹爆炸（清掉爆炸范围内的敌弹）
+        if self.bonzo_balloons:
+            for bal in self.bonzo_balloons[:]:
+                if not bal.alive:
+                    continue
+                for eb in self.bullet_manager.enemy_bullets[:]:
+                    if not eb.alive or eb.cancel_timer > 0:
+                        continue
+                    if circle_collision(bal.x, bal.y, bal.radius,
+                                        eb.x, eb.y, eb.collision_radius):
+                        bal.explode(self.bullet_manager)
+                        break
+            self.bonzo_balloons = [b for b in self.bonzo_balloons if b.alive]
 
         # 可击破大玉（展符缺口玉） vs 玩家弹：击破后爆炸清弹（范围内玩家也受伤）
         for eb in self.bullet_manager.enemy_bullets[:]:
@@ -1287,6 +1774,40 @@ class PlayingState(GameState):
             goldor_t["caught_active"] = False
             self._on_player_hit()
 
+        # 裂符「Dimensional Slash」：被触手拖到 Kaeman 怀中 -> 中弹
+        slash_st = getattr(getattr(self.stage, "boss", None), "kaeman_slash", None)
+        if (slash_st is not None and slash_st.get("grab_hit_active")
+                and self.player.can_be_hit()):
+            slash_st["grab_hit_active"] = False
+            self._on_player_hit()
+
+        # 王符「Atomizing Ray」：旋转扫射光束扫中 -> 中弹
+        atom_st = getattr(getattr(self.stage, "boss", None), "kaeman_atomize", None)
+        if (atom_st is not None and atom_st.get("beam_active")
+                and self.player.can_be_hit()):
+            ax = atom_st.get("bx", 0.0)
+            ay = atom_st.get("by", 0.0)
+            al = atom_st.get("length", 0.0)
+            angles = atom_st.get("angles")
+            if not angles:
+                angles = (atom_st.get("angle", 0.0),)
+            for aa in angles:
+                ex = ax + math.cos(aa) * al
+                ey = ay + math.sin(aa) * al
+                if point_segment_distance(self.player.x, self.player.y,
+                                          ax, ay, ex, ey) <= (atom_st.get("hit_radius", 8.0)
+                                                               + self.player.hitbox_radius):
+                    self._on_player_hit()
+                    break
+
+        # 焚符「Nuclear Frenzy」：核能爆炸领域内即中弹（持续输出才能压制范围）
+        nuke = getattr(getattr(self.stage, "boss", None), "necron_nuclear", None)
+        if (nuke is not None and self.player.can_be_hit()
+                and math.hypot(self.player.x - nuke.get("cx", 0),
+                               self.player.y - nuke.get("cy", 0))
+                <= nuke.get("radius", 0) + self.player.hitbox_radius):
+            self._on_player_hit()
+
         # 擦弹判定
         if self.player.focused:
             for eb in self.bullet_manager.enemy_bullets[:]:
@@ -1327,7 +1848,18 @@ class PlayingState(GameState):
             self._on_player_hit()
 
     def _on_player_hit(self):
-        """玩家中弹：Last Spell直接结算，否则进入决死Bomb窗口。"""
+        """玩家中弹：重甲抵消 / 蜘蛛护符自动决死 / Last Spell直接结算，否则进入决死Bomb窗口。"""
+        eff = self.item_effects
+        # Heavy Armor：概率抵消被弹
+        if eff["hit_cancel_chance"] > 0 and random.random() * 100.0 < eff["hit_cancel_chance"]:
+            return
+        # Spider Artifact：失去残机后10s内再次失机 -> 改为失去1B并放出决死Bomb
+        if eff["spider_artifact"] and self.spider_timer > 0 and self.bombs >= 1:
+            self.spider_timer = 0
+            self.bombs -= 1
+            self.game.global_data["bombs"] = self.bombs
+            self._use_bomb()
+            return
         if (self.stage.boss is not None
                 and self.stage.boss.is_last_spell_active()):
             self._player_die()
@@ -1362,6 +1894,10 @@ class PlayingState(GameState):
 
     def _player_die(self):
         """玩家死亡"""
+        # 练习模式：Miss 即重试当前符卡，不消耗残机、不触发游戏结束
+        if self.practice_info:
+            self._practice_restart()
+            return
         # Last Spell 挑战：Miss 不损残机，直接强制结束（彩蛋性质）
         if (self.stage.boss is not None
                 and self.stage.boss.is_last_spell_active()):
@@ -1369,6 +1905,10 @@ class PlayingState(GameState):
             self.player.hit()
             return
         self.lives -= 1
+        self.lives_lost_this_stage += 1
+        # Arack / Spider Artifact：失去残机后的10秒触发窗口
+        self.arack_timer = int(cfg.FPS * 10)
+        self.spider_timer = int(cfg.FPS * 10)
         self.game.global_data["lives"] = self.lives
         if self.lives <= 0:
             self.game_over = True
@@ -1382,6 +1922,11 @@ class PlayingState(GameState):
                 self.player.reset_position()
             self.bullet_manager.clear_all()
             self.bullet_manager.cancel_all_enemy_bullets()
+            # 裂符「Dimensional Slash」：死亡复活时取消触手拉拽，避免重生后再被拖
+            slash_st = getattr(getattr(self.stage, "boss", None), "kaeman_slash", None)
+            if slash_st is not None:
+                slash_st["tentacle"] = None
+                slash_st["grab_hit_active"] = False
 
     def _restart(self):
         """重新开始"""
@@ -1429,6 +1974,29 @@ class PlayingState(GameState):
         self.power_items.clear()
         self.bonus_items.clear()
         self.homing_shot_skip = False
+
+        # 重置物品效果与 C 技能状态（重开后背包已清空）
+        self.item_effects = aggregate_effects(self.item_inventory, self.stage.stage_num)
+        self.c_skill_id = self.item_inventory.get_c_skill_equipped_id()
+        self.c_uses = {}
+        self.c_skill_message = ""
+        self.c_skill_message_timer = 0
+        self.bad_health_timer = 0
+        self.arack_timer = 0
+        self.spider_timer = 0
+        self.spirit_bow_timer = 0
+        self.end_stone_timer = 0
+        self.precursor_timer = 0
+        self.lives_lost_this_stage = 0
+        self.kill_counter = 0
+        self.shadow_damage = 0.0
+        self.wither_shields = []
+        self.bonzo_balloons = []
+        self.fot_roses = []
+        self.overflux_orbs = []
+        self.summoned_minions = []
+        self.player.hitbox_radius = cfg.PLAYER_HITBOX_RADIUS * self.item_effects["hitbox_scale"]
+        self._apply_stage_start_bonuses()
         self.dialogue = None
         self.boss_music_intro = False
         self.mid_boss_music_started = False
@@ -1440,6 +2008,421 @@ class PlayingState(GameState):
         self._show_music_name(self.stage.music_name)
         # 重开后同样显示关卡标题
         self._show_stage_title(self.stage.title_path)
+
+    # ================= C 技能与物品被动效果 =================
+
+    def _set_c_message(self, text, frames=80):
+        self.c_skill_message = text
+        self.c_skill_message_timer = frames
+
+    def _apply_stage_start_bonuses(self):
+        """关卡开始时应用 Goldor's Helmet / Storm's Leggings 等效果并重置本关计数。"""
+        eff = self.item_effects
+        if int(eff["start_lives"]) > 0:
+            self.lives = min(cfg.PLAYER_MAX_LIVES, self.lives + int(eff["start_lives"]))
+        if int(eff["start_bombs"]) > 0:
+            self.bombs = min(cfg.PLAYER_MAX_BOMBS, self.bombs + int(eff["start_bombs"]))
+        self.game.global_data["lives"] = self.lives
+        self.game.global_data["bombs"] = self.bombs
+        self.lives_lost_this_stage = 0
+        self.kill_counter = 0
+        self.shadow_damage = 0.0
+        self.c_uses = {}
+        if self.c_skill_id:
+            self.c_uses[self.c_skill_id] = 0
+        self.wither_shields = []
+        self.bonzo_balloons = []
+        self.fot_roses = []
+        self.overflux_orbs = []
+        self.summoned_minions = []
+        self.spirit_bow_timer = 0
+        self.end_stone_timer = 0
+        self.precursor_timer = 0
+
+    def _enemy_bullet_near_graze(self):
+        """是否有敌弹位于擦弹范围内（Tarantula Pet 加速判断）。"""
+        px, py = self.player.x, self.player.y
+        r = self.player.graze_radius + 8
+        for b in self.bullet_manager.enemy_bullets:
+            if not b.alive or b.cancel_timer > 0 or b.harmless:
+                continue
+            if (b.x - px) ** 2 + (b.y - py) ** 2 <= r * r:
+                return True
+        return False
+
+    def _apply_speed_effects(self):
+        """根据装备效果修正玩家移动速度（在 handle_input 之后调用）。"""
+        eff = self.item_effects
+        mult = 1.0 + eff["speed_pct"] / 100.0
+        if not self.player.focused:
+            mult += eff["high_speed_pct"] / 100.0
+        if eff["graze_speed_pct"] > 0 and self._enemy_bullet_near_graze():
+            mult += eff["graze_speed_pct"] / 100.0
+        self.player.speed = max(0.15, self.player.speed * mult)
+
+    def _apply_graze_slow(self):
+        """低速状态擦弹范围内敌弹减速（Scarf's Studies）；离开范围后恢复原速。"""
+        eff = self.item_effects
+        slow = 1.0 - eff["graze_slow_pct"] / 100.0
+        px, py = self.player.x, self.player.y
+        r = self.player.graze_radius
+        for b in self.bullet_manager.enemy_bullets:
+            if not b.alive or b.cancel_timer > 0 or b.harmless:
+                continue
+            base = getattr(b, "base_speed", 0.0)
+            if base <= 0:
+                continue
+            in_range = self.player.focused and (b.x - px) ** 2 + (b.y - py) ** 2 <= r * r
+            cur = math.hypot(b.vx, b.vy)
+            if cur <= 0.01:
+                continue
+            if in_range:
+                target = base * slow
+                if cur > target:
+                    k = target / cur
+                    b.vx *= k
+                    b.vy *= k
+            else:
+                if cur < base * 0.99:
+                    k = min(1.0, (base / cur) ** 0.12)
+                    b.vx *= k
+                    b.vy *= k
+
+    # ---- C 技能 ----
+
+    def _use_c_skill(self):
+        """按 C 释放当前装备的 C 技能。"""
+        item_id = self.c_skill_id
+        if not item_id:
+            self._set_c_message("未装备 C 技能物品")
+            return
+        info = C_SKILLS.get(item_id)
+        if not info:
+            return
+        used = self.c_uses.get(item_id, 0)
+        if used >= info["per_stage"]:
+            self._set_c_message(f"C技能「{info['name']}」：本面已用完（{info['per_stage']}次）")
+            return
+        handler = getattr(self, f"_c_{item_id}", None)
+        if handler is None:
+            return
+        if not handler():
+            return
+        self.c_uses[item_id] = used + 1
+        remain = info["per_stage"] - used - 1
+        self._set_c_message(f"C技能「{info['name']}」已释放（本面剩余{remain}次）")
+
+    def _c_sword_of_bad_health(self):
+        """消耗1残机，10秒内友方伤害+200%。"""
+        if self.lives <= 1:
+            self._set_c_message("残机不足，无法使用嗜血爆发")
+            return False
+        self.lives -= 1
+        self.lives_lost_this_stage += 1
+        self.game.global_data["lives"] = self.lives
+        self.bad_health_timer = int(cfg.FPS * 10)
+        return True
+
+    def _c_bonzos_staff(self):
+        """放出3个随机方向有后坐力的气球。"""
+        from src.systems.c_skill_entities import BonzoBalloon
+        for _ in range(3):
+            self.bonzo_balloons.append(BonzoBalloon(self.player.x, self.player.y - 10))
+        for bal in self.bonzo_balloons[-3:]:
+            self.player.x = max(cfg.PLAY_AREA_LEFT, min(cfg.PLAY_AREA_RIGHT,
+                                                        self.player.x - bal.vx * 6))
+            self.player.y = max(cfg.PLAY_AREA_TOP, min(cfg.PLAY_AREA_BOTTOM,
+                                                        self.player.y - bal.vy * 6))
+        return True
+
+    def _c_golem_sword(self):
+        """钢铁之击：炸掉擦弹范围内所有弹幕。"""
+        px, py = self.player.x, self.player.y
+        r = self.player.graze_radius
+        for b in self.bullet_manager.enemy_bullets[:]:
+            if not b.alive or b.cancel_timer > 0:
+                continue
+            if circle_collision(px, py, r, b.x, b.y, b.collision_radius):
+                b.start_cancel()
+        return True
+
+    def _c_aspect_of_the_end(self):
+        self._teleport_player()
+        return True
+
+    def _c_enderman_pet_epic(self):
+        self._teleport_player()
+        return True
+
+    def _c_tarantula_boots(self):
+        """蛛影突袭：清除当前移动方向上最近的1个弹幕并快速移动至其位置。"""
+        dx, dy = self.player.vx, self.player.vy
+        if dx == 0 and dy == 0:
+            dy = -1.0
+        length = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / length, dy / length
+        px, py = self.player.x, self.player.y
+        best = None
+        best_dist2 = None
+        for b in self.bullet_manager.enemy_bullets:
+            if not b.alive or b.cancel_timer > 0 or b.harmless:
+                continue
+            rx, ry = b.x - px, b.y - py
+            if rx * ux + ry * uy <= 0:
+                continue
+            d2 = rx * rx + ry * ry
+            if best_dist2 is None or d2 < best_dist2:
+                best_dist2 = d2
+                best = b
+        if best is None:
+            self._set_c_message("当前移动方向前方没有可清除的弹幕")
+            return False
+        best.start_cancel()
+        self.player.x = max(cfg.PLAY_AREA_LEFT, min(cfg.PLAY_AREA_RIGHT, best.x))
+        self.player.y = max(cfg.PLAY_AREA_TOP, min(cfg.PLAY_AREA_BOTTOM, best.y))
+        return True
+
+    def _teleport_player(self):
+        """向当前移动方向瞬移一段距离。"""
+        dx, dy = self.player.vx, self.player.vy
+        if dx == 0 and dy == 0:
+            dy = -1.0
+        length = math.hypot(dx, dy) or 1.0
+        dist = 150
+        self.player.x = max(cfg.PLAY_AREA_LEFT, min(cfg.PLAY_AREA_RIGHT,
+                                                    self.player.x + dx / length * dist))
+        self.player.y = max(cfg.PLAY_AREA_TOP, min(cfg.PLAY_AREA_BOTTOM,
+                                                    self.player.y + dy / length * dist))
+
+    def _c_end_stone_sword(self):
+        """2秒内无法移动且无法受伤。"""
+        self.end_stone_timer = int(cfg.FPS * 2)
+        self.player.invincible = max(self.player.invincible, int(cfg.FPS * 2) + 1)
+        return True
+
+    def _c_wither_cloak_sword(self):
+        """召唤6个护盾围绕自机，持续10秒。"""
+        from src.systems.c_skill_entities import WitherShield
+        if self.wither_shields:
+            self._set_c_message("凋零护盾已在场")
+            return False
+        self.wither_shields = [WitherShield(self.player, i, 6) for i in range(6)]
+        return True
+
+    def _c_spirit_bow(self):
+        """10秒内所有自机子弹变为追踪弹。"""
+        self.spirit_bow_timer = int(cfg.FPS * 10)
+        for pb in self.bullet_manager.player_bullets:
+            pb.homing = True
+        return True
+
+    def _c_aspect_of_the_dragons(self):
+        """龙怒：炸掉上方弹幕并对BOSS造成4800伤害。"""
+        limit_y = self.player.y + 30
+        for b in self.bullet_manager.enemy_bullets[:]:
+            if not b.alive or b.cancel_timer > 0:
+                continue
+            if b.y < limit_y:
+                b.start_cancel()
+        boss = self.stage.boss
+        if boss is not None and boss.alive and getattr(boss, "combat_enabled", True):
+            self._apply_boss_damage(boss, 4800)
+        return True
+
+    def _c_flower_of_truth(self):
+        """放出玫瑰：追踪消灭最近3个弹幕后飞向BOSS造成1200伤害。"""
+        from src.systems.c_skill_entities import FlowerRose
+        if self.fot_roses:
+            self._set_c_message("玫瑰已在场")
+            return False
+        self.fot_roses.append(FlowerRose(self.player.x, self.player.y - 12))
+        return True
+
+    def _c_giants_sword(self):
+        """清除全场弹幕并对BOSS造成当前阶段50%的伤害。"""
+        self.bullet_manager.cancel_all_enemy_bullets()
+        boss = self.stage.boss
+        if boss is not None and boss.alive and getattr(boss, "combat_enabled", True):
+            self._apply_boss_damage(boss, boss.hp * 0.5)
+        return True
+
+    def _c_precursor_eye(self):
+        """向上射出1道持续3秒的红色激光（帧伤20）。"""
+        self.precursor_timer = int(cfg.FPS * 3)
+        return True
+
+    def _c_overflux_power_orb(self):
+        """Boss战中召唤Orb，持续处于范围内10秒获得1残机。"""
+        from src.systems.c_skill_entities import OverfluxOrb
+        boss = self.stage.boss
+        if boss is None or not boss.alive or not getattr(boss, "combat_enabled", True):
+            self._set_c_message("能量核心只能在Boss战中使用")
+            return False
+        if self.overflux_orbs:
+            self._set_c_message("能量核心已在场")
+            return False
+        self.overflux_orbs.append(OverfluxOrb(self.player.x, self.player.y))
+        return True
+
+    def _c_summoning_ring(self):
+        """随机召唤2只归属于你的小怪。"""
+        from src.systems.c_skill_entities import SummonedMinion
+        for off in (-22, 22):
+            self.summoned_minions.append(SummonedMinion(self.player.x + off, self.player.y + 8))
+        return True
+
+    def _apply_boss_damage(self, boss, damage):
+        """对 Boss 造成 C 技能伤害；若击破则补发击杀奖励。"""
+        if boss is None or not boss.alive:
+            return False
+        killed = boss.take_damage(damage, source="main")
+        if killed:
+            self._reward_enemy_kill(boss)
+        return killed
+
+    # ---- 目标类型伤害倍率 ----
+
+    def _target_damage_mult(self, enemy):
+        from src.entities.boss import Boss
+        eff = self.item_effects
+        mult = 1.0
+        if isinstance(enemy, Boss):
+            if self._is_midboss_target(enemy):
+                mult *= 1.0 + eff["midboss_damage_pct"] / 100.0
+            if self._is_wither_target(enemy):
+                mult *= 1.0 + eff["wither_damage_pct"] / 100.0
+        else:
+            mult *= 1.0 + eff["minion_damage_pct"] / 100.0
+        return mult
+
+    def _is_midboss_target(self, enemy):
+        if enemy is self.stage.mid_boss:
+            return True
+        group = getattr(enemy, "drop_group", None)
+        if group:
+            groups = group if isinstance(group, (list, tuple)) else [group]
+            return "MidBoss" in groups
+        return False
+
+    def _is_wither_target(self, enemy):
+        return getattr(enemy, "is_wither", False) or getattr(enemy, "name", "") in WITHER_BOSS_NAMES
+
+    # ---- 每帧 C 技能更新 ----
+
+    def _update_c_skills(self):
+        eff = self.item_effects
+        if self.bad_health_timer > 0:
+            self.bad_health_timer -= 1
+        if self.arack_timer > 0:
+            self.arack_timer -= 1
+        if self.spider_timer > 0:
+            self.spider_timer -= 1
+        if self.spirit_bow_timer > 0:
+            self.spirit_bow_timer -= 1
+        if self.precursor_timer > 0:
+            self.precursor_timer -= 1
+            self._precursor_laser_damage()
+        if self.c_skill_message_timer > 0:
+            self.c_skill_message_timer -= 1
+            if self.c_skill_message_timer <= 0:
+                self.c_skill_message = ""
+
+        for shield in self.wither_shields[:]:
+            shield.update(self.player)
+        self.wither_shields = [s for s in self.wither_shields if s.alive]
+
+        for bal in self.bonzo_balloons[:]:
+            bal.update()
+        self.bonzo_balloons = [b for b in self.bonzo_balloons if b.alive]
+
+        for rose in self.fot_roses[:]:
+            rose.update(self.bullet_manager, self.stage.boss)
+        self.fot_roses = [r for r in self.fot_roses if r.alive]
+
+        for orb in self.overflux_orbs[:]:
+            gained = orb.update(self.player)
+            if gained:
+                self.lives = min(cfg.PLAYER_MAX_LIVES, self.lives + 1)
+                self.game.global_data["lives"] = self.lives
+                self._set_c_message("能量核心充能完成：+1残机")
+                orb.alive = False
+        self.overflux_orbs = [o for o in self.overflux_orbs if o.alive]
+
+        for m in self.summoned_minions[:]:
+            m.update(self.bullet_manager, self.stage.boss)
+        self.summoned_minions = [m for m in self.summoned_minions if m.alive]
+
+        # 擦弹减速（Scarf's Studies）
+        if eff["graze_slow_pct"] > 0:
+            self._apply_graze_slow()
+
+    def _precursor_laser_damage(self):
+        """先驱激光每帧对光束范围内的 Boss 造成20点伤害。"""
+        boss = self.stage.boss
+        if boss is None or not boss.alive or not getattr(boss, "combat_enabled", True):
+            return
+        if abs(boss.x - self.player.x) <= 22 and boss.y < self.player.y:
+            self._apply_boss_damage(boss, 20)
+
+    def _draw_precursor_laser(self, screen, ox=0, oy=0):
+        if self.precursor_timer <= 0:
+            return
+        px = int(self.player.x + ox)
+        py = int(self.player.y + oy)
+        top = int(oy)
+        height = max(1, py - top)
+        surf = pygame.Surface((40, height), pygame.SRCALPHA)
+        surf.fill((255, 40, 40, 90))
+        screen.blit(surf, (px - 20, top))
+        pygame.draw.line(screen, (255, 120, 120), (px, top), (px, py), 2)
+        pygame.draw.line(screen, (255, 255, 255), (px, py), (px, py - 12), 2)
+
+    def _draw_c_skill_entities(self, screen, ox=0, oy=0):
+        for shield in self.wither_shields:
+            shield.draw(screen, ox, oy)
+        for bal in self.bonzo_balloons:
+            bal.draw(screen, ox, oy)
+        for rose in self.fot_roses:
+            rose.draw(screen, ox, oy)
+        for orb in self.overflux_orbs:
+            orb.draw(screen, ox, oy)
+        for m in self.summoned_minions:
+            m.draw(screen, ox, oy)
+        self._draw_precursor_laser(screen, ox, oy)
+
+    def _draw_c_skill_indicator(self, screen):
+        """战斗区左上角显示当前 C 技能与剩余次数。"""
+        if not self.c_skill_id:
+            return
+        info = C_SKILLS.get(self.c_skill_id)
+        if not info:
+            return
+        used = self.c_uses.get(self.c_skill_id, 0)
+        remain = max(0, info["per_stage"] - used)
+        x = self.offset_x + 10
+        y = self.offset_y + 10
+        text = self.game.font_small.render(
+            f"C：{info['name']}（本面{remain}/{info['per_stage']}）", True, cfg.COLOR_YELLOW)
+        band = pygame.Surface((text.get_width() + 12, text.get_height() + 6), pygame.SRCALPHA)
+        band.fill((0, 0, 0, 120))
+        screen.blit(band, (x - 6, y - 3))
+        screen.blit(text, (x, y))
+        if self.c_skill_message:
+            msg = self.game.font_small.render(self.c_skill_message, True, cfg.COLOR_GREEN)
+            band2 = pygame.Surface((msg.get_width() + 12, msg.get_height() + 6), pygame.SRCALPHA)
+            band2.fill((0, 0, 0, 120))
+            screen.blit(band2, (x - 6, y + text.get_height() + 2))
+            screen.blit(msg, (x, y + text.get_height() + 5))
+
+    def _roll_terracotta_drops(self, soldier):
+        """Sadan 兵符「Terracotta Army」的兵马俑被击破时的掉落。"""
+        if self.practice_info:
+            return
+        chance_mult = self.item_effects["drop_rate_mult"]
+        epic_mult = self.item_effects["epic_drop_rate_mult"]
+        for item in self.item_manager.roll_drops("stage4_terracotta", chance_mult, epic_mult):
+            self.item_popups.append({"item": item, "timer": 0})
+            self._gain_item(item)
 
     def draw(self, screen):
         ox, oy = self.offset_x, self.offset_y
@@ -1473,6 +2456,9 @@ class PlayingState(GameState):
         # Hitbox stays above bullet layers
         self.player.draw_hitbox(screen, ox, oy)
 
+        # C 技能实体（护盾/气球/玫瑰/Orb/召唤小怪/激光）
+        self._draw_c_skill_entities(screen, ox, oy)
+
         # 决死Bomb判定窗口：红色结界快速收缩
         if self.death_window > 0:
             self._draw_death_window(screen, ox, oy)
@@ -1500,6 +2486,9 @@ class PlayingState(GameState):
         self.hud.draw(screen, self.player, self.score, self.lives,
                       self.bombs, self.power, self.graze,
                       stage_name=self.stage.name, boss=active_boss)
+
+        # C 技能指示器（物品名 / 剩余次数 / 提示）
+        self._draw_c_skill_indicator(screen)
 
         # Last Spell 中禁用 Bomb 的提示
         if self.bomb_blocked_timer > 0:
@@ -1536,3 +2525,7 @@ class PlayingState(GameState):
         # 通关
         if self.stage_clear:
             self.hud.draw_stage_clear(screen, self.score, self.stage.name)
+
+        # 练习模式：右上角提示 + 击破结算
+        if self.practice_info:
+            self._draw_practice_overlay(screen)

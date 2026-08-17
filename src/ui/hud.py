@@ -180,6 +180,9 @@ class HUD:
         retry_text = self.font_small.render("Press R to Retry  |  ESC to Menu", True, cfg.COLOR_GRAY)
         screen.blit(retry_text, (cfg.SCREEN_WIDTH // 2 - retry_text.get_width() // 2, 340))
 
+        lost_text = self.font_small.render("本轮获得的装备与金币不会保留", True, cfg.COLOR_GRAY)
+        screen.blit(lost_text, (cfg.SCREEN_WIDTH // 2 - lost_text.get_width() // 2, 375))
+
     def draw_stage_clear(self, screen, score, stage_name):
         """关卡通关（全屏）"""
         overlay = pygame.Surface((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))

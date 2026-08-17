@@ -22,5 +22,8 @@ python_path.txt
 # 用户运行时配置（音量等）
 config.json
 
+# 本地仓库存档（撤离后物资持久化保存）
+warehouse.json
+
 # 工具脚本生成的启动日志
 tools/_boot_*.txt

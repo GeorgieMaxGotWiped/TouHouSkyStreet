@@ -505,6 +505,9 @@ def _sadan_terracotta_check_hits(army, bullet_manager, P, boss):
                 if s["hp"] <= 0:
                     _sadan_terracotta_down(s, bullet_manager, P)
                     boss.take_damage(P["soldier_boss_damage"])
+                    drop_cb = getattr(boss, "terracotta_drop_callback", None)
+                    if drop_cb is not None:
+                        drop_cb(s)
                     if boss.phase != "spell" or not boss.alive:
                         return
                     break
@@ -2379,10 +2382,16 @@ class Stage4_Catacombs(Stage):
         self.background_darkness = 145
 
         self.defeat_dialogue_lines = [
-            ("魔法使 Mage", "巨像崩落，赤陶也重新归于尘土。死灵王的戏码结束了。"),
-            ("Sadan", "NOOOOOOOOO!!! THIS IS IMPOSSIBLE!!"),
-            ("Sadan", "FATHER, FORGIVE ME!!!"),
-            ("魔法使 Mage", "你的亡者军团确实壮观，但还不足以拦住一个来找宝物的魔法使。"),
+            ("Sadan", "看来，我的忠告并没有什么作用。"),
+            ("魔法使 Mage", "所以，地下城深处究竟隐藏着什么？"),
+            ("Sadan", "一个漫长的故事。"),
+            ("魔法使 Mage", "听起来，你并不准备解释。"),
+            ("Sadan", "有些答案，只有亲眼见到才能理解。"),
+            ("魔法使 Mage", "看来，我只能继续前进了。"),
+            ("Sadan", "那么，去吧。"),
+            ("Sadan", "不过，从这里开始，等待你的将不再是守卫者。"),
+            ("魔法使 Mage", "什么意思？"),
+            ("Sadan", "你很快就会知道。"),
         ]
         self.defeat_dialogue_portraits = {
             "魔法使 Mage": cfg.SELF_SPRITE,
@@ -2673,12 +2682,15 @@ class Stage4_Catacombs(Stage):
     def _start_dialogue(self):
         """关底对话：自机 Mage 与 Sadan 战前对峙（自机立绘在左侧）。"""
         self.dialogue_lines = [
-            ("魔法使 Mage", "这里就是地下墓穴的更深层……空气里全是死灵术的臭味。"),
-            ("Sadan", "So you made it all the way here... Now you wish to defy me? Sadan?!"),
-            ("魔法使 Mage", "死灵王 Sadan，对吧？我不是来挑战你，只是来借点宝物。"),
-            ("Sadan", "The audacity! I have been the ruler of these floors for a hundred years!"),
-            ("魔法使 Mage", "那就用弹幕说话吧。你的巨人，还是你的赤陶军，都叫出来吧。"),
-            ("Sadan", "ENOUGH! My giants! Unleashed!"),
+            ("Sadan", "能来到这里，说明你已经击败了前面的那些家伙。"),
+            ("魔法使 Mage", "看来，你知道我为什么会来到这里。"),
+            ("Sadan", "最近的地下城，确实有些不同。"),
+            ("魔法使 Mage", "终于有人愿意承认这一点了。"),
+            ("Sadan", "但我劝你不要继续前进。"),
+            ("魔法使 Mage", "为什么？"),
+            ("Sadan", "因为有些事情，并不值得被重新唤醒。"),
+            ("魔法使 Mage", "那我更应该亲眼确认。"),
+            ("Sadan", "既然如此，就先证明你有继续前进的资格吧。"),
         ]
         self.dialogue_portraits = {
             "魔法使 Mage": cfg.SELF_SPRITE,

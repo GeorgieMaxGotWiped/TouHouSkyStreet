@@ -36,7 +36,8 @@ assert get_stage_class(1).__name__ == "Stage1_SkyblockHub"
 assert get_stage_class(2).__name__ == "Stage2_DragonsNest"
 assert get_stage_class(3) is Stage3_CatacombsF1, "stage3 registered"
 assert get_next_stage_class(2) is Stage3_CatacombsF1, "stage2 -> stage3"
-assert get_next_stage_class(3) is None, "stage3 -> menu"
+from src.stages.stage4 import Stage4_Catacombs
+assert get_next_stage_class(3) is Stage4_Catacombs, "stage3 -> stage4"
 print("[1] registry OK")
 
 # --- 2. 实例化与资源 ---

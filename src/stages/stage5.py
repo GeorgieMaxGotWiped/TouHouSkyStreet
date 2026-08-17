@@ -2515,7 +2515,21 @@ class Stage5_WitherLords(Stage):
             "goldor": self._make_goldor,
             "necron": self._make_necron,
         }[boss_id]
-        return factory()
+        boss = factory()
+        # 掉落表分组：五面前置三连（Professor/Thorn/Livid）为道中Boss，
+        # 四凋零领主为关底Boss；所有五面 Boss 都属于 stage5_boss（任意Boss）。
+        if boss_id == "watcher":
+            boss.drop_group = ["stage5_boss"]
+        elif boss_id in ("professor", "thorn", "livid"):
+            groups = ["stage5_boss", "MidBoss"]
+            if boss_id == "thorn":
+                groups.append("stage5_midboss_thorn")
+            elif boss_id == "livid":
+                groups.append("stage5_midboss_livid")
+            boss.drop_group = groups
+        else:
+            boss.drop_group = ["stage5_boss", "stage5_final_boss"]
+        return boss
 
     def _set_boss_id(self, boss_id):
         self.current_boss_id = boss_id
@@ -3019,7 +3033,7 @@ class Stage5_WitherLords(Stage):
         elif boss_id == "thorn":
             self._start_summon_dialogue("livid")
         elif boss_id == "livid":
-            self._start_maxor_dialogue()
+            self._start_watcher_exit_dialogue()
         elif boss_id == "maxor":
             self._start_wither_battle("storm")
         elif boss_id == "storm":
@@ -3045,11 +3059,14 @@ class Stage5_WitherLords(Stage):
         self._spawn_boss_for_dialogue("watcher")
         self._set_dialogue(
             [
-                ("The Watcher", "So you have come this far... The Catacombs watch you, Mage."),
-                ("魔法使 Mage", "你就是那个一直在幕后注视一切的眼睛？"),
-                ("The Watcher", "I do not fight for victory. I simply open the door to those who are worthy."),
-                ("魔法使 Mage", "那就用弹幕证明我有没有资格吧！"),
-                ("The Watcher", "Very well. Behold the exhibition of the dead!"),
+                ("The Watcher", "终于来了。"),
+                ("魔法使 Mage", "你就是一直在观察我的人？"),
+                ("The Watcher", "从你踏入地下城的那一刻起。"),
+                ("魔法使 Mage", "看来，你知道我要找什么。"),
+                ("The Watcher", "知道。"),
+                ("The Watcher", "但答案不是靠询问得到的。"),
+                ("魔法使 Mage", "所以？"),
+                ("The Watcher", "先证明自己吧。"),
             ],
             {
                 "The Watcher": cfg.STAGE5_WATCHER_BOSS_SPRITE,
@@ -3060,39 +3077,67 @@ class Stage5_WitherLords(Stage):
         self.phase = "dialogue"
         self._ramp_background_speed(FINAL_BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)
 
-    def _summon_lines(self, boss_id, watcher_line, boss_line):
-        boss_name = self.boss_display_names[boss_id]
-        return [
-            ("The Watcher", watcher_line),
-            (boss_name, boss_line),
-            ("The Watcher", "Show them, my collection. Another page of the Catacombs turns."),
-        ]
-
     def _start_summon_dialogue(self, boss_id):
         self._spawn_boss_for_dialogue(boss_id)
+        boss_name = self.boss_display_names[boss_id]
+        boss_portrait = getattr(cfg, "STAGE5_" + boss_id.upper() + "_BOSS_SPRITE")
         if boss_id == "professor":
-            lines = self._summon_lines(
-                "professor",
-                "First, the Professor. His guardians remember every intruder.",
-                "The archives are not open to you, Mage. Leave, or be indexed.")
+            lines = [
+                ("The Watcher", "第一个试炼。"),
+                ("The Watcher", "知识。"),
+                ("The Professor", "哦？"),
+                ("The Professor", "看来，今天来了位新的研究对象。"),
+            ]
         elif boss_id == "thorn":
-            lines = self._summon_lines(
-                "thorn",
-                "Thorn, the briar. Prick yourself on the Catacombs' patience.",
-                "Every path grows thorns for the uninvited.")
+            lines = [
+                ("The Watcher", "第二个试炼。"),
+                ("The Watcher", "力量。"),
+                ("Thorn", "人类。"),
+                ("Thorn", "让我看看你有没有资格继续前进。"),
+            ]
         else:
-            lines = self._summon_lines(
-                "livid",
-                "Livid, the shadow of a failed age. Strike from the dark.",
-                "You will not see the one who ends you.")
+            lines = [
+                ("The Watcher", "最后一个试炼。"),
+                ("魔法使 Mage", "敏捷？"),
+                ("The Watcher", "不。"),
+                ("The Watcher", "欺骗。"),
+                ("Livid", "呵。"),
+                ("Livid", "希望你能找到真正的我。"),
+            ]
+        portraits = {
+            "The Watcher": cfg.STAGE5_WATCHER_BOSS_SPRITE,
+            boss_name: boss_portrait,
+        }
+        if boss_id == "livid":
+            portraits["魔法使 Mage"] = cfg.SELF_SPRITE
+            sides = {"魔法使 Mage": "left", "The Watcher": "right"}
+        else:
+            sides = {"The Watcher": "left"}
         self._set_dialogue(
             lines,
+            portraits,
+            sides,
+            "normal_boss")
+        self.phase = "dialogue"
+        self._ramp_background_speed(FINAL_BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)
+
+    def _start_watcher_exit_dialogue(self):
+        """Livid 被击败后：The Watcher 退场对话。"""
+        self._set_dialogue(
+            [
+                ("The Watcher", "看来，我已经没有继续观察的必要了。"),
+                ("魔法使 Mage", "这就结束了？"),
+                ("The Watcher", "不。"),
+                ("The Watcher", "真正的守门人正在等你。"),
+                ("魔法使 Mage", "Necron？"),
+                ("The Watcher", "去寻找答案吧。"),
+            ],
             {
                 "The Watcher": cfg.STAGE5_WATCHER_BOSS_SPRITE,
-                self.boss_display_names[boss_id]: getattr(cfg, "STAGE5_" + boss_id.upper() + "_BOSS_SPRITE"),
+                "魔法使 Mage": cfg.SELF_SPRITE,
             },
-            {"The Watcher": "left"},
-            "normal_boss")
+            {"魔法使 Mage": "left", "The Watcher": "right"},
+            "watcher_exit")
         self.phase = "dialogue"
         self._ramp_background_speed(FINAL_BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)
 
@@ -3100,10 +3145,18 @@ class Stage5_WitherLords(Stage):
         self._spawn_boss_for_dialogue("maxor")
         self._set_dialogue(
             [
-                ("Maxor", "You tore through the Watcher's toys. Impressive for a stray Mage."),
-                ("魔法使 Mage", "Maxor……Wither Lord 的第一道门。"),
-                ("Maxor", "Then come. The Wither Lords do not hide behind an eye."),
-                ("魔法使 Mage", "我正有此意。把你们四道门一扇扇打穿！"),
+                ("Maxor", "哈哈！"),
+                ("Maxor", "终于来了个有意思的家伙！"),
+                ("魔法使 Mage", "看来，你们已经等我很久了。"),
+                ("Maxor", "不。"),
+                ("Maxor", "是他等你很久了。"),
+                ("魔法使 Mage", "他？"),
+                ("Maxor", "真奇怪。"),
+                ("Maxor", "走到这里，你居然还不知道自己为什么会来到这里。"),
+                ("魔法使 Mage", "我只是来调查地下城的异常。"),
+                ("Maxor", "是吗？"),
+                ("魔法使 Mage", "什么意思？"),
+                ("Maxor", "自己去寻找答案吧。"),
             ],
             {
                 "Maxor": cfg.STAGE5_MAXOR_BOSS_SPRITE,
@@ -3130,11 +3183,17 @@ class Stage5_WitherLords(Stage):
     def _start_final_dialogue(self):
         self._set_dialogue(
             [
-                ("魔法使 Mage", "四道门都被打穿了……Necron，你的凋零风暴到此为止。"),
-                ("Necron", "Impossible... The Wither Lords cannot fall to a single Mage."),
-                ("魔法使 Mage", "我不是来毁灭墓穴的，只是要把天空街的异变查清楚。"),
-                ("Necron", "Then look deeper, Mage. The Catacombs are only the first gate."),
-                ("魔法使 Mage", "第一道门吗……也好，至少现在，这条路已经通了。"),
+                ("Necron", "看来，我们输了。"),
+                ("魔法使 Mage", "所以，一切都是因为 Kaeman？"),
+                ("Necron", "是。"),
+                ("Necron", "也不是。"),
+                ("魔法使 Mage", "什么意思？"),
+                ("Necron", "没有人能够改变已经发生的事情。"),
+                ("魔法使 Mage", "但他还在试图这么做。"),
+                ("Necron", "正因如此，你才会来到这里。"),
+                ("魔法使 Mage", "看来，最后的答案就在前面。"),
+                ("Necron", "去吧。"),
+                ("Necron", "他就在王座之间等着你。"),
             ],
             {
                 "魔法使 Mage": cfg.SELF_SPRITE,
@@ -3155,6 +3214,9 @@ class Stage5_WitherLords(Stage):
         if self.dialogue_is_defeat:
             return
         action = self._pending_dialogue_action
+        if action == "watcher_exit":
+            self._start_maxor_dialogue()
+            return
         if action in ("watcher", "maxor"):
             self._force_current_boss_spell()
         else:

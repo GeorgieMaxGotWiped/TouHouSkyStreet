@@ -5,22 +5,50 @@ import pygame
 from src.engine import settings as cfg
 from src.engine.game import GameState
 from src.systems.item_system import (
+    C_SKILLS,
     EQUIPMENT_SLOTS,
     SLOT_LABELS,
+    SKYBLOCK_ITEMS,
     ITEM_TYPE_LABELS,
+    SHOP_CATEGORY_ORDER,
     REFORGE_STONES,
     REFORGES,
+    build_lore,
     ItemInventory,
 )
+from src.systems.item_effects import aggregate_effects
 from src.systems.item_icons import draw_item_icon
+
+
+# 物品基础属性 -> 中文名（装备页“总属性”显示用）
+_STAT_LABELS = {
+    "health": "生命",
+    "defense": "防御",
+    "intelligence": "智力",
+    "speed": "速度",
+    "health_regen": "生命回复",
+    "crit_damage": "暴击伤害",
+}
+
+# Skyblock 技能 -> 中文名（装备页“技能”显示用）
+_SKILL_LABELS = {
+    "COMBAT": "战斗",
+    "MINING": "采矿",
+    "FARMING": "农业",
+    "FORAGING": "伐木",
+    "FISHING": "钓鱼",
+    "ENCHANTING": "附魔",
+    "ALCHEMY": "炼金",
+}
 
 
 class IntermissionState(GameState):
     """关卡间休整界面"""
 
-    def __init__(self, game, stage_num):
+    def __init__(self, game, stage_num, pre_start=False):
         super().__init__(game)
         self.stage_num = stage_num
+        self.pre_start = pre_start
         self.inventory = ItemInventory.from_global_data(game.global_data)
         self.page_names = ["equipment", "inventory", "shop", "forge"]
         self.page_labels = ["装备", "背包", "商店", "锻造"]
@@ -28,22 +56,28 @@ class IntermissionState(GameState):
         self.selected = 0
         self.choosing_slot = None
         self.choose_selected = 0
+        self.equip_scroll = 0
         self.shop_mode = "buy"
         self.forge_mode = "stone"   # stone：选重铸石 / item：选物品
         self.forge_stone_idx = 0
         self.forge_item_idx = 0
         self.message = ""
         self.message_timer = 0
+        self.confirm_action = None   # None / "exit" / "extract" / "next"
+        self.confirm_choice = 0      # 0=取消 1=确定
 
     def enter(self, game):
         self.game.stop_music()
         self.selected = 0
         self.choosing_slot = None
+        self.equip_scroll = 0
         self.shop_mode = "buy"
         self.forge_mode = "stone"
         self.forge_stone_idx = 0
         self.forge_item_idx = 0
         self.message = ""
+        self.confirm_action = None
+        self.confirm_choice = 0
 
     def exit(self):
         self._save_inventory()
@@ -65,6 +99,7 @@ class IntermissionState(GameState):
         self.selected = 0
         self.choosing_slot = None
         self.choose_selected = 0
+        self.equip_scroll = 0
         self.shop_mode = "buy"
         self.forge_mode = "stone"
         self.forge_stone_idx = 0
@@ -73,7 +108,16 @@ class IntermissionState(GameState):
 
     def _current_shop_entries(self):
         if self.shop_mode == "buy":
-            return self.inventory.get_shop_stock()
+            # 购买页按物品类型分类，组间插入不可选中的表头行
+            entries = []
+            groups = self.inventory.get_shop_stock_grouped()
+            for item_type in SHOP_CATEGORY_ORDER:
+                group = groups.get(item_type)
+                if not group:
+                    continue
+                entries.append({"header": ITEM_TYPE_LABELS.get(item_type, item_type)})
+                entries.extend(group)
+            return entries
         return self.inventory.get_sellable_entries()
 
     def _go_menu(self):
@@ -93,18 +137,68 @@ class IntermissionState(GameState):
         stage.setup_waves()
         self.game.switch_state(PlayingState(self.game, stage))
 
+    def _extract(self):
+        """撤离：将本局全部物资（物品/金币/重铸前缀）存入本地仓库并结束远征。"""
+        self._save_inventory()
+        from src.systems.warehouse import load_warehouse, save_warehouse
+        warehouse = load_warehouse()
+        warehouse.merge_from(self.inventory)
+        save_warehouse(warehouse)
+        if self.pre_start:
+            self.game.notice = "已取消出征：携带的物资已退回仓库"
+        else:
+            self.game.notice = "已撤离：本局物资已存入仓库"
+        from src.ui.menu import MenuState
+        self.game.switch_state(MenuState(self.game))
+
+    def _open_confirm(self, action):
+        """打开确认弹窗：action 为 exit / extract / next 之一"""
+        self.confirm_action = action
+        self.confirm_choice = 0
+
+    def _update_confirm_dialog(self, keys):
+        """确认弹窗交互：↑↓ 选择，Enter 确认，Esc 取消"""
+        if keys.get(pygame.K_ESCAPE, False) or keys.get(pygame.K_x, False):
+            self.confirm_action = None
+            return
+        if (keys.get(pygame.K_UP, False) or keys.get(pygame.K_w, False)
+                or keys.get(pygame.K_LEFT, False) or keys.get(pygame.K_a, False)):
+            self.confirm_choice = (self.confirm_choice - 1) % 2
+        if (keys.get(pygame.K_DOWN, False) or keys.get(pygame.K_s, False)
+                or keys.get(pygame.K_RIGHT, False) or keys.get(pygame.K_d, False)):
+            self.confirm_choice = (self.confirm_choice + 1) % 2
+        if self._confirm_pressed(keys):
+            action = self.confirm_action
+            self.confirm_action = None
+            if self.confirm_choice != 1:
+                return
+            if action == "exit":
+                self._go_menu()
+            elif action == "extract":
+                self._extract()
+            elif action == "next":
+                self._continue_next_stage()
+
     def update(self, dt):
         keys = self.game.keys_just_pressed
+
+        if self.confirm_action is not None:
+            self._update_confirm_dialog(keys)
+            return
 
         if keys.get(pygame.K_ESCAPE, False):
             if self.choosing_slot is not None:
                 self.choosing_slot = None
                 self.choose_selected = 0
                 return
-            self._go_menu()
+            # 出发前休整：Esc 直接放弃出征（物资退回仓库），避免丢失已携带物资
+            self._open_confirm("extract" if self.pre_start else "exit")
             return
         if keys.get(pygame.K_n, False):
-            self._continue_next_stage()
+            self._open_confirm("next")
+            return
+        if self.choosing_slot is None and keys.get(pygame.K_b, False):
+            self._open_confirm("extract")
             return
 
         if self.message_timer > 0:
@@ -152,7 +246,10 @@ class IntermissionState(GameState):
 
             if self._confirm_pressed(keys):
                 entry = entries[self.choose_selected]
-                self.inventory.equip(entry["id"])
+                ok, err = self.inventory.equip(entry["id"])
+                if not ok:
+                    self._set_message(err or "装备失败")
+                    return
                 self._save_inventory()
                 self._set_message(f"已装备：{entry['item'].name}")
                 self.choosing_slot = None
@@ -162,6 +259,13 @@ class IntermissionState(GameState):
         page = self.page_names[self.page_idx]
 
         if page == "equipment":
+            # 右侧属性面板滚动（滚轮 / PageUp / PageDown）
+            wheel_up = bool(self.game.mouse_buttons_just_pressed.get(4))
+            wheel_down = bool(self.game.mouse_buttons_just_pressed.get(5))
+            if keys.get(pygame.K_PAGEUP, False) or wheel_up:
+                self.equip_scroll = max(0, self.equip_scroll - 3)
+            if keys.get(pygame.K_PAGEDOWN, False) or wheel_down:
+                self.equip_scroll += 3
             if keys.get(pygame.K_UP, False) or keys.get(pygame.K_w, False):
                 self.selected = (self.selected - 1) % len(EQUIPMENT_SLOTS)
             if keys.get(pygame.K_DOWN, False) or keys.get(pygame.K_s, False):
@@ -190,7 +294,10 @@ class IntermissionState(GameState):
                         self._save_inventory()
                         self._set_message(f"已卸下：{item.name}")
                     else:
-                        self.inventory.equip(item.id)
+                        ok, err = self.inventory.equip(item.id)
+                        if not ok:
+                            self._set_message(err or "装备失败")
+                            return
                         self._save_inventory()
                         self._set_message(f"已装备：{item.name}")
             elif self._confirm_pressed(keys):
@@ -216,6 +323,8 @@ class IntermissionState(GameState):
 
                 if self._confirm_pressed(keys):
                     entry = entries[self.selected]
+                    if entry.get("header"):
+                        return
                     if self.shop_mode == "buy":
                         price = entry["buy_price"]
                         item = entry["item"]
@@ -320,7 +429,11 @@ class IntermissionState(GameState):
         screen.fill((7, 10, 25))
 
         # 标题与金币
-        title = self.game.font_large.render(f"第 {self.stage_num} 面结束 · 休整", True, cfg.COLOR_YELLOW)
+        if self.pre_start:
+            title_text = "出发前休整 · 穿戴携带物品"
+        else:
+            title_text = f"第 {self.stage_num} 面结束 · 休整"
+        title = self.game.font_large.render(title_text, True, cfg.COLOR_YELLOW)
         screen.blit(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 28))
 
         coins = self.game.font_medium.render(f"金币：{self.inventory.coins}", True, cfg.COLOR_YELLOW)
@@ -353,8 +466,9 @@ class IntermissionState(GameState):
         hints = [
             "Q/E 或 1/2/3/4：切换页面",
             "↑↓：选择   Enter/Z/Space：确认",
-            "N：进入下一关",
-            "Esc：返回主菜单",
+            ("N：出发（进入第 1 面）" if self.pre_start else "N：进入下一关"),
+            ("B：放弃出征（物资退回仓库）" if self.pre_start else "B：撤离（物资存入仓库）"),
+            ("Esc：放弃出征（物资退回仓库）" if self.pre_start else "Esc：返回主菜单（不保存本局）"),
         ]
         hint_y = cfg.SCREEN_HEIGHT - 88
         for line in hints:
@@ -366,19 +480,140 @@ class IntermissionState(GameState):
             msg = self.game.font_medium.render(self.message, True, cfg.COLOR_GREEN)
             screen.blit(msg, ((cfg.SCREEN_WIDTH - msg.get_width()) // 2, cfg.SCREEN_HEIGHT - 120))
 
+        self._draw_confirm_dialog(screen)
+
+    def _draw_confirm_dialog(self, screen):
+        """“是否确定”弹窗：覆盖在休整界面之上"""
+        if self.confirm_action is None:
+            return
+        texts = {
+            "exit": "确定要退出并返回主菜单吗？（本局物资不会保留）",
+            "extract": ("确定要放弃出征吗？携带的物资将退回仓库。"
+                        if self.pre_start else "确定要撤离吗？本局全部物资将存入仓库并结束远征。"),
+            "next": ("确定要出发进入第 1 面吗？"
+                     if self.pre_start else "确定要进入下一关吗？"),
+        }
+        panel = pygame.Rect(230, 240, 500, 240)
+        overlay = pygame.Surface((panel.width, panel.height), pygame.SRCALPHA)
+        overlay.fill((14, 18, 40, 242))
+        screen.blit(overlay, panel.topleft)
+        pygame.draw.rect(screen, cfg.COLOR_YELLOW, panel, 2)
+
+        title = self.game.font_medium.render(
+            texts.get(self.confirm_action, "确定吗？"), True, cfg.COLOR_WHITE)
+        screen.blit(title, (panel.x + 40, panel.y + 46))
+
+        for i, label in enumerate(["取消", "确定"]):
+            selected = i == self.confirm_choice
+            color = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
+            prefix = "> " if selected else "  "
+            surf = self.game.font_medium.render(prefix + label, True, color)
+            screen.blit(surf, (panel.x + 190, panel.y + 110 + i * 46))
+
+        hint = self.game.font_small.render(
+            "↑↓ 选择   Enter 确认   Esc 取消", True, cfg.COLOR_GRAY)
+        screen.blit(hint, (panel.x + 40, panel.y + panel.height - 36))
+
+    # --- 物品详情 / 自机属性 ---
+
+    def _item_detail_lines(self, item):
+        """生成物品功能说明行 [(文本, 颜色)]：基础属性 + lore"""
+        lines = []
+        if item is None:
+            return lines
+        stat_text = item.stat_text()
+        if stat_text:
+            lines.append((stat_text, cfg.COLOR_GRAY))
+        lines.extend((line, cfg.COLOR_WHITE) for line in (item.lore or []))
+        return lines
+
+    def _draw_item_detail_panel(self, screen, item, x=36, y=470, w=None, h=190):
+        """底部物品功能说明面板：名称 / 基础属性 / lore"""
+        if w is None:
+            w = cfg.SCREEN_WIDTH - 72
+        panel = pygame.Rect(x, y, w, h)
+        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, panel)
+        pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, panel, 1)
+        py = panel.y + 12
+        if item is None:
+            self._draw_text(screen, "未选择物品", panel.x + 16, py,
+                            cfg.COLOR_GRAY, self.game.font_small)
+            return
+        name = self.game.font_medium.render(item.name, True, item.rarity_color)
+        screen.blit(name, (panel.x + 16, py))
+        py += 30
+        for text, color in self._item_detail_lines(item):
+            if py > panel.y + panel.height - 10:
+                break
+            py = self._draw_text(screen, text, panel.x + 16, py, color, self.game.font_small)
+
+    def _equipment_panel_lines(self):
+        """装备页右侧面板：总属性 / 被动效果 / 技能 -> [(文本, 颜色)]"""
+        lines = []
+
+        # 总属性（装备基础属性）
+        stats = self.inventory.get_equipped_stats()
+        lines.append(("—— 总属性 ——", cfg.COLOR_WHITE))
+        if not stats:
+            lines.append(("暂无装备属性", cfg.COLOR_GRAY))
+        for key, value in stats.items():
+            label = _STAT_LABELS.get(key, key)
+            lines.append((f"{label}: {value}", cfg.COLOR_GREEN))
+
+        # 被动效果（装备 + 重铸前缀 + 套装；过滤默认值 0 / 1.0）
+        eff = aggregate_effects(self.inventory, self.stage_num)
+        shown_eff = {}
+        for key, value in eff.items():
+            if isinstance(value, bool):
+                if value:
+                    shown_eff[key] = value
+            elif isinstance(value, (int, float)):
+                if value not in (0, 1.0):
+                    shown_eff[key] = value
+            elif value is not None:
+                shown_eff[key] = value
+        effect_lines = build_lore(shown_eff)
+        lines.append(("—— 被动效果 ——", cfg.COLOR_WHITE))
+        if not effect_lines:
+            lines.append(("无", cfg.COLOR_GRAY))
+        lines.extend((text, cfg.COLOR_GREEN) for text in effect_lines)
+
+        # 技能：C技能 + Skyblock 技能等级
+        lines.append(("—— 技能 ——", cfg.COLOR_WHITE))
+        c_id = self.inventory.get_c_skill_equipped_id()
+        if c_id:
+            item = SKYBLOCK_ITEMS.get(c_id)
+            skill = C_SKILLS.get(c_id, {})
+            sname = skill.get("name", "C技能")
+            desc = skill.get("desc", "")
+            per = skill.get("per_stage", 1)
+            shown_name = item.name if item else c_id
+            lines.append((f"C技能·{sname}（{shown_name}）：{desc}（每面{per}次）",
+                          cfg.COLOR_YELLOW))
+        else:
+            lines.append(("未装备C技能物品", cfg.COLOR_GRAY))
+        skills_data = self.game.global_data.get("skills", {}) or {}
+        for sk, data in skills_data.items():
+            level = data.get("level", 0) if isinstance(data, dict) else 0
+            if level > 0:
+                lines.append((f"{_SKILL_LABELS.get(sk, sk)} Lv.{level}", cfg.COLOR_YELLOW))
+        return lines
+
     def _draw_equipment_page(self, screen):
+        # 左侧：装备槽
         y = 150
         left_x = 80
-        right_x = 500
         header = self.game.font_medium.render("装备槽", True, cfg.COLOR_WHITE)
         screen.blit(header, (left_x, y))
         y += 42
 
-        stats = self.inventory.get_equipped_stats()
+        selected_item = None
         for i, slot in enumerate(EQUIPMENT_SLOTS):
             selected = i == self.selected
             row_color = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
             item = self.inventory.get_equipped_item(slot)
+            if selected:
+                selected_item = item
             prefix = "> " if selected else "  "
             label = self.game.font_medium.render(
                 f"{prefix}{SLOT_LABELS[slot]}", True, row_color)
@@ -393,23 +628,36 @@ class IntermissionState(GameState):
                 stat_text = item.stat_text()
                 if stat_text:
                     stat = self.game.font_small.render(stat_text, True, cfg.COLOR_GRAY)
-                    screen.blit(stat, (left_x + 178, y + 28))
+                    screen.blit(stat, (left_x + 178, y + 26))
             else:
                 empty = self.game.font_medium.render("（空）", True, cfg.COLOR_GRAY)
                 screen.blit(empty, (left_x + 178, y))
-            y += 58
+            y += 46
 
-        # 总属性
-        y = 150
-        header = self.game.font_medium.render("总属性", True, cfg.COLOR_WHITE)
-        screen.blit(header, (right_x, y))
-        y += 42
-        if not stats:
-            self._draw_text(screen, "暂无装备属性", right_x, y, cfg.COLOR_GRAY, self.game.font_small)
-        else:
-            for key, value in stats.items():
-                y = self._draw_text(screen, f"{key}: {value}", right_x, y,
-                                    cfg.COLOR_GREEN, self.game.font_small)
+        # 左侧下方：当前选中装备的功能说明
+        self._draw_item_detail_panel(screen, selected_item, x=60, y=478, w=400, h=152)
+
+        # 右侧：自机属性（总属性 / 被动效果 / 技能，可滚动）
+        panel = pygame.Rect(488, 142, cfg.SCREEN_WIDTH - 508, 486)
+        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, panel)
+        pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, panel, 1)
+        header = self.game.font_medium.render("自机属性", True, cfg.COLOR_WHITE)
+        screen.blit(header, (panel.x + 14, panel.y + 10))
+
+        lines = self._equipment_panel_lines()
+        line_h = 22
+        top = panel.y + 56
+        bottom = panel.y + panel.height - 10
+        max_rows = max(1, (bottom - top) // line_h)
+        self.equip_scroll = max(0, min(self.equip_scroll, max(0, len(lines) - max_rows)))
+        if len(lines) > max_rows:
+            scroll_hint = self.game.font_small.render(
+                "（滚轮 / PageUp / PageDown 滚动）", True, cfg.COLOR_GRAY)
+            screen.blit(scroll_hint, (panel.x + 14, panel.y + 34))
+        visible = lines[self.equip_scroll:self.equip_scroll + max_rows]
+        py = top
+        for text, color in visible:
+            py = self._draw_text(screen, text, panel.x + 14, py, color, self.game.font_small)
 
         # 装备选择覆盖层
         if self.choosing_slot is not None:
@@ -455,6 +703,18 @@ class IntermissionState(GameState):
         hint = self.game.font_small.render("Enter 装备   Esc 取消", True, cfg.COLOR_GRAY)
         screen.blit(hint, (panel.x + 24, panel.y + panel.height - 34))
 
+        # 面板底部：所选物品功能说明
+        entry = entries[self.choose_selected]
+        item = entry["item"]
+        pygame.draw.line(screen, cfg.COLOR_DARK_GRAY,
+                         (panel.x + 20, panel.y + 360),
+                         (panel.x + panel.width - 20, panel.y + 360))
+        py = panel.y + 374
+        for text, color in self._item_detail_lines(item):
+            if py > panel.y + panel.height - 40:
+                break
+            py = self._draw_text(screen, text, panel.x + 24, py, color, self.game.font_small)
+
     def _draw_inventory_page(self, screen):
         entries = self.inventory.get_inventory_entries()
         y = 150
@@ -466,7 +726,7 @@ class IntermissionState(GameState):
             self._draw_text(screen, "背包是空的", 80, y, cfg.COLOR_GRAY, self.game.font_medium)
             return
 
-        visible, start = self._visible_slice(entries, self.selected, 14)
+        visible, start = self._visible_slice(entries, self.selected, 9)
         for offset, entry in enumerate(visible):
             idx = start + offset
             selected = idx == self.selected
@@ -490,6 +750,12 @@ class IntermissionState(GameState):
                 screen.blit(tag, (430, y))
             y += 30
 
+        # 底部：所选物品功能说明
+        if entries:
+            if self.selected >= len(entries):
+                self.selected = len(entries) - 1
+            self._draw_item_detail_panel(screen, entries[self.selected]["item"])
+
     def _draw_shop_page(self, screen):
         y = 150
         buy_color = cfg.COLOR_YELLOW if self.shop_mode == "buy" else cfg.COLOR_GRAY
@@ -507,9 +773,14 @@ class IntermissionState(GameState):
             self._draw_text(screen, text, 80, y, cfg.COLOR_GRAY, self.game.font_medium)
             return
 
-        visible, start = self._visible_slice(entries, self.selected, 13)
+        visible, start = self._visible_slice(entries, self.selected, 9)
         for offset, entry in enumerate(visible):
             idx = start + offset
+            if entry.get("header"):
+                header = self.game.font_medium.render(f"— {entry['header']} —", True, cfg.COLOR_GRAY)
+                screen.blit(header, (80, y))
+                y += 30
+                continue
             selected = idx == self.selected
             item = entry["item"]
             prefix = "> " if selected else "  "
@@ -531,6 +802,14 @@ class IntermissionState(GameState):
                     badge = self.game.font_small.render("已装备", True, cfg.COLOR_GREEN)
                     screen.blit(badge, (700, y))
             y += 30
+
+        # 底部：所选物品功能说明（分类表头不可选中，跳过）
+        if entries:
+            if self.selected >= len(entries):
+                self.selected = len(entries) - 1
+            entry = entries[self.selected]
+            if not entry.get("header"):
+                self._draw_item_detail_panel(screen, entry["item"])
 
     def _draw_forge_page(self, screen):
         """锻造页：左侧重铸石，右侧可锻造物品，底部预览与操作提示"""
@@ -604,25 +883,20 @@ class IntermissionState(GameState):
             tip += prefix["name"] if prefix else "?"
             if prefix:
                 tip += f"（{prefix['label']}）"
-            self._draw_text(screen, tip, panel.x + 20, py, cfg.COLOR_YELLOW, self.game.font_small)
+            py = self._draw_text(screen, tip, panel.x + 20, py, cfg.COLOR_YELLOW, self.game.font_small)
             if prefix:
-                py = self._draw_text(screen, "加成：", panel.x + 20, py + 4,
-                                     cfg.COLOR_WHITE, self.game.font_small)
-                for key, value in prefix["stats"].items():
-                    py = self._draw_text(screen, f"  {key}: +{value}", panel.x + 20, py,
+                for lore_line in prefix.get("lore", []):
+                    py = self._draw_text(screen, lore_line, panel.x + 24, py + 2,
                                          cfg.COLOR_GREEN, self.game.font_small)
             hint = self.game.font_small.render("Enter：选择该重铸石 → 选物品", True, cfg.COLOR_GRAY)
             screen.blit(hint, (panel.x + 20, panel.y + panel.height - 30))
         else:
             entry = forge_items[self.forge_item_idx]
             item = entry["item"]
-            line = f"将 {stone['item'].name} 锻造到 {entry['display_name']}"
-            self._draw_text(screen, line, panel.x + 20, py, cfg.COLOR_YELLOW, self.game.font_small)
+            py = self._draw_text(screen, line, panel.x + 20, py, cfg.COLOR_YELLOW, self.game.font_small)
             if prefix:
-                py = self._draw_text(screen, "前缀加成：", panel.x + 20, py + 4,
-                                     cfg.COLOR_WHITE, self.game.font_small)
-                for key, value in prefix["stats"].items():
-                    py = self._draw_text(screen, f"  {key}: +{value}", panel.x + 20, py,
+                for lore_line in prefix.get("lore", []):
+                    py = self._draw_text(screen, lore_line, panel.x + 24, py + 2,
                                          cfg.COLOR_GREEN, self.game.font_small)
             old = self.inventory.get_item_prefix(item.id)
             old_name = REFORGES[old]["name"] if old in REFORGES else "无"

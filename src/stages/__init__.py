@@ -7,12 +7,14 @@ def get_stage_class(stage_num):
     from src.stages.stage3 import Stage3_CatacombsF1
     from src.stages.stage4 import Stage4_Catacombs
     from src.stages.stage5 import Stage5_WitherLords
+    from src.stages.stage6 import Stage6_FinalApproach
     return {
         1: Stage1_SkyblockHub,
         2: Stage2_DragonsNest,
         3: Stage3_CatacombsF1,
         4: Stage4_Catacombs,
         5: Stage5_WitherLords,
+        6: Stage6_FinalApproach,
     }.get(stage_num)
 
 

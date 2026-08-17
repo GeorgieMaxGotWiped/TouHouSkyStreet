@@ -165,10 +165,16 @@ class Stage2_DragonsNest(Stage):
         self.background_darkness = 120   # 压暗背景，突出弹幕
         # 战后对话：末影龙 Ender Dragon 被击破后（自机 Mage 在左侧）
         self.defeat_dialogue_lines = [
-            ("魔法使 Mage", "最后一缕龙息也消散了……胜负已分。"),
-            ("末影龙 Ender Dragon", "虚空……正在接纳我的力量。人类，你确实比我想象中更强。"),
-            ("魔法使 Mage", "我可不是什么强者，只是想在龙巢里找点宝物罢了。"),
-            ("末影龙 Ender Dragon", "带着你的战利品离开吧。愿末地的虚空……不再记住你的名字。"),
+            ("末影龙 Ender Dragon", "原来如此。"),
+            ("末影龙 Ender Dragon", "难怪那些家伙会开始行动。"),
+            ("魔法使 Mage", "你口中的“它”，到底是谁？"),
+            ("末影龙 Ender Dragon", "地下城最深处的存在。"),
+            ("魔法使 Mage", "看来，我离答案越来越近了。"),
+            ("末影龙 Ender Dragon", "别高兴得太早。"),
+            ("末影龙 Ender Dragon", "从现在开始，你将面对的，不再是野外的怪物。"),
+            ("魔法使 Mage", "地下城吗？"),
+            ("末影龙 Ender Dragon", "没错。"),
+            ("末影龙 Ender Dragon", "真正的试炼，才刚刚开始。"),
         ]
         self.defeat_dialogue_portraits = {
             "魔法使 Mage": cfg.SELF_SPRITE,
@@ -353,13 +359,18 @@ class Stage2_DragonsNest(Stage):
     def _start_dialogue(self):
         """关底对话：自机 Mage 与末影龙 Ender Dragon 战前对峙（自机立绘在左侧）"""
         self.dialogue_lines = [
-            ("魔法使 Mage", "这里就是末地的最底层……沉睡在龙巢中的巨龙，终于找到了。"),
-            ("末影龙 Ender Dragon", "闯入末地最底层的人类……你们惊醒了沉睡在龙巢中的我。"),
-            ("魔法使 Mage", "你就是盘踞在这片虚空最深处的龙吧？抱歉吵醒你，但我不打算空手而归。"),
-            ("末影龙 Ender Dragon", "愚蠢。这里没有宝藏，只有无尽的虚空与龙息。"),
-            ("魔法使 Mage", "有没有宝藏，要亲眼确认才算数。既然你不肯让路，那就用弹幕说话吧！"),
-            ("末影龙 Ender Dragon", "既然你们执意踏进这方寸之地，就用翅膀丈量我的愤怒吧。"),
-            ("末影龙 Ender Dragon", "我会让末影珍珠与龙息，将你们彻底驱离这片天地！"),
+            ("末影龙 Ender Dragon", "人类？"),
+            ("末影龙 Ender Dragon", "居然能来到这里。"),
+            ("魔法使 Mage", "看来，最近的骚动连你都被惊动了。"),
+            ("末影龙 Ender Dragon", "骚动？"),
+            ("末影龙 Ender Dragon", "这里从来就没有平静过。"),
+            ("魔法使 Mage", "那为什么最近会有那么多怪物向地下城聚集？"),
+            ("末影龙 Ender Dragon", "因为它醒了。"),
+            ("魔法使 Mage", "它？"),
+            ("末影龙 Ender Dragon", "呵。"),
+            ("末影龙 Ender Dragon", "看来，你什么都不知道。"),
+            ("魔法使 Mage", "既然如此，我就只能自己去确认了。"),
+            ("末影龙 Ender Dragon", "那就让我看看，你是否有继续前进的资格。"),
         ]
         # 说话角色的立绘：自机 Mage 在左侧，末影龙在右侧
         self.dialogue_portraits = {

@@ -26,6 +26,8 @@ if getattr(sys, 'frozen', False):
 else:
     CONFIG_DIR = BASE_DIR
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+# 本地仓库存档（撤离后物资持久化保存，出征前从中挑选携带）
+WAREHOUSE_PATH = os.path.join(CONFIG_DIR, "warehouse.json")
 
 
 def load_user_config():
@@ -84,8 +86,14 @@ STAGE3_WALL = os.path.join(BACKGROUNDS_DIR, "stage3", "wall.png")
 STAGE4_FLOOR = os.path.join(BACKGROUNDS_DIR, "stage4", "floor.png")
 STAGE4_WALL = os.path.join(BACKGROUNDS_DIR, "stage4", "wall.png")
 # --- 伪3D背景贴图（第5面：凋零之厅 / BOSS RUSH，暂复用四面背景） ---
-STAGE5_FLOOR = STAGE4_FLOOR
-STAGE5_WALL = STAGE4_WALL
+STAGE5_FLOOR = os.path.join(BACKGROUNDS_DIR, "stage5", "floor.png")
+STAGE5_WALL = os.path.join(BACKGROUNDS_DIR, "stage5", "wall.png")
+
+# --- 伪3D背景贴图（第6面：最终进军 / Final Approach，先复用四面墓穴，进入要塞后切换） ---
+STAGE6_FLOOR = os.path.join(BACKGROUNDS_DIR, "stage6", "floor.png")
+STAGE6_WALL = os.path.join(BACKGROUNDS_DIR, "stage6", "wall.png")
+STAGE6_FORTRESS_FLOOR = os.path.join(BACKGROUNDS_DIR, "stage6", "fortress_floor.png")
+STAGE6_FORTRESS_WALL = os.path.join(BACKGROUNDS_DIR, "stage6", "fortress_wall.png")
 
 # --- 关卡标题 ---
 TITLES_DIR = os.path.join(ASSETS_DIR, "titles")
@@ -94,6 +102,7 @@ STAGE2_TITLE = os.path.join(TITLES_DIR, "stage2.png")
 STAGE3_TITLE = os.path.join(TITLES_DIR, "stage3.png")
 STAGE4_TITLE = os.path.join(TITLES_DIR, "stage4.png")
 STAGE5_TITLE = os.path.join(TITLES_DIR, "stage5.png")
+STAGE6_TITLE = os.path.join(TITLES_DIR, "stage6.png")
 
 # 关卡标题显示时长（帧，60FPS）
 STAGE_TITLE_DURATION = 180
@@ -208,6 +217,52 @@ STAGE5_MAXOR_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "maxor.png")
 STAGE5_STORM_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "storm.png")
 STAGE5_GOLDOR_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "goldor.png")
 STAGE5_NECRON_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "necron.png")
+
+# --- 六面素材（Final Approach：亡灵军队 / Kaeman 干涉 / 凋零要塞 / Wither King） ---
+ENEMY_SPRITES_DIR_STAGE6 = os.path.join(SPRITES_DIR, "enemies", "stage6")
+STAGE6_HUSK_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE6, "undead.png")]      # Wither Husk
+STAGE6_GUARD_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE6, "skeleton.png")]   # Wither Guard
+STAGE6_MINER_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE6, "caster.png")]     # Wither Miner
+STAGE6_KNIGHT_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE6, "skeletor.png")]  # Wither Knight
+STAGE6_WISP_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE6, "soul.png")]        # 黑能量游魂
+STAGE6_TERRACOTTA_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "terracotta.png")
+STAGE6_COLOSSUS_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "The_Diamond_Giant.png")
+STAGE6_GIANT_ONE_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "TheGiantOne.png")
+STAGE6_WITHER_SKULL_SPRITE = os.path.join(BACKGROUNDS_DIR, "stage6", "Wither_Skull.png")
+STAGE6_WATCHFUL_EYE_SPRITE = os.path.join(BACKGROUNDS_DIR, "stage6", "watchful_eyes.png")
+STAGE6_DARK_ORB_SPRITE = os.path.join(BACKGROUNDS_DIR, "stage6", "Dark_Orb.png")
+# 王之门徒残影（复用五面 Wither Lords 立绘）
+STAGE6_MAXOR_GHOST_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "maxor_ghost.png")
+STAGE6_STORM_GHOST_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "storm_ghost.png")
+STAGE6_GOLDOR_GHOST_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "goldor_ghost.png")
+STAGE6_NECRON_GHOST_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "necron_ghost.png")
+# Wither King（六面最终 Boss，立绘为程序生成占位）
+STAGE6_WITHER_KING_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "wither_king.png")
+STAGE6_KAEMAN_PORTRAIT = STAGE6_WITHER_KING_BOSS_SPRITE
+# 对话中 BOSS 头衔表：英文名 -> 中文头衔（对话框右上角显示）
+BOSS_TITLES = {
+    "Arachne": "巢穴中的妖怪蜘蛛",
+    "Ender Dragon": "栖息于末地的龙",
+    "Bonzo": "地下城小丑",
+    "Sadan": "守卫墓穴的巨人王",
+    "The Watcher": "注视深渊之人",
+    "Maxor": "爆炸凋零",
+    "Necron": "王座之前的死灵",
+    "Kaeman": "追逐死亡尽头的大魔法使",
+}
+# 冥符「Five Corrupted Relics」五种 Relic 贴图（红/橙/绿/蓝/紫，按五边形顶点顺序）
+STAGE6_RELIC_SPRITES = (
+    os.path.join(ENEMY_SPRITES_DIR_STAGE6, "wither_king_relic", "red.png"),
+    os.path.join(ENEMY_SPRITES_DIR_STAGE6, "wither_king_relic", "orange.png"),
+    os.path.join(ENEMY_SPRITES_DIR_STAGE6, "wither_king_relic", "green.png"),
+    os.path.join(ENEMY_SPRITES_DIR_STAGE6, "wither_king_relic", "blue.png"),
+    os.path.join(ENEMY_SPRITES_DIR_STAGE6, "wither_king_relic", "purple.png"),
+)
+STAGE6_HUSK_SPRITE_HEIGHT = 40
+STAGE6_GUARD_SPRITE_HEIGHT = 92
+STAGE6_MINER_SPRITE_HEIGHT = 84
+STAGE6_KNIGHT_SPRITE_HEIGHT = 96
+STAGE6_WISP_SPRITE_HEIGHT = 80
 
 # --- 小怪贴图（第1面） ---
 ENEMY_SPRITES_DIR = os.path.join(SPRITES_DIR, "enemies", "stage1")
@@ -324,6 +379,15 @@ STAGE5_BOSS_MUSIC_LOOP = STAGE4_BOSS_MUSIC_LOOP
 # 曲名（每面开始 / Boss战开始时显示当前播放的音乐名）
 STAGE5_MUSIC_NAME = "凋零之厅 ~ Hall of the Wither Lords"
 STAGE5_BOSS_MUSIC_NAME = "凋零之厅 ~ Hall of the Wither Lords"
+
+# --- 六面音乐（Final Approach，暂复用五面/四面 Boss 战曲目） ---
+STAGE6_MUSIC_START = STAGE5_MUSIC_START
+STAGE6_MUSIC_LOOP = STAGE5_MUSIC_LOOP
+STAGE6_MUSIC = STAGE5_MUSIC
+STAGE6_BOSS_MUSIC_START = STAGE5_BOSS_MUSIC_START
+STAGE6_BOSS_MUSIC_LOOP = STAGE5_BOSS_MUSIC_LOOP
+STAGE6_MUSIC_NAME = "最终进军 ~ Final Approach"
+STAGE6_BOSS_MUSIC_NAME = "凋零之王的王座 ~ Throne of the Wither King"
 
 # 曲名横幅显示时长（帧，60FPS）
 MUSIC_BANNER_DURATION = 300

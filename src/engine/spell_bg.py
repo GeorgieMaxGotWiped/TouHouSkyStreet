@@ -58,6 +58,7 @@ _pattern_cache = {}
 # 全景贴图注册表：key -> 左右无缝的 360° 环形全景图路径
 PANORAMA_TEXTURES = {
     "stage3_bg1": os.path.join(cfg.BACKGROUNDS_DIR, "stage3", "bg1.png"),
+    "kaeman_bg1": os.path.join(cfg.BACKGROUNDS_DIR, "stage6", "spells", "bg1.png"),
     "scarf": os.path.join(cfg.BACKGROUNDS_DIR, "stage4", "scarf", "bg_scarf.png"),
     "sadan": os.path.join(cfg.BACKGROUNDS_DIR, "stage4", "sadan", "bg_sadan.png"),
     "professor": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "professor", "bg_professor.png"),
@@ -72,6 +73,10 @@ IMAGE_TEXTURES = {
     "storm": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "storm", "bg.png"),
     "goldor": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "goldor", "bg.png"),
 }
+
+# Kaeman 六符专用背景目录（assets/backgrounds/stage6/spells/）：
+# 复用自其他关卡的共享背景已复制到此，可独立修改而不影响原关卡。
+KAEMAN_SPELLS = os.path.join("stage6", "spells")
 
 
 def _make_web_pattern(color, arms=8, rings=5):
@@ -257,6 +262,11 @@ def _tinted_web_asset(rgb):
     return img if img is not None else _make_web_pattern(rgb)
 
 
+def _tinted_web_asset_at(relpath, rgb):
+    """按相对路径加载蛛网贴图（用于 Kaeman 独立副本），失败回退程序化蛛网"""
+    img = _tint_texture_asset(relpath, rgb)
+    return img if img is not None else _make_web_pattern(rgb)
+
 
 def _make_rgba_surface(rgb, alpha):
     """由 numpy 数组构建带逐像素透明度的 Surface（数组按 [x, y] 索引）"""
@@ -396,6 +406,31 @@ _PATTERN_MAKERS = {
     "icon_balloon":     lambda: _load_item_icon("balloon.png", tint=(1.10, 0.75, 0.90), target_h=90, dim=0.72, glow=0.55, folder="stage3") or _make_spiral_pattern((220, 90, 130)),
     "icon_balloon_cyan": lambda: _load_item_icon("balloon.png", tint=(0.70, 1.10, 1.15), target_h=64, dim=0.70, glow=0.55, folder="stage3") or _make_spiral_pattern((80, 200, 210)),
     "icon_balloon_gold": lambda: _load_item_icon("balloon.png", tint=(1.15, 1.00, 0.55), target_h=64, dim=0.70, glow=0.55, folder="stage3") or _make_spiral_pattern((230, 200, 90)),
+    # Kaeman 六符专用（从 assets/backgrounds/stage6/spells/ 加载，独立于原关卡副本）
+    "ka_web_violet":        lambda: _tinted_web_asset_at(os.path.join(KAEMAN_SPELLS, "web.png"), (104, 50, 150)),
+    "ka_bg_end":            lambda: _tint_texture_asset(os.path.join(KAEMAN_SPELLS, "bg.png"), (168, 118, 200)),
+    "ka_bg_gold":           lambda: _tint_texture_asset(os.path.join(KAEMAN_SPELLS, "bg.png"), (216, 168, 66)),
+    "ka_stone_floor":       lambda: _tint_texture_asset(os.path.join(KAEMAN_SPELLS, "floor1.png"), (172, 164, 128)),
+    "ka_catacomb_floor":    lambda: _tint_texture_asset(os.path.join(KAEMAN_SPELLS, "floor.png"), (128, 150, 164)),
+    "ka_icon_fragment":     lambda: _load_item_icon("Arachne_Fragment.png", tint=(0.85, 0.70, 1.20), target_h=150, dim=0.58, glow=0.50, folder=KAEMAN_SPELLS) or _make_soul_pattern((140, 90, 220)),
+    "ka_icon_fang":         lambda: _load_item_icon("Arachne's_Fang.png", tint=(0.90, 0.78, 1.10), target_h=95, dim=0.55, glow=0.40, folder=KAEMAN_SPELLS) or _make_soul_pattern((150, 120, 200)),
+    "ka_icon_skull":        lambda: _load_item_icon("skull.png", tint=(0.95, 1.05, 1.00), target_h=100, dim=0.66, glow=0.45, folder=KAEMAN_SPELLS) or _make_soul_pattern((190, 190, 180)),
+    "ka_icon_dark_orb":     lambda: _load_item_icon("dark_orb.png", tint=(1.10, 0.55, 1.05), target_h=80, dim=0.70, glow=0.60, folder=KAEMAN_SPELLS) or _make_soul_pattern((160, 60, 190)),
+    "ka_icon_dragon_pet":   lambda: _load_item_icon("Ender_Dragon_Pet.png", tint=(1.05, 0.72, 1.20), target_h=170, dim=0.80, glow=0.55, folder=KAEMAN_SPELLS) or _make_spiral_pattern((170, 90, 220)),
+    "ka_icon_claw":         lambda: _load_item_icon("Dragon_Claw.png", tint=(0.95, 0.68, 1.22), target_h=110, dim=0.62, glow=0.45, folder=KAEMAN_SPELLS) or _make_soul_pattern((170, 90, 220)),
+    "ka_icon_scale":        lambda: _load_item_icon("Dragon_Scale.png", tint=(0.58, 1.02, 1.06), target_h=90, dim=0.66, glow=0.50, folder=KAEMAN_SPELLS) or _make_soul_pattern((90, 200, 200)),
+    "ka_icon_pearl":        lambda: _load_item_icon("Enchanted_Ender_Pearl.png", tint=(0.55, 1.05, 1.05), target_h=90, dim=0.72, glow=0.60, folder=KAEMAN_SPELLS) or _make_soul_pattern((90, 200, 200)),
+    "ka_icon_endstone":     lambda: _load_item_icon("Enchanted_End_Stone.png", tint=(1.02, 0.96, 0.78), target_h=150, dim=0.78, glow=0.55, folder=KAEMAN_SPELLS) or _make_monolith_pattern((220, 210, 165)),
+    "ka_pillar_left":       lambda: _load_item_icon("pillar1.png", tint=(0.85, 0.80, 1.05), target_h=300, dim=0.60, glow=0.40, folder=KAEMAN_SPELLS) or _make_thread_pattern((90, 80, 130)),
+    "ka_pillar_right":      lambda: _load_item_icon("pillar2.png", tint=(0.80, 0.75, 1.10), target_h=300, dim=0.60, glow=0.40, folder=KAEMAN_SPELLS) or _make_thread_pattern((90, 80, 130)),
+    "ka_icon_golem":        lambda: _load_item_icon("Golem_Pet.png", tint=(0.85, 0.90, 1.00), target_h=110, dim=0.70, glow=0.50, folder=KAEMAN_SPELLS) or _make_monolith_pattern((150, 160, 180)),
+    "ka_icon_eye":          lambda: _load_item_icon("Summoning_Eye.webp", tint=(0.45, 0.95, 0.85), target_h=80, dim=0.66, glow=0.55, folder=KAEMAN_SPELLS) or _make_soul_pattern((80, 190, 170)),
+    "ka_icon_rose":         lambda: _load_item_icon("End_stone_rose.png", tint=(0.95, 0.55, 0.80), target_h=70, dim=0.70, glow=0.50, folder=KAEMAN_SPELLS) or _make_soul_pattern((200, 110, 160)),
+    "ka_icon_watcher_eye":  lambda: _load_item_icon("watcher_eye.png", tint=(0.80, 1.10, 1.12), target_h=110, dim=0.72, glow=0.55, folder=KAEMAN_SPELLS) or _make_bolt_pattern((110, 210, 235)),
+    "ka_icon_helmet":       lambda: _load_item_icon("64px-Superior_Dragon_Helmet.png", tint=(1.30, 1.06, 0.42), target_h=120, dim=0.80, glow=0.65, folder=KAEMAN_SPELLS) or _make_spiral_pattern((230, 190, 80)),
+    "ka_icon_superior_frag": lambda: _load_item_icon("64px-Superior_Dragon_Fragment.png", tint=(1.35, 0.92, 0.30), target_h=95, dim=0.72, glow=0.55, folder=KAEMAN_SPELLS) or _make_soul_pattern((240, 180, 70)),
+    "ka_icon_core":         lambda: _load_item_icon("Judgement_Core.png", tint=(1.05, 0.72, 0.35), target_h=130, dim=0.75, glow=0.65, folder=KAEMAN_SPELLS) or _make_spiral_pattern((220, 150, 60)),
+    "ka_icon_terminator":   lambda: _load_item_icon("42px-Terminator.png", tint=(0.70, 1.05, 1.15), target_h=110, dim=0.70, glow=0.55, folder=KAEMAN_SPELLS) or _make_bolt_pattern((120, 200, 255)),
 }
 
 
@@ -743,6 +778,96 @@ STYLES = {
         "dim": 0.78,
         "layers": [
             _Layer(None, image="goldor"),
+        ],
+    },
+    # --- Kaeman 六符专用（复制自共享样式，资源指向 stage6/spells/ 便于独立修改） ---
+    "kaeman_dominion": {  # Kaeman ① 王符「Wither King's Dominion」（复制自 undead）
+        "base": (7, 9, 8),
+        "glow": (18, 26, 16),
+        "ring": (150, 230, 120),
+        "dim": 0.52,
+        "layers": [
+            _Layer(None, panorama=dict(key="kaeman_bg1", speed=16.0, fov=60,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           KAEMAN_SPELLS, "bossfloor1.png")),
+                   blend="alpha"),
+            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
+            _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
+            _Layer("ka_icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
+            _Layer("ka_icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
+        ],
+    },
+    "kaeman_relics": {  # Kaeman ② 冥符「Five Corrupted Relics」（复制自 soul）
+        "base": (8, 6, 20),
+        "glow": (24, 10, 42),
+        "ring": (190, 110, 255),
+        "layers": [
+            _Layer("soul_violet", rot_speed=0.24, scale=2.2, pulse=0.07, freq=0.3),
+            _Layer("ka_web_violet", rot_speed=-0.12, scale=2.6, pulse=0.05, freq=0.25),
+            _Layer("thread_pale", scroll=(0.0, 0.35), blend="alpha"),
+            _Layer("ka_icon_fragment", rot_speed=0.40, scale=0.72, pulse=0.06, freq=0.35),
+            _Layer("ka_icon_fang", rot_speed=1.40, scale=0.50, orbit=(140, 1.00)),
+        ],
+    },
+    "kaeman_withered_dragon": {  # Kaeman ③ 龙符「Withered Dragon」（复制自 dragon）
+        "base": (10, 5, 18),
+        "glow": (32, 12, 40),
+        "ring": (215, 145, 255),
+        "layers": [
+            _Layer("ka_bg_end", scroll=(0.0, 0.28), blend="alpha"),
+            _Layer("spiral_purple", rot_speed=0.55, scale=2.2, pulse=0.07, freq=0.35),
+            _Layer("ka_web_violet", rot_speed=-0.25, scale=2.4, pulse=0.05, freq=0.28),
+            _Layer("ka_icon_dragon_pet", rot_speed=0.22, scale=0.62, pulse=0.05, freq=0.30),
+            _Layer("ka_icon_claw", rot_speed=1.20, scale=0.44, pulse=0.08, freq=0.45, orbit=(150, 0.85)),
+            _Layer("ka_icon_scale", rot_speed=-0.90, scale=0.38, pulse=0.07, freq=0.40, orbit=(178, -0.65)),
+            _Layer("ka_icon_pearl", rot_speed=0.60, scale=0.34, pulse=0.09, freq=0.55, orbit=(118, 1.10)),
+        ],
+    },
+    "kaeman_slash": {  # Kaeman ④ 裂符「Dimensional Slash」（空间裂痕主题）
+        "base": (10, 4, 8),
+        "glow": (34, 10, 18),
+        "ring": (255, 96, 110),
+        "dim": 0.55,
+        "layers": [
+            _Layer("ka_stone_floor", scroll=(0.0, 0.28), blend="alpha"),
+            _Layer("spiral_red", rot_speed=-0.55, scale=2.1, pulse=0.09, freq=0.42),
+            _Layer("bolt_pale", rot_speed=0.30, scale=2.3, pulse=0.07, freq=0.38),
+            _Layer("thread_pale", scroll=(0.0, 0.70), blend="alpha"),
+            _Layer("ka_icon_fragment", rot_speed=0.45, scale=0.66, pulse=0.06, freq=0.38),
+            _Layer("ka_icon_fang", rot_speed=1.30, scale=0.44, pulse=0.08, freq=0.48, orbit=(150, 0.95)),
+            _Layer("ka_icon_eye", rot_speed=-0.70, scale=0.36, pulse=0.07, freq=0.44, orbit=(182, -0.60)),
+        ],
+    },
+    "kaeman_atomize": {  # Kaeman ⑤ 王符「Atomizing Ray」（原子化射线主题）
+        "base": (12, 3, 5),
+        "glow": (38, 6, 10),
+        "ring": (255, 74, 86),
+        "dim": 0.55,
+        "layers": [
+            _Layer("ka_stone_floor", scroll=(0.0, 0.28), blend="alpha"),
+            _Layer("spiral_red", rot_speed=-0.50, scale=2.2, pulse=0.09, freq=0.42),
+            _Layer("bolt_pale", rot_speed=0.38, scale=2.4, pulse=0.08, freq=0.44),
+            _Layer("thread_pale", scroll=(0.0, 0.8), blend="alpha"),
+            _Layer("ka_icon_fang", rot_speed=0.50, scale=0.62, pulse=0.07, freq=0.40),
+            _Layer("ka_icon_skull", rot_speed=1.10, scale=0.40, pulse=0.08, freq=0.50, orbit=(150, 0.85)),
+        ],
+    },
+    "kaeman_slumber": {  # Kaeman ★ Last Spell「终仪 The Wither King's Final Slumber」（吸收/爆发紫夜主题）
+        "base": (9, 5, 20),
+        "glow": (30, 12, 52),
+        "ring": (200, 130, 255),
+        "dim": 0.5,
+        "layers": [
+            _Layer(None, panorama=dict(key="kaeman_bg1", speed=14.0, fov=58,
+                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
+                                                           KAEMAN_SPELLS, "bossfloor1.png")),
+                   blend="alpha"),
+            _Layer("soul_violet", rot_speed=0.22, scale=2.3, pulse=0.06, freq=0.28),
+            _Layer("spiral_purple_dim", rot_speed=0.45, scale=1.7, pulse=0.06, freq=0.36),
+            _Layer("thread_pale", scroll=(0.0, 0.45), blend="alpha"),
+            _Layer("ka_web_violet", rot_speed=-0.18, scale=2.4, pulse=0.05, freq=0.26),
+            _Layer("ka_icon_dark_orb", rot_speed=0.55, scale=0.70, pulse=0.09, freq=0.42),
+            _Layer("ka_icon_skull", rot_speed=1.10, scale=0.42, pulse=0.08, freq=0.50, orbit=(150, 0.90)),
         ],
     },
 }

@@ -146,14 +146,26 @@ class Stage:
 
     def _start_dialogue(self):
         self.dialogue_lines = [
-            ("蜘蛛女王 Arachne", "你们竟敢召唤黑暗女王？胆敢挑战我的存在..."),
-            ("蜘蛛女王 Arachne", "嘎哈哈哈哈！真是令人厌烦……不过，看来并非只有你们准备了后手！"),
-            ("蜘蛛女王 Arachne", "蜘蛛巢穴之中，蛛群已至……你能数清十只吗？"),
-            ("蜘蛛女王 Arachne", "就让你们先品尝一丝吧——那即将降临这个世界的无尽蛛潮！"),
+            ("蜘蛛女王 Arachne", "哎呀，今天还真是稀客。"),
+            ("蜘蛛女王 Arachne", "居然有人会主动跑到蜘蛛巢穴里来。"),
+            ("魔法使 Mage", "最近到处都在谈论地下城的异常。"),
+            ("魔法使 Mage", "总得有人过来看看。"),
+            ("蜘蛛女王 Arachne", "地下城？"),
+            ("蜘蛛女王 Arachne", "呵呵，你们这些冒险者还真喜欢给一切都找个理由。"),
+            ("魔法使 Mage", "所以，你知道些什么吗？"),
+            ("蜘蛛女王 Arachne", "我只知道一件事。"),
+            ("蜘蛛女王 Arachne", "最近，有不少不属于这里的家伙正在往地下城深处聚集。"),
+            ("魔法使 Mage", "听起来可不像是什么好兆头。"),
+            ("蜘蛛女王 Arachne", "既然这么好奇，不如亲自下去看看？"),
+            ("蜘蛛女王 Arachne", "当然，前提是你能先穿过我的蛛网。"),
         ]
-        # Arachne 说话时在对话框旁显示立绘
+        # 说话角色的立绘：自机 Mage 在左侧，Arachne 在右侧
         self.dialogue_portraits = {
+            "魔法使 Mage": cfg.SELF_SPRITE,
             "蜘蛛女王 Arachne": cfg.ARACHNE_BOSS_SPRITE,
+        }
+        self.dialogue_portrait_sides = {
+            "魔法使 Mage": "left",
         }
         # 对话开始即让Boss入场：在场但不攻击、不显示血条
         self.setup_boss()
@@ -267,10 +279,15 @@ class Stage1_SkyblockHub(Stage):
         self.boss_music_name = cfg.STAGE1_BOSS_MUSIC_NAME
         # 战后对话：蜘蛛女王 Arachne 被击破后（自机 Mage 在左侧）
         self.defeat_dialogue_lines = [
-            ("魔法使 Mage", "呼……蛛丝终于全部斩断了。蜘蛛女王，看来也不过如此嘛。"),
-            ("蜘蛛女王 Arachne", "嘎……竟敢击碎我的暗之女王之魂……你们究竟是什么来头？"),
-            ("魔法使 Mage", "只是路过的魔法使罢了。这片巢穴里的宝物，我就收下了。"),
-            ("蜘蛛女王 Arachne", "哼……拿去吧。只要蜘蛛之巢尚存，我终有一日会重新织起这张网……"),
+            ("蜘蛛女王 Arachne", "真是厉害。"),
+            ("蜘蛛女王 Arachne", "看来这些蛛丝还拦不住你。"),
+            ("魔法使 Mage", "所以，到底发生了什么？"),
+            ("蜘蛛女王 Arachne", "谁知道呢？"),
+            ("蜘蛛女王 Arachne", "我只是一只守着巢穴的蜘蛛而已。"),
+            ("蜘蛛女王 Arachne", "不过，最近的末地可比这里热闹多了。"),
+            ("魔法使 Mage", "末地吗？"),
+            ("蜘蛛女王 Arachne", "去看看吧。"),
+            ("蜘蛛女王 Arachne", "说不定，你能在那里找到想要的答案。"),
         ]
         self.defeat_dialogue_portraits = {
             "魔法使 Mage": cfg.SELF_SPRITE,

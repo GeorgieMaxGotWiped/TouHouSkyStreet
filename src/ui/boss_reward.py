@@ -24,10 +24,14 @@ class BossRewardState(GameState):
         valid = [i for i in pool if i in SKYBLOCK_ITEMS]
         self.offer = [SKYBLOCK_ITEMS[i] for i in random.sample(valid, min(3, len(valid)))]
         self.selected = 0
+        self.confirming = False
+        self.confirm_choice = 0
 
     def enter(self, game):
         self.game.stop_music()
         self.selected = 0
+        self.confirming = False
+        self.confirm_choice = 0
 
     def exit(self):
         self.inventory.save_to_global_data(self.game.global_data)
@@ -39,16 +43,54 @@ class BossRewardState(GameState):
 
     def update(self, dt):
         keys = self.game.keys_just_pressed
-        if keys.get(pygame.K_UP, False) or keys.get(pygame.K_w, False):
+        if self.confirming:
+            self._update_confirm(keys)
+            return
+        if keys.get(pygame.K_LEFT, False) or keys.get(pygame.K_a, False):
             self.selected = (self.selected - 1) % len(self.offer)
-        if keys.get(pygame.K_DOWN, False) or keys.get(pygame.K_s, False):
+        if keys.get(pygame.K_RIGHT, False) or keys.get(pygame.K_d, False):
             self.selected = (self.selected + 1) % len(self.offer)
         if self._confirm_pressed(keys) and self.offer:
-            item = self.offer[self.selected]
-            self.inventory.add_item(item.id, 1)
-            self.inventory.save_to_global_data(self.game.global_data)
-            from src.ui.intermission import IntermissionState
-            self.game.switch_state(IntermissionState(self.game, self.stage_num))
+            self.confirming = True
+            self.confirm_choice = 0
+
+    def _update_confirm(self, keys):
+        """确认领取环节：确定 / 返回。"""
+        if keys.get(pygame.K_ESCAPE, False) or keys.get(pygame.K_x, False):
+            self.confirming = False
+            return
+        if keys.get(pygame.K_LEFT, False) or keys.get(pygame.K_a, False):
+            self.confirm_choice = (self.confirm_choice - 1) % 2
+        if keys.get(pygame.K_RIGHT, False) or keys.get(pygame.K_d, False):
+            self.confirm_choice = (self.confirm_choice + 1) % 2
+        if self._confirm_pressed(keys):
+            if self.confirm_choice == 0:
+                item = self.offer[self.selected]
+                self.inventory.add_item(item.id, 1)
+                self.inventory.save_to_global_data(self.game.global_data)
+                from src.ui.intermission import IntermissionState
+                self.game.switch_state(IntermissionState(self.game, self.stage_num))
+            else:
+                self.confirming = False
+
+    def _fmt_price(self, value):
+        if value <= 0:
+            return "—"
+        if value >= 1000000000:
+            v = value / 1000000000.0
+            return ("%gB" % v) if float(v).is_integer() else f"{v:.1f}B"
+        if value >= 1000000:
+            v = value / 1000000.0
+            return ("%gM" % v) if float(v).is_integer() else f"{v:.1f}M"
+        if value >= 1000:
+            v = value / 1000.0
+            return ("%gk" % v) if float(v).is_integer() else f"{v:.1f}k"
+        return str(value)
+
+    def _price_text(self, item):
+        buy_s = self._fmt_price(item.buy_price) if item.buy_price > 0 else "—"
+        sell_s = self._fmt_price(item.sell_price) if item.sell_price > 0 else "—"
+        return f"买入 {buy_s}   卖出 {sell_s}"
 
     def _wrap_text(self, font, text, max_width):
         """word-wrap text by spaces; split overlong single words char by char."""
@@ -103,6 +145,9 @@ class BossRewardState(GameState):
                 name_surf = font_small.render(item.name, True, item.rarity_color)
 
             raw_lines = []
+            price_text = self._price_text(item)
+            if price_text:
+                raw_lines.append((cfg.COLOR_YELLOW, price_text))
             if item.stat_text():
                 raw_lines.append((cfg.COLOR_GREEN, item.stat_text()))
             for lore_line in item.lore[:3]:
@@ -149,9 +194,53 @@ class BossRewardState(GameState):
                 ty += line_h
 
             if selected:
-                mark = font_medium.render("按 Enter 领取", True, cfg.COLOR_YELLOW)
+                mark = font_medium.render("按 Enter 确认领取", True, cfg.COLOR_YELLOW)
                 screen.blit(mark, (x + (card_w - mark.get_width()) // 2, hint_y))
 
         hint = self.game.font_small.render(
-            "↑↓ / W S：选择     Enter / Z / Space：领取并进入休整", True, cfg.COLOR_DARK_GRAY)
+            "← → / A D：选择     Enter / Z / Space：确认领取", True, cfg.COLOR_DARK_GRAY)
         screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, cfg.SCREEN_HEIGHT - 70))
+
+        if self.confirming:
+            self._draw_confirm(screen)
+
+    def _draw_confirm(self, screen):
+        """确认领取环节：确定 / 返回。"""
+        item = self.offer[self.selected]
+        overlay = pygame.Surface((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        screen.blit(overlay, (0, 0))
+
+        box_w = 620
+        box_h = 220
+        box = pygame.Rect((cfg.SCREEN_WIDTH - box_w) // 2, 280, box_w, box_h)
+        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, box)
+        pygame.draw.rect(screen, item.rarity_color, box, 2)
+
+        q = self.game.font_medium.render("确定领取这件战利品吗？", True, cfg.COLOR_WHITE)
+        screen.blit(q, ((cfg.SCREEN_WIDTH - q.get_width()) // 2, box.y + 30))
+
+        name = self.game.font_medium.render(item.name, True, item.rarity_color)
+        screen.blit(name, ((cfg.SCREEN_WIDTH - name.get_width()) // 2, box.y + 72))
+
+        labels = ["确定", "返回"]
+        gap = 48
+        total_w = sum(self.game.font_medium.size(label)[0] + 44 for label in labels) + gap
+        x = (cfg.SCREEN_WIDTH - total_w) // 2
+        y = box.y + box_h - 60
+        for idx, label in enumerate(labels):
+            w = self.game.font_medium.size(label)[0] + 44
+            rect = pygame.Rect(x, y, w, 38)
+            selected = idx == self.confirm_choice
+            pygame.draw.rect(screen,
+                             cfg.COLOR_YELLOW if selected else cfg.COLOR_DARK_GRAY,
+                             rect, 2 if selected else 1)
+            color = cfg.COLOR_YELLOW if selected else cfg.COLOR_GRAY
+            surf = self.game.font_medium.render(label, True, color)
+            screen.blit(surf, (rect.x + (w - surf.get_width()) // 2,
+                               rect.y + (38 - surf.get_height()) // 2))
+            x += w + gap
+
+        hint = self.game.font_small.render(
+            "← → 选择　Enter / Z / Space：确认　Esc / X：取消", True, cfg.COLOR_DARK_GRAY)
+        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, box.y + box_h + 10))

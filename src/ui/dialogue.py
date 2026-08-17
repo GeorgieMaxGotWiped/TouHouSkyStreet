@@ -1,8 +1,12 @@
 # 对话系统
 # 底部对话框：Z/Enter 继续，ESC 跳过
 
+import re
 import pygame
 from src.engine import settings as cfg
+
+# 对话说话名只显示英文：去掉中文前缀（如「魔法使 Mage」→「Mage」）
+_CJK_LEAD = re.compile(r"^[\u4e00-\u9fff\uff00-\uffef\u3000-\u303f]+\s*")
 
 # 对话框高度（px）
 DIALOGUE_BOX_HEIGHT = 112
@@ -14,11 +18,14 @@ DIALOGUE_PORTRAIT_FADE_FRAMES = 15
 
 class DialogueBox:
     """底部对话框（逐条推进）"""
-    def __init__(self, game, lines, portraits=None, portrait_sides=None):
+    def __init__(self, game, lines, portraits=None, portrait_sides=None,
+                 portrait_scales=None, portrait_offsets=None):
         self.game = game
         self.lines = lines          # [(name, text), ...]
         self.portraits = portraits or {}   # {角色名: 贴图路径}
         self.portrait_sides = portrait_sides or {}   # {角色名: "left"/"right"}，默认右侧
+        self.portrait_scales = portrait_scales or {}   # {角色名: 立绘放大倍率}，默认 1.0
+        self.portrait_offsets = portrait_offsets or {}   # {角色名: 立绘水平偏移px}，正值右移
         self.index = 0
         self.finished = False
         self.wait_frames = 20       # 换行后输入缓冲，防止误跳过
@@ -27,12 +34,16 @@ class DialogueBox:
         self.portrait_path = None     # 当前显示的立绘路径（换行时重新淡入）
         self.portrait_fade = 0        # 立绘当前透明度（0-255）
         self.portrait_fade_timer = 0  # 立绘淡入剩余帧数
+        self.boss_card = self._find_boss_card()   # 本段对话涉及的 BOSS 英文名，无则 None
 
-    def _get_portrait(self, path):
-        """加载并缓存立绘：等比放大到「头顶对齐战斗框上1/3线」，失败返回 None"""
-        if path in self._portrait_attempted:
-            return self._portrait_cache.get(path)
-        self._portrait_attempted.add(path)
+    def _get_portrait(self, path, name):
+        """加载并缓存立绘：等比放大到「头顶对齐战斗框上1/3线」，失败返回 None。
+        name 对应的角色可通过 portrait_scales 额外放大。"""
+        scale = self.portrait_scales.get(name, 1.0)
+        key = (path, scale)
+        if key in self._portrait_attempted:
+            return self._portrait_cache.get(key)
+        self._portrait_attempted.add(key)
         try:
             img = pygame.image.load(path)
             try:
@@ -43,12 +54,27 @@ class DialogueBox:
             if h <= 0:
                 raise ValueError("invalid portrait height")
             ph = self._portrait_height(img, h)
+            if scale != 1.0:
+                ph = max(1, int(round(ph * scale)))
             new_w = max(1, round(w * ph / h))
-            self._portrait_cache[path] = pygame.transform.smoothscale(
+            self._portrait_cache[key] = pygame.transform.smoothscale(
                 img, (new_w, ph))
         except Exception as e:
             print(f"[Dialogue] Failed to load portrait {path}: {e}")
-        return self._portrait_cache.get(path)
+        return self._portrait_cache.get(key)
+
+    @staticmethod
+    def _display_name(name):
+        """对话中的显示名：只保留英文名（去掉中文前缀）。"""
+        return _CJK_LEAD.sub('', name)
+
+    def _find_boss_card(self):
+        """从本段对话的说话人中找出头衔表里的 BOSS（英文名），没有则返回 None。"""
+        for name, _text in self.lines:
+            display = self._display_name(name)
+            if display in cfg.BOSS_TITLES:
+                return display
+        return None
 
     @staticmethod
     def _portrait_height(img, h):
@@ -121,7 +147,7 @@ class DialogueBox:
         # 说话角色的立绘：贴在对话框上方（无边框），默认右侧；自机在左侧
         portrait_path = self.portraits.get(name)
         if portrait_path:
-            sprite = self._get_portrait(portrait_path)
+            sprite = self._get_portrait(portrait_path, name)
             if sprite is not None:
                 if self.portrait_fade < 255:
                     sprite = self._with_alpha(sprite, self.portrait_fade)
@@ -129,7 +155,7 @@ class DialogueBox:
                 if self.portrait_sides.get(name) == "left":
                     px = x
                 else:
-                    px = x + box_w - pw
+                    px = x + box_w - pw + self.portrait_offsets.get(name, 0)
                 py = y - ph // 2   # 立绘下半部分被对话框遮挡（半身效果）
                 # 超出战斗框的部分裁剪掉，不显示
                 old_clip = screen.get_clip()
@@ -143,9 +169,19 @@ class DialogueBox:
         screen.blit(box, (x, y))
         pygame.draw.rect(screen, cfg.COLOR_GRAY, (x, y, box_w, box_h), 2)
 
-        # 角色名
-        name_text = self.game.font_medium.render(name, True, cfg.COLOR_YELLOW)
+        # 角色名（只显示英文名）
+        name_text = self.game.font_medium.render(self._display_name(name), True, cfg.COLOR_YELLOW)
         screen.blit(name_text, (x + 16, y + 12))
+
+        # 对话框右上角：本段对话涉及的 BOSS 头衔一行 + 名字一行（放到框外上方，x 不变）
+        if self.boss_card:
+            title_surf = self.game.font_small.render(
+                cfg.BOSS_TITLES[self.boss_card], True, cfg.COLOR_GRAY)
+            boss_name_surf = self.game.font_medium.render(
+                self.boss_card, True, cfg.COLOR_YELLOW)
+            right_x = x + box_w - 16
+            screen.blit(title_surf, (right_x - title_surf.get_width(), y - 52))
+            screen.blit(boss_name_surf, (right_x - boss_name_surf.get_width(), y - 30))
 
         # 正文（自动换行）
         body_font = self.game.font_small

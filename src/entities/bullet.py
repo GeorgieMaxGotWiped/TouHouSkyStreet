@@ -176,6 +176,7 @@ class Bullet:
 
         # 角度（用于旋转弹）
         self.angle = math.atan2(vy, vx)
+        self.base_speed = math.hypot(vx, vy)  # 初始速度（擦弹减速效果还原用）
 
     def update(self, dt):
         # 消弹中：冻结在原地播放变白自爆动画

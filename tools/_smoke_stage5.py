@@ -139,7 +139,8 @@ def _solve_goldor_terminal(stage, bm, px, py, limit=4000):
 def main():
     assert get_stage_class(5) is Stage5_WitherLords, "stage5 registered"
     assert get_next_stage_class(4) is Stage5_WitherLords, "stage4 -> stage5"
-    assert get_next_stage_class(5) is None, "stage5 -> menu"
+    from src.stages.stage6 import Stage6_FinalApproach
+    assert get_next_stage_class(5) is Stage6_FinalApproach, "stage5 -> stage6"
     print("[1] registry OK")
 
     stage = Stage5_WitherLords()

@@ -28,6 +28,11 @@ HP_BAR_TOP = 10             # 血条顶部
 HP_BAR_HEIGHT = 8           # 血条高度
 BOSS_NAME_Y = HP_BAR_TOP + HP_BAR_HEIGHT + 4   # Boss 名 / 符卡名共用行
 
+# 开符站稳：Boss 到达符卡站位（战场宽/2, 120）前不展开符卡弹幕，
+# 避免 Boss 边滑行边放弹导致弹幕变形；超时后就位兜底防卡死
+SPELL_SETTLE_EPS = 1.0       # 到达站位判定阈值（px）
+SPELL_SETTLE_MAX = 240       # 最长等待帧数（超时就位兜底）
+
 
 def _english_only(text):
     """Boss 显示名：只保留 ASCII 英文部分（删除中文），避免名字过长超出战斗区域"""
@@ -270,6 +275,9 @@ class Boss:
         self.target_x = self.x
         self.target_y = self.y
         self.move_speed = 2.0
+        # 开符站稳：Boss 未到达符卡站位前不展开符卡弹幕
+        self._spell_settle = False
+        self._spell_settle_frames = 0
 
         # 符卡
         self.spell_cards = []
@@ -317,6 +325,13 @@ class Boss:
         self.frenzy_crystals = []      # Frenzy power crystal 收集物
         self.frenzy_shockwaves = []    # Frenzy 冲击波视觉环（TNT 爆炸 / 大型冲击波 / 拾取闪光）
         self.frenzy_laser = None       # Frenzy 解封红色激光状态
+        self.necron_nuclear = None     # 焚符「Nuclear Frenzy」核能领域状态（None=未展开）
+        self.kaeman_dominion = None    # 王符「Wither King's Dominion」Wither 王领域状态（None=未展开）
+        self.kaeman_relics = None      # 冥符「Five Corrupted Relics」五种 Relic 五边形状态（None=未展开）
+        self.kaeman_slash = None       # 裂符「Dimensional Slash」空间裂痕状态（None=未展开）
+        self.kaeman_atomize = None     # 王符「Atomizing Ray」原子化扫射射线状态（None=未展开）
+        self.kaeman_slumber = None    # 终仪「The Wither King's Final Slumber」吸收/放出状态（None=未展开）
+        self.spell_damage_hook = None  # 符卡伤害回调（焚符火力压制领域），由符卡挂接
         self.entering = True
         self.entry_timer = 120
         self.invincible = False
@@ -396,6 +411,28 @@ class Boss:
             self.x += dx * min(1.0, self.move_speed / dist) * dt * 60
             self.y += dy * min(1.0, self.move_speed / dist) * dt * 60
 
+    def _spell_settled(self):
+        """开符站稳检查：返回 True 表示可展开符卡弹幕。
+
+        Boss 未到达符卡站位（战场宽/2, 120）前不展开弹幕：Boss 继续滑向站位，
+        符卡计时同步暂停，避免 Boss 边移动边放弹导致弹幕变形；超时后就位兜底，
+        防止站位不可达导致符卡卡死。
+        """
+        if not self._spell_settle:
+            return True
+        self._spell_settle_frames += 1
+        dx = self.target_x - self.x
+        dy = self.target_y - self.y
+        if dx * dx + dy * dy <= SPELL_SETTLE_EPS * SPELL_SETTLE_EPS:
+            self._spell_settle = False
+            return True
+        if self._spell_settle_frames >= SPELL_SETTLE_MAX:
+            self.x = self.target_x
+            self.y = self.target_y
+            self._spell_settle = False
+            return True
+        return False
+
     def update(self, dt, bullet_manager, player_x, player_y):
         # 符卡背景独立推进：Boss 死亡/结符后的淡出也能继续播放
         if self.spell_bg is not None:
@@ -454,7 +491,7 @@ class Boss:
                     self._start_spell(self.last_spell)
 
         elif self.phase == "spell":
-            if self.current_spell:
+            if self.current_spell and self._spell_settled():
                 self.current_spell.update(self, bullet_manager, dt, player_x, player_y)
 
         elif self.phase == "reviving":
@@ -580,6 +617,14 @@ class Boss:
         self.storm_giga = None
         self.goldor_terminal = None
         self.goldor_rage = None
+        self.necron_nuclear = None
+        self.kaeman_dominion = None
+        self.kaeman_relics = None
+        self.kaeman_dragon = None
+        self.kaeman_slash = None
+        self.kaeman_atomize = None
+        self.kaeman_slumber = None
+        self.spell_damage_hook = None   # 开符：清空上一符卡的伤害回调
         if spell is None:
             if self.current_spell_idx >= len(self.spell_cards):
                 return
@@ -591,6 +636,9 @@ class Boss:
         self.current_spell.start()
         self.resistance = self.spell_resistance
         self.move_to(cfg.BATTLE_AREA_WIDTH / 2, 120)
+        # 开符站稳：Boss 到达符卡站位前不展开弹幕（避免边移动边放弹导致弹幕变形）
+        self._spell_settle = True
+        self._spell_settle_frames = 0
         # 刚开符时给予一段免疫时间
         self.invincible = True
         self.invincible_timer = 60
@@ -639,6 +687,14 @@ class Boss:
         self.storm_giga = None
         self.goldor_terminal = None
         self.goldor_rage = None
+        self.necron_nuclear = None
+        self.kaeman_dominion = None
+        self.kaeman_relics = None
+        self.kaeman_dragon = None
+        self.kaeman_slash = None
+        self.kaeman_atomize = None
+        self.kaeman_slumber = None
+        self.spell_damage_hook = None   # 战败：清空符卡伤害回调
 
     def _end_spell(self):
         self._cancel_screen_bullets()   # 结符：清屏
@@ -662,6 +718,14 @@ class Boss:
         self.frenzy_laser = None
         self.storm_giga = None
         self.goldor_rage = None
+        self.necron_nuclear = None
+        self.kaeman_dominion = None
+        self.kaeman_relics = None
+        self.kaeman_dragon = None
+        self.kaeman_slash = None
+        self.kaeman_atomize = None
+        self.kaeman_slumber = None
+        self.spell_damage_hook = None   # 结符：清空符卡伤害回调
         self.current_spell_idx += 1
         self.current_spell = None
         restore_sprite = getattr(self, "_spell_sprite_restore", None)
@@ -693,13 +757,16 @@ class Boss:
             self.non_spell_timer = 0
             self.non_spell_duration = 240
 
-    def take_damage(self, damage):
+    def take_damage(self, damage, source=None):
         if (self.entering or self.invincible or not self.combat_enabled
                 or self.phase == "reviving"):
             return False
         if self._is_time_spell_active():
             return False
         self.hp -= damage * self.resistance
+        damage_hook = getattr(self, "spell_damage_hook", None)
+        if damage_hook is not None:
+            damage_hook(damage, source)
         # 血量钳制：确保三张符卡按序完整演出，Boss不会在最后一张符前被击杀
         if self.current_spell_idx < len(self.spell_cards):
             if self.phase == "spell" and self.current_spell:
