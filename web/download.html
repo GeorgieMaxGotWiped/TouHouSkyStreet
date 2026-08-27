@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>下载 · 东方天空街</title>
+  <meta name="description" content="下载东方天空街游戏，系统要求与运行方式。">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav">
+      <div class="nav-brand"><span class="dot"></span><span>东方天空街</span></div>
+      <nav class="nav-links">
+        <a href="index.html">首页</a>
+        <a href="gameplay.html">玩法</a>
+        <a href="characters.html">角色</a>
+        <a href="items.html">物品图鉴</a>
+        <a href="download.html">下载</a>
+        <a href="about.html">关于</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <span class="kicker">Download</span>
+    <h1>下载游戏</h1>
+    <p class="lead">Windows 10/11 · 单文件可执行 · 即点即玩</p>
+    <div class="btn-row">
+      <a class="btn btn-primary" href="https://github.com/GeorgieMaxGotWiped/TouHouSkyStreet/releases" target="_blank" rel="noopener">⬇ 下载 EXE 版</a>
+      <a class="btn btn-ghost" href="#source">源码运行</a>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container prose">
+      <h2>系统要求</h2>
+      <table>
+        <tr><th>项目</th><th>要求</th></tr>
+        <tr><td>系统</td><td>Windows 10 / 11</td></tr>
+        <tr><td>运行方式</td><td>直接运行 EXE，或使用 Python 3.8+ 运行源码</td></tr>
+        <tr><td>显卡 / 内存</td><td>普通集成显卡与 4GB 内存即可流畅运行</td></tr>
+      </table>
+
+      <h2>EXE 版</h2>
+      <p>游戏打包为单个 <code>TouHouSkyStreet.exe</code>，双击即可运行，无需安装 Python。EXE 将随 GitHub Releases 发布（构建命令见下）。</p>
+      <p>打包命令等价于：<code>pip install -r requirements-build.txt</code> 后执行 <code>python -m PyInstaller --onefile --name TouHouSkyStreet --add-data "assets;assets" --noconsole main.py</code>。</p>
+      <div class="btn-row" style="justify-content:flex-start;">
+        <a class="btn btn-ghost" href="https://github.com/GeorgieMaxGotWiped/TouHouSkyStreet/releases" target="_blank" rel="noopener">前往 GitHub Releases 下载</a>
+      </div>
+
+      <h2 id="source">源码运行</h2>
+      <p>若希望从源码运行，请确保本机已安装 Python 3.8+（安装时勾选 “Add Python to PATH”）。</p>
+      <ol>
+        <li>双击根目录 <code>启动游戏.bat</code>（自动检测 Python 与依赖），或手动执行 <code>pip install -r requirements.txt</code>。</li>
+        <li>命令行运行：<code>python main.py</code>。</li>
+        <li>指定难度：<code>python main.py easy|normal|hard|lunatic</code>。</li>
+      </ol>
+      <p>若自动检测仍找不到 Python，可在根目录新建 <code>python_path.txt</code>，第一行填写 Python 可执行文件完整路径（如 <code>C:\Python313\python.exe</code>）。</p>
+
+      <h2>更新说明</h2>
+      <p>详细版本更新记录见仓库 <code>RELEASE_NOTES.md</code>。</p>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <div class="container foot">
+      <span>© 2026 Touhou Sky Street 制作组 · 东方 Project 同人作品</span>
+      <span>基于 Hypixel Skyblock 的二次创作 · 素材来源与许可见<a href="about.html">关于</a></span>
+    </div>
+  </footer>
+  <script src="js/site.js"></script>
+</body>
+</html>

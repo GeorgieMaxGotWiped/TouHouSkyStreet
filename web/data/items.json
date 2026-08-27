@@ -1,0 +1,1471 @@
+{
+  "meta": {
+    "project": "东方天空街 ~ Touhou Sky Street",
+    "count": 61,
+    "rarities": [
+      {
+        "id": "COMMON",
+        "label": "Common",
+        "color": "#aaaaaa"
+      },
+      {
+        "id": "UNCOMMON",
+        "label": "Uncommon",
+        "color": "#55ff55"
+      },
+      {
+        "id": "RARE",
+        "label": "Rare",
+        "color": "#5555ff"
+      },
+      {
+        "id": "EPIC",
+        "label": "Epic",
+        "color": "#aa00aa"
+      },
+      {
+        "id": "LEGENDARY",
+        "label": "Legendary",
+        "color": "#ffaa00"
+      },
+      {
+        "id": "MYTHIC",
+        "label": "Mythic",
+        "color": "#ff55ff"
+      },
+      {
+        "id": "DIVINE",
+        "label": "Divine",
+        "color": "#55ffff"
+      },
+      {
+        "id": "SPECIAL",
+        "label": "Special",
+        "color": "#ff5555"
+      },
+      {
+        "id": "VERY_SPECIAL",
+        "label": "Very_special",
+        "color": "#ff5555"
+      }
+    ],
+    "types": [
+      {
+        "id": "weapon",
+        "label": "武器"
+      },
+      {
+        "id": "armor",
+        "label": "护甲"
+      },
+      {
+        "id": "accessory",
+        "label": "护符"
+      },
+      {
+        "id": "consumable",
+        "label": "消耗品"
+      },
+      {
+        "id": "material",
+        "label": "材料"
+      },
+      {
+        "id": "reforge_stone",
+        "label": "重铸石"
+      }
+    ]
+  },
+  "items": [
+    {
+      "id": "enderman_pet_common",
+      "name": "Enderman Pet [C]",
+      "rarity": "COMMON",
+      "rarity_label": "Common",
+      "rarity_color": "#aaaaaa",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {
+        "crit_damage": 10
+      },
+      "effects": {},
+      "lore": [],
+      "buy_price": 500,
+      "sell_price": 100,
+      "image": "../assets/items/enderman_pet_common.png"
+    },
+    {
+      "id": "aspect_of_the_jerry",
+      "name": "Aspect of the Jerry",
+      "rarity": "COMMON",
+      "rarity_label": "Common",
+      "rarity_color": "#aaaaaa",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "damage_pct": 1
+      },
+      "lore": [
+        "伤害+1%"
+      ],
+      "buy_price": 300000,
+      "sell_price": 60000,
+      "image": "../assets/items/aspect_of_the_jerry.png"
+    },
+    {
+      "id": "undead_sword",
+      "name": "Undead Sword",
+      "rarity": "COMMON",
+      "rarity_label": "Common",
+      "rarity_color": "#aaaaaa",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "minion_damage_pct": 10
+      },
+      "lore": [
+        "对小怪伤害+10%"
+      ],
+      "buy_price": 800000,
+      "sell_price": 200000,
+      "image": "../assets/items/undead_sword.png"
+    },
+    {
+      "id": "lapis_armor_boots",
+      "name": "Lapis Armor Boots",
+      "rarity": "UNCOMMON",
+      "rarity_label": "Uncommon",
+      "rarity_color": "#55ff55",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "boots",
+      "slot_label": "靴子",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "coin_drop_pct": 2
+      },
+      "lore": [
+        "+2% Coin掉落",
+        "4件全套：所有EPIC及以上物品+20%获取概率"
+      ],
+      "buy_price": 300000,
+      "sell_price": 100000,
+      "image": "../assets/items/lapis_armor_boots.png"
+    },
+    {
+      "id": "lapis_armor_chestplate",
+      "name": "Lapis Armor Chestplate",
+      "rarity": "UNCOMMON",
+      "rarity_label": "Uncommon",
+      "rarity_color": "#55ff55",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "chestplate",
+      "slot_label": "胸甲",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "kill_small_coins": 80000
+      },
+      "lore": [
+        "击杀1个小怪时获得80K Coin",
+        "4件全套：所有EPIC及以上物品+20%获取概率"
+      ],
+      "buy_price": 1000000,
+      "sell_price": 300000,
+      "image": "../assets/items/lapis_armor_chestplate.png"
+    },
+    {
+      "id": "lapis_armor_helmet",
+      "name": "Lapis Armor Helmet",
+      "rarity": "UNCOMMON",
+      "rarity_label": "Uncommon",
+      "rarity_color": "#55ff55",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "helmet",
+      "slot_label": "头盔",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "coin_drop_pct": 3
+      },
+      "lore": [
+        "+3% Coin掉落",
+        "4件全套：所有EPIC及以上物品+20%获取概率"
+      ],
+      "buy_price": 350000,
+      "sell_price": 120000,
+      "image": "../assets/items/lapis_armor_helmet.png"
+    },
+    {
+      "id": "lapis_armor_leggings",
+      "name": "Lapis Armor Leggings",
+      "rarity": "UNCOMMON",
+      "rarity_label": "Uncommon",
+      "rarity_color": "#55ff55",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "leggings",
+      "slot_label": "护腿",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "kill_boss_coins": 10000000,
+        "kill_midboss_coins": 5000000
+      },
+      "lore": [
+        "击杀1个关底BOSS时获得10M Coin；击杀1个道中BOSS时获得5M Coin",
+        "4件全套：所有EPIC及以上物品+20%获取概率"
+      ],
+      "buy_price": 2000000,
+      "sell_price": 600000,
+      "image": "../assets/items/lapis_armor_leggings.png"
+    },
+    {
+      "id": "sword_of_bad_health",
+      "name": "Sword of Bad Health",
+      "rarity": "UNCOMMON",
+      "rarity_label": "Uncommon",
+      "rarity_color": "#55ff55",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：消耗1残机，10秒内友方造成的伤害+200%"
+      ],
+      "buy_price": 2000000,
+      "sell_price": 500000,
+      "image": "../assets/items/sword_of_bad_health.png"
+    },
+    {
+      "id": "balloon_snake",
+      "name": "Balloon Snake",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {
+        "tracking_high_speed_damage_pct": 20
+      },
+      "lore": [
+        "高速状态下追踪弹伤害+20%"
+      ],
+      "buy_price": 5000000,
+      "sell_price": 2000000,
+      "image": "../assets/items/balloon_snake.png"
+    },
+    {
+      "id": "guardian_pet_rare",
+      "name": "Guardian Pet [R]",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {
+        "defense": 20,
+        "health": 25
+      },
+      "effects": {},
+      "lore": [],
+      "buy_price": 1500,
+      "sell_price": 300,
+      "image": "../assets/items/guardian_pet_rare.png"
+    },
+    {
+      "id": "maddox_batphone",
+      "name": "Maddox Batphone",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {
+        "kill50_bombs": 1
+      },
+      "lore": [
+        "每消灭50只怪物获得1BOMB"
+      ],
+      "buy_price": 3000000,
+      "sell_price": 1000000,
+      "image": "../assets/items/maddox_batphone.png"
+    },
+    {
+      "id": "overflux_power_orb",
+      "name": "Overflux Power Orb",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：Boss战中召唤Orb，若接下来10秒内持续处在Orb范围内获得1残机",
+        "Orb判定大小约等于擦弹范围"
+      ],
+      "buy_price": 18000000,
+      "sell_price": 7000000,
+      "image": "../assets/items/overflux_power_orb.png"
+    },
+    {
+      "id": "power_orb",
+      "name": "Radiant Power Orb",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {
+        "health_regen": 10
+      },
+      "effects": {},
+      "lore": [
+        "Place to deploy a power orb",
+        "that heals nearby players."
+      ],
+      "buy_price": 1200,
+      "sell_price": 240,
+      "image": "../assets/items/power_orb.png"
+    },
+    {
+      "id": "summoning_ring",
+      "name": "Summoning Ring",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：随机召唤2只归属于你的小怪",
+        "反向移动、反向射击（自机狙锁Boss），弹幕可抵消敌弹或对敌人造成150伤害，不对玩家造成伤害"
+      ],
+      "buy_price": 25000000,
+      "sell_price": 10000000,
+      "image": "../assets/items/summoning_ring.png"
+    },
+    {
+      "id": "tarantula_pet",
+      "name": "Tarantula Pet",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {
+        "graze_speed_pct": 20
+      },
+      "lore": [
+        "有敌弹在擦弹范围内时移速+20%"
+      ],
+      "buy_price": 3000000,
+      "sell_price": 1000000,
+      "image": "../assets/items/tarantula_pet.png"
+    },
+    {
+      "id": "bonzos_mask",
+      "name": "Bonzo's Mask",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "helmet",
+      "slot_label": "头盔",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {
+        "health": 125,
+        "defense": 100,
+        "intelligence": 150
+      },
+      "effects": {},
+      "lore": [
+        "Returns you from the dead."
+      ],
+      "buy_price": 7000,
+      "sell_price": 1400,
+      "image": "../assets/items/bonzos_mask.png"
+    },
+    {
+      "id": "heavy_armor_boots",
+      "name": "Heavy Armor Boots",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "boots",
+      "slot_label": "靴子",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "hit_cancel_chance": 10,
+        "speed_pct": -10
+      },
+      "lore": [
+        "10%概率被弹时将其抵消；移动速度-10%",
+        "4件全套：高速状态移动速度+20%"
+      ],
+      "buy_price": 2500000,
+      "sell_price": 900000,
+      "image": "../assets/items/heavy_armor_boots.png"
+    },
+    {
+      "id": "heavy_armor_chestplate",
+      "name": "Heavy Armor Chestplate",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "chestplate",
+      "slot_label": "胸甲",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "hit_cancel_chance": 15,
+        "speed_pct": -15
+      },
+      "lore": [
+        "15%概率被弹时将其抵消；移动速度-15%",
+        "4件全套：高速状态移动速度+20%"
+      ],
+      "buy_price": 4000000,
+      "sell_price": 1500000,
+      "image": "../assets/items/heavy_armor_chestplate.png"
+    },
+    {
+      "id": "heavy_armor_helmet",
+      "name": "Heavy Armor Helmet",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "helmet",
+      "slot_label": "头盔",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "hit_cancel_chance": 6,
+        "speed_pct": -6
+      },
+      "lore": [
+        "6%概率被弹时将其抵消；移动速度-6%",
+        "4件全套：高速状态移动速度+20%"
+      ],
+      "buy_price": 2000000,
+      "sell_price": 700000,
+      "image": "../assets/items/heavy_armor_helmet.png"
+    },
+    {
+      "id": "heavy_armor_leggings",
+      "name": "Heavy Armor Leggings",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "leggings",
+      "slot_label": "护腿",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "hit_cancel_chance": 12,
+        "speed_pct": -12
+      },
+      "lore": [
+        "12%概率被弹时将其抵消；移动速度-12%",
+        "4件全套：高速状态移动速度+20%"
+      ],
+      "buy_price": 3000000,
+      "sell_price": 1100000,
+      "image": "../assets/items/heavy_armor_leggings.png"
+    },
+    {
+      "id": "necromancers_brooch",
+      "name": "Necromancer's Brooch",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "reforge_stone",
+      "type_label": "重铸石",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "Reforge Stone",
+        "Necrotic：低速状态下固定弹射速+3%"
+      ],
+      "buy_price": 1000000,
+      "sell_price": 350000,
+      "image": "../assets/items/necromancers_brooch.png"
+    },
+    {
+      "id": "red_scarf",
+      "name": "Red Scarf",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "reforge_stone",
+      "type_label": "重铸石",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "Reforge Stone",
+        "Loving：BOMB伤害+8%；减少1条固定弹，增加1条追踪弹"
+      ],
+      "buy_price": 3000000,
+      "sell_price": 1000000,
+      "image": "../assets/items/red_scarf.png"
+    },
+    {
+      "id": "aspect_of_the_end",
+      "name": "Aspect of the End",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：向当前移动方向瞬移一段距离"
+      ],
+      "buy_price": 3000000,
+      "sell_price": 900000,
+      "image": "../assets/items/aspect_of_the_end.png"
+    },
+    {
+      "id": "bonzos_staff",
+      "name": "Bonzo's Staff",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：放出3个随机方向有后坐力的气球，碰到弹幕后爆炸"
+      ],
+      "buy_price": 8000000,
+      "sell_price": 2500000,
+      "image": "../assets/items/bonzos_staff.png"
+    },
+    {
+      "id": "golem_sword",
+      "name": "Golem Sword",
+      "rarity": "RARE",
+      "rarity_label": "Rare",
+      "rarity_color": "#5555ff",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：钢铁之击（每面可以使用4次）",
+        "炸掉擦弹范围内所有弹幕"
+      ],
+      "buy_price": 5000000,
+      "sell_price": 1500000,
+      "image": "../assets/items/golem_sword.png"
+    },
+    {
+      "id": "catacombs_expert_ring",
+      "name": "Catacombs Expert Ring",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {
+        "midboss_damage_pct": 50
+      },
+      "lore": [
+        "对道中BOSS伤害+50%"
+      ],
+      "buy_price": 30000000,
+      "sell_price": 12000000,
+      "image": "../assets/items/catacombs_expert_ring.png"
+    },
+    {
+      "id": "enderman_pet_epic",
+      "name": "Enderman Pet",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：向当前移动方向瞬移一段距离"
+      ],
+      "buy_price": 10000000,
+      "sell_price": 4000000,
+      "image": "../assets/items/enderman_pet_epic.png"
+    },
+    {
+      "id": "spider_artifact",
+      "name": "Spider Artifact",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {
+        "spider_artifact": true
+      },
+      "lore": [
+        "失去1残机后的10秒内若再次失去残机，改为失去1B并放出决死Bomb"
+      ],
+      "buy_price": 6000000,
+      "sell_price": 2000000,
+      "image": "../assets/items/spider_artifact.png"
+    },
+    {
+      "id": "shadow_assassin_boots",
+      "name": "Shadow Assassin Boots",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "boots",
+      "slot_label": "靴子",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "kill_small_damage_pct": 0.3,
+        "kill_boss_damage_pct": 3
+      },
+      "lore": [
+        "每关中击杀1个小怪本关伤害+0.3%，击杀1个BOSS本关伤害+3%"
+      ],
+      "buy_price": 10000000,
+      "sell_price": 4000000,
+      "image": "../assets/items/shadow_assassin_boots.png"
+    },
+    {
+      "id": "tarantula_boots",
+      "name": "Tarantula Boots",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "boots",
+      "slot_label": "靴子",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：清除当前移动方向上最近的1个弹幕并快速移动至其位置"
+      ],
+      "buy_price": 8000000,
+      "sell_price": 3000000,
+      "image": "../assets/items/tarantula_boots.png"
+    },
+    {
+      "id": "tarantula_helmet",
+      "name": "Tarantula Helmet",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "helmet",
+      "slot_label": "头盔",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "end_lost_over1_bombs": 1
+      },
+      "lore": [
+        "C技能：关卡结束时若失去残机>1，获得1BOMB"
+      ],
+      "buy_price": 8000000,
+      "sell_price": 3000000,
+      "image": "../assets/items/tarantula_helmet.png"
+    },
+    {
+      "id": "wither_goggles",
+      "name": "Wither Goggles",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "helmet",
+      "slot_label": "头盔",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "bomb_damage_pct": 50
+      },
+      "lore": [
+        "BOMB伤害+50%"
+      ],
+      "buy_price": 18000000,
+      "sell_price": 7000000,
+      "image": "../assets/items/wither_goggles.png"
+    },
+    {
+      "id": "dragons_claw",
+      "name": "Dragon Claw",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "reforge_stone",
+      "type_label": "重铸石",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "Reforge Stone",
+        "Fabled：非追踪弹造成+15%伤害"
+      ],
+      "buy_price": 2000000,
+      "sell_price": 700000,
+      "image": "../assets/items/dragons_claw.png"
+    },
+    {
+      "id": "precursor_gear",
+      "name": "Precursor Gear",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "reforge_stone",
+      "type_label": "重铸石",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "Reforge Stone",
+        "Ancient：造成+X%伤害，X为当前面数"
+      ],
+      "buy_price": 4000000,
+      "sell_price": 1500000,
+      "image": "../assets/items/precursor_gear.png"
+    },
+    {
+      "id": "wither_blood",
+      "name": "Wither Blood",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "reforge_stone",
+      "type_label": "重铸石",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "Reforge Stone",
+        "Withered：追踪弹造成+20%伤害"
+      ],
+      "buy_price": 3000000,
+      "sell_price": 1000000,
+      "image": "../assets/items/wither_blood.png"
+    },
+    {
+      "id": "arack",
+      "name": "Arack",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "arack_pct": 35
+      },
+      "lore": [
+        "失去1残机后的10秒内造成+35%伤害"
+      ],
+      "buy_price": 4000000,
+      "sell_price": 1200000,
+      "image": "../assets/items/arack.png"
+    },
+    {
+      "id": "end_stone_sword",
+      "name": "End Stone Sword",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：2秒内无法移动且无法受伤（每面可以使用3次）"
+      ],
+      "buy_price": 6000000,
+      "sell_price": 2000000,
+      "image": "../assets/items/end_stone_sword.png"
+    },
+    {
+      "id": "spirit_bow",
+      "name": "Spirit Bow",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：接下来的10秒内所有自机子弹都变为追踪弹"
+      ],
+      "buy_price": 10000000,
+      "sell_price": 3500000,
+      "image": "../assets/items/spirit_bow.png"
+    },
+    {
+      "id": "wither_cloak_sword",
+      "name": "Wither Cloak Sword",
+      "rarity": "EPIC",
+      "rarity_label": "Epic",
+      "rarity_color": "#aa00aa",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：在周围召唤6个护盾，持续10秒",
+        "6个护盾围绕自机旋转，位置约在擦弹处，碰到敌弹将其抵消并失去该护盾"
+      ],
+      "buy_price": 22000000,
+      "sell_price": 7000000,
+      "image": "../assets/items/wither_cloak_sword.png"
+    },
+    {
+      "id": "baby_yeti_pet",
+      "name": "Baby Yeti Pet",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {
+        "kill50_lives": 1
+      },
+      "lore": [
+        "消灭50只怪物后获得1残机"
+      ],
+      "buy_price": 50000000,
+      "sell_price": 20000000,
+      "image": "../assets/items/baby_yeti_pet.png"
+    },
+    {
+      "id": "ender_dragon_pet",
+      "name": "Ender Dragon Pet",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {
+        "damage_pct": 20
+      },
+      "lore": [
+        "伤害+20%"
+      ],
+      "buy_price": 500000000,
+      "sell_price": 200000000,
+      "image": "../assets/items/ender_dragon_pet.png"
+    },
+    {
+      "id": "scarfs_studies",
+      "name": "Scarf's Studies",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {
+        "graze_slow_pct": 25
+      },
+      "lore": [
+        "低速状态下擦弹范围内子弹速度-25%"
+      ],
+      "buy_price": 20000000,
+      "sell_price": 8000000,
+      "image": "../assets/items/scarfs_studies.png"
+    },
+    {
+      "id": "wither_relic",
+      "name": "Wither Relic",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "accessory",
+      "type_label": "护符",
+      "slot": "accessory",
+      "slot_label": "护符",
+      "equippable": true,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {
+        "wither_damage_pct": 25
+      },
+      "lore": [
+        "对凋零伤害+25%"
+      ],
+      "buy_price": 300000000,
+      "sell_price": 120000000,
+      "image": "../assets/items/wither_relic.png"
+    },
+    {
+      "id": "goldors_helmet",
+      "name": "Goldor's Helmet",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "chestplate",
+      "slot_label": "胸甲",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "start_lives": 1
+      },
+      "lore": [
+        "关卡开始时+1残机"
+      ],
+      "buy_price": 50000000,
+      "sell_price": 20000000,
+      "image": "../assets/items/goldors_helmet.png"
+    },
+    {
+      "id": "maxors_boots",
+      "name": "Maxor's Boots",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "chestplate",
+      "slot_label": "胸甲",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "speed_pct": 25,
+        "hitbox_scale": 0.5
+      },
+      "lore": [
+        "移动速度+25%",
+        "判定点缩小50%"
+      ],
+      "buy_price": 40000000,
+      "sell_price": 16000000,
+      "image": "../assets/items/maxors_boots.png"
+    },
+    {
+      "id": "necromancer_lord_leggings",
+      "name": "Necromancer Lord Leggings",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "leggings",
+      "slot_label": "护腿",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "end_no_hit_lives": 1,
+        "end_no_hit_bombs": 1
+      },
+      "lore": [
+        "关卡结束时若未失去残机，+1残机，+1BOMB"
+      ],
+      "buy_price": 45000000,
+      "sell_price": 18000000,
+      "image": "../assets/items/necromancer_lord_leggings.png"
+    },
+    {
+      "id": "necrons_chestplate",
+      "name": "Necron's Chestplate",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "chestplate",
+      "slot_label": "胸甲",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "non_tracking_damage_pct": 40
+      },
+      "lore": [
+        "非追踪弹伤害+40%"
+      ],
+      "buy_price": 75000000,
+      "sell_price": 30000000,
+      "image": "../assets/items/necrons_chestplate.png"
+    },
+    {
+      "id": "precursor_eye",
+      "name": "Precursor Eye",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "helmet",
+      "slot_label": "头盔",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：向上射出1道持续3秒的红色激光（帧伤20）"
+      ],
+      "buy_price": 35000000,
+      "sell_price": 14000000,
+      "image": "../assets/items/precursor_eye.png"
+    },
+    {
+      "id": "storms_leggings",
+      "name": "Storm's Leggings",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "chestplate",
+      "slot_label": "胸甲",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "bomb_damage_pct": 35,
+        "start_bombs": 1
+      },
+      "lore": [
+        "BOMB伤害+35%",
+        "关卡开始时+1BOMB"
+      ],
+      "buy_price": 45000000,
+      "sell_price": 18000000,
+      "image": "../assets/items/storms_leggings.png"
+    },
+    {
+      "id": "superior_dragon_chestplate",
+      "name": "Superior Dragon Chestplate",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "armor",
+      "type_label": "护甲",
+      "slot": "chestplate",
+      "slot_label": "胸甲",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "damage_pct": 10,
+        "drop_rate_mult": 1.1
+      },
+      "lore": [
+        "伤害+10%",
+        "所有掉落概率+10%（乘算）"
+      ],
+      "buy_price": 30000000,
+      "sell_price": 12000000,
+      "image": "../assets/items/superior_dragon_chestplate.png"
+    },
+    {
+      "id": "divans_alloy",
+      "name": "Divan's Alloy",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "material",
+      "type_label": "材料",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "A legendary alloy. Purely collectible."
+      ],
+      "buy_price": 500000000,
+      "sell_price": 250000000,
+      "image": "../assets/items/divans_alloy.png"
+    },
+    {
+      "id": "judgement_core",
+      "name": "Judgement Core",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "material",
+      "type_label": "材料",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "A core of judgment. Purely collectible."
+      ],
+      "buy_price": 300000000,
+      "sell_price": 150000000,
+      "image": "../assets/items/judgement_core.png"
+    },
+    {
+      "id": "necrons_handle",
+      "name": "Necron's Handle",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "material",
+      "type_label": "材料",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "The handle of the Wither King's most trusted weapon."
+      ],
+      "buy_price": 400000000,
+      "sell_price": 200000000,
+      "image": "../assets/items/necrons_handle.png"
+    },
+    {
+      "id": "aspect_of_the_dragons",
+      "name": "Aspect of the Dragons",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：放出龙怒炸掉上方一定距离的所有弹幕，并对BOSS造成大量伤害",
+        "伤害4800"
+      ],
+      "buy_price": 30000000,
+      "sell_price": 12000000,
+      "image": "../assets/items/aspect_of_the_dragons.png"
+    },
+    {
+      "id": "dark_claymore",
+      "name": "Dark Claymore",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "damage_pct": 25
+      },
+      "lore": [
+        "伤害+25%"
+      ],
+      "buy_price": 150000000,
+      "sell_price": 60000000,
+      "image": "../assets/items/dark_claymore.png"
+    },
+    {
+      "id": "flower_of_truth",
+      "name": "Flower of Truth",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：放出1个玫瑰，追踪并消灭距离最近的3个弹幕，并对BOSS造成一定伤害（每面两次）",
+        "3次后飞向BOSS并对其造成1200伤害"
+      ],
+      "buy_price": 25000000,
+      "sell_price": 10000000,
+      "image": "../assets/items/flower_of_truth.png"
+    },
+    {
+      "id": "giants_sword",
+      "name": "Giant's Sword",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "C技能：召唤大剑清除场上所有弹幕，并对BOSS造成当前阶段50%的伤害"
+      ],
+      "buy_price": 100000000,
+      "sell_price": 40000000,
+      "image": "../assets/items/giants_sword.png"
+    },
+    {
+      "id": "hyperion",
+      "name": "Hyperion",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "bomb_damage_pct": 25,
+        "deathbomb_refund": 1
+      },
+      "lore": [
+        "BOMB伤害+25%",
+        "使用决死Bomb消耗2B时回复1B"
+      ],
+      "buy_price": 500000000,
+      "sell_price": 200000000,
+      "image": "../assets/items/hyperion.png"
+    },
+    {
+      "id": "terminator",
+      "name": "Terminator",
+      "rarity": "LEGENDARY",
+      "rarity_label": "Legendary",
+      "rarity_color": "#ffaa00",
+      "item_type": "weapon",
+      "type_label": "武器",
+      "slot": "weapon",
+      "slot_label": "武器",
+      "equippable": true,
+      "can_reforge": true,
+      "stats": {},
+      "effects": {
+        "non_tracking_damage_pct": 35,
+        "terminator": true
+      },
+      "lore": [
+        "非追踪弹+35%伤害",
+        "高速状态散射夹角9°/条，低速状态1°/条"
+      ],
+      "buy_price": 650000000,
+      "sell_price": 260000000,
+      "image": "../assets/items/terminator.png"
+    },
+    {
+      "id": "divine_fragment",
+      "name": "Divine Fragment",
+      "rarity": "DIVINE",
+      "rarity_label": "Divine",
+      "rarity_color": "#55ffff",
+      "item_type": "material",
+      "type_label": "材料",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "A fragment of divine power.",
+        "Radiates with celestial energy."
+      ],
+      "buy_price": 4000,
+      "sell_price": 800,
+      "image": "../assets/items/divine_fragment.png"
+    },
+    {
+      "id": "skyblock_coin",
+      "name": "SkyBlock Coin",
+      "rarity": "SPECIAL",
+      "rarity_label": "Special",
+      "rarity_color": "#ff5555",
+      "item_type": "material",
+      "type_label": "材料",
+      "slot": null,
+      "slot_label": null,
+      "equippable": false,
+      "can_reforge": false,
+      "stats": {},
+      "effects": {},
+      "lore": [
+        "拾取直接 +1M 金币，不进背包"
+      ],
+      "buy_price": 0,
+      "sell_price": 0,
+      "image": "../assets/items/skyblock_coin.png"
+    }
+  ]
+}

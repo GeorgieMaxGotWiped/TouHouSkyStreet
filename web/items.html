@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>物品图鉴 · 东方天空街</title>
+  <meta name="description" content="东方天空街全物品图鉴：武器、护甲、护符、重铸石与材料。">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav">
+      <div class="nav-brand"><span class="dot"></span><span>东方天空街</span></div>
+      <nav class="nav-links">
+        <a href="index.html">首页</a>
+        <a href="gameplay.html">玩法</a>
+        <a href="characters.html">角色</a>
+        <a href="items.html">物品图鉴</a>
+        <a href="download.html">下载</a>
+        <a href="about.html">关于</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <span class="kicker">Items</span>
+    <h1>物品图鉴</h1>
+    <p class="lead">共 <span id="total">–</span> 件物品，按罕见度与类型筛选。</p>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <div class="filter-bar" id="filter-rarity"></div>
+      <div class="filter-bar" id="filter-type"></div>
+      <div class="item-count" id="count-line"></div>
+      <div class="items-grid" id="items-grid"></div>
+      <p style="text-align:center;color:var(--c-text-dim);font-size:13px;margin-top:24px;">
+        物品数据由脚本从游戏源码导出（<code>web/tools/export_items.py</code>）。物品名称为游戏内英文名，中文名本地化整理中。
+      </p>
+    </div>
+  </section>
+
+  <footer class="site-footer">
+    <div class="container foot">
+      <span>© 2026 Touhou Sky Street 制作组 · 东方 Project 同人作品</span>
+      <span>基于 Hypixel Skyblock 的二次创作 · 素材来源与许可见<a href="about.html">关于</a></span>
+    </div>
+  </footer>
+  <script src="js/site.js"></script>
+  <script src="js/items.js"></script>
+</body>
+</html>
