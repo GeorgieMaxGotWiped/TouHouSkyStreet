@@ -156,10 +156,10 @@ a:hover { color: var(--accent); }
 /* 舞台（六幕）与特色共用编号列表 */
 .stage-list { list-style: none; margin: 0; padding: 0; }
 .stage-list li {
-  display: grid; grid-template-columns: 84px 1fr; gap: 20px;
+  display: grid; grid-template-columns: max-content 1fr; gap: 20px;
   padding: 20px 0; border-bottom: 1px solid var(--line);
 }
-.stage-list .st { font-family: var(--font-display); color: var(--gold); font-size: 16px; letter-spacing: 1px; }
+.stage-list .st { font-family: var(--font-display); color: var(--gold); font-size: 16px; letter-spacing: 1px; white-space: nowrap; }
 .stage-list h3 { margin: 0 0 4px; font-family: var(--font-body); font-weight: 700; font-size: 18px; }
 .stage-list p { margin: 0; color: var(--ink-dim); font-size: 14px; }
 
@@ -288,7 +288,7 @@ td { color: var(--ink-dim); }
   .intro { grid-template-columns: 1fr; }
   .screens { grid-template-columns: 1fr; }
   .screen { grid-column: 1 / 13 !important; margin-top: 0 !important; }
-  .feature, .stage-list li, .log-item { grid-template-columns: 40px 1fr; }
+  .feature, .log-item { grid-template-columns: 40px 1fr; }
   .gallery-grid { columns: 2 150px; }
 }
 
