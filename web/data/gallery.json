@@ -1,0 +1,110 @@
+{
+  "categories": [
+    {
+      "id": "player",
+      "label": "玩家"
+    },
+    {
+      "id": "boss",
+      "label": "Boss / 角色"
+    }
+  ],
+  "items": [
+    {
+      "id": "player",
+      "name": "玩家（自机）",
+      "category": "player",
+      "image": "assets/gallery/player.webp"
+    },
+    {
+      "id": "arachne",
+      "name": "蛛后 Arachne",
+      "category": "boss",
+      "image": "assets/gallery/arachne.webp"
+    },
+    {
+      "id": "bonzo",
+      "name": "邦佐 Bonzo",
+      "category": "boss",
+      "image": "assets/gallery/bonzo.webp"
+    },
+    {
+      "id": "end_stone_protector",
+      "name": "末影石守卫",
+      "category": "boss",
+      "image": "assets/gallery/end_stone_protector.webp"
+    },
+    {
+      "id": "ender_dragon",
+      "name": "末影龙",
+      "category": "boss",
+      "image": "assets/gallery/ender_dragon.webp"
+    },
+    {
+      "id": "goldor",
+      "name": "戈尔铎 Goldor",
+      "category": "boss",
+      "image": "assets/gallery/goldor.webp"
+    },
+    {
+      "id": "livid",
+      "name": "利维德 Livid",
+      "category": "boss",
+      "image": "assets/gallery/livid.webp"
+    },
+    {
+      "id": "maxor",
+      "name": "马克索 Maxor",
+      "category": "boss",
+      "image": "assets/gallery/maxor.webp"
+    },
+    {
+      "id": "necron",
+      "name": "尼可隆 Necron",
+      "category": "boss",
+      "image": "assets/gallery/necron.webp"
+    },
+    {
+      "id": "professor",
+      "name": "教授 Professor",
+      "category": "boss",
+      "image": "assets/gallery/professor.webp"
+    },
+    {
+      "id": "sadan",
+      "name": "萨丹 Sadan",
+      "category": "boss",
+      "image": "assets/gallery/sadan.webp"
+    },
+    {
+      "id": "scarf",
+      "name": "斯卡夫 Scarf",
+      "category": "boss",
+      "image": "assets/gallery/scarf.webp"
+    },
+    {
+      "id": "storm",
+      "name": "风暴 Storm",
+      "category": "boss",
+      "image": "assets/gallery/storm.webp"
+    },
+    {
+      "id": "thorn",
+      "name": "荆棘 Thorn",
+      "category": "boss",
+      "image": "assets/gallery/thorn.webp"
+    },
+    {
+      "id": "watcher",
+      "name": "守望者 Watcher",
+      "category": "boss",
+      "image": "assets/gallery/watcher.webp"
+    },
+    {
+      "id": "wither_king",
+      "name": "凋零之王 Wither King",
+      "category": "boss",
+      "image": "assets/gallery/wither_king.webp"
+    }
+  ]
+}

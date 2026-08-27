@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>物品图鉴 · 东方天空街</title>
-  <meta name="description" content="东方天空街全物品图鉴：武器、护甲、护符、重铸石与材料。">
+  <title>画廊 · 东方天空街</title>
+  <meta name="description" content="东方天空街人物与角色画廊。">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -25,22 +25,26 @@
   </header>
 
   <section class="hero">
-    <span class="kicker">Items</span>
-    <h1>物品图鉴</h1>
-    <p class="lead">共 <span id="total">–</span> 件物品，按罕见度与类型筛选。</p>
+    <span class="kicker">Gallery</span>
+    <h1>人物画廊</h1>
+    <p class="lead">@<span id="total">–</span> 位角色与 Boss</p>
   </section>
 
   <section class="section">
     <div class="container">
-      <div class="filter-bar" id="filter-rarity"></div>
-      <div class="filter-bar" id="filter-type"></div>
-      <div class="item-count" id="count-line"></div>
-      <div class="items-grid" id="items-grid"></div>
+      <div class="filter-bar" id="filter-cat"></div>
+      <div class="gallery-grid" id="gallery-grid"></div>
       <p style="text-align:center;color:var(--c-text-dim);font-size:13px;margin-top:24px;">
-        物品数据由脚本从游戏源码导出（<code>web/tools/export_items.py</code>）。物品名称为游戏内英文名，中文名本地化整理中。
+        图片由脚本从游戏资源导出优化（<code>web/tools/build_assets.py</code>），点击可放大查看。
       </p>
     </div>
   </section>
+
+  <div class="lightbox" id="lightbox" hidden>
+    <button class="lightbox-close" id="lightbox-close" aria-label="关闭">×</button>
+    <img id="lightbox-img" alt="">
+    <div class="lightbox-cap" id="lightbox-cap"></div>
+  </div>
 
   <footer class="site-footer">
     <div class="container foot">
@@ -49,7 +53,6 @@
     </div>
   </footer>
   <script src="js/site.js"></script>
-  <script src="js/items.js"></script>
+  <script src="js/gallery.js"></script>
 </body>
 </html>
-

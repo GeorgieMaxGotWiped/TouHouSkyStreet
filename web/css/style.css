@@ -167,3 +167,79 @@ th { background: var(--c-surface); }
 /* 视口淡入 */
 .reveal { opacity: 0; transform: translateY(16px); transition: opacity 0.5s ease, transform 0.5s ease; }
 .reveal.in { opacity: 1; transform: none; }
+
+/* ---------- 头图（hero 背景） ---------- */
+.hero.with-bg {
+  background:
+    linear-gradient(180deg, rgba(23,19,31,0.72), rgba(23,19,31,0.92) 70%),
+    url("../assets/img/hero.webp") center / cover no-repeat;
+}
+
+/* ---------- OST 播放器 ---------- */
+.player {
+  max-width: 460px; margin: 0 auto; padding: 24px;
+  background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); display: flex; gap: 20px; align-items: center;
+}
+.player-art {
+  width: 96px; height: 96px; flex: none; border-radius: 12px;
+  display: grid; place-items: center; font-size: 40px;
+  background: linear-gradient(135deg, var(--c-accent), #7a4bd0);
+  color: #fff;
+}
+.player-body { flex: 1; min-width: 0; }
+.player-track { font-size: 18px; font-weight: 700; }
+.player-sub { color: var(--c-text-dim); font-size: 13px; margin-bottom: 10px; }
+.player-progress { height: 6px; background: var(--c-border); border-radius: 999px; overflow: hidden; margin-bottom: 14px; }
+.player-progress .bar { display: block; width: 8%; height: 100%; background: var(--c-accent); border-radius: 999px; }
+.player-controls { display: flex; gap: 10px; }
+.ctrl {
+  width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--c-border);
+  background: transparent; color: var(--c-text); font-size: 16px; cursor: pointer;
+  display: grid; place-items: center;
+}
+.ctrl:disabled { opacity: 0.4; cursor: not-allowed; }
+.ctrl:not(:disabled):hover { background: var(--c-surface); }
+.ctrl.play { background: var(--c-accent); color: #fff; border-color: var(--c-accent); width: 52px; height: 52px; font-size: 20px; }
+.ctrl.play:disabled { background: var(--c-border); border-color: var(--c-border); }
+
+/* ---------- 曲目列表 ---------- */
+.track-list { max-width: 560px; margin: 0 auto; }
+.track-empty { text-align: center; color: var(--c-text-dim); padding: 40px 0; border: 1px dashed var(--c-border); border-radius: var(--radius); }
+.track-row {
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px;
+  border: 1px solid var(--c-border); border-radius: 12px; margin-bottom: 10px;
+  background: var(--c-surface);
+}
+.track-idx { color: var(--c-text-dim); font-family: monospace; min-width: 22px; }
+.track-info { flex: 1; min-width: 0; }
+.track-title { font-weight: 600; }
+.track-sub { color: var(--c-text-dim); font-size: 13px; }
+
+/* ---------- 画廊 ---------- */
+.gallery-grid {
+  display: grid; gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+.gallery-card {
+  margin: 0; background: var(--c-surface); border: 1px solid var(--c-border);
+  border-radius: var(--radius); overflow: hidden; cursor: zoom-in;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.gallery-card:hover { transform: translateY(-3px); border-color: var(--c-accent); }
+.gallery-card img { display: block; width: 100%; aspect-ratio: 3/4; object-fit: contain; background: #1a1623; }
+.gallery-card figcaption { padding: 10px 12px; font-size: 14px; color: var(--c-text-dim); text-align: center; }
+
+/* 灯箱 */
+.lightbox {
+  position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+  background: rgba(0,0,0,0.82); padding: 24px;
+}
+.lightbox[hidden] { display: none; }
+.lightbox img { max-width: 92vw; max-height: 86vh; border-radius: 8px; }
+.lightbox-cap { margin-top: 14px; color: var(--c-text); font-size: 16px; text-align: center; }
+.lightbox-close {
+  position: absolute; top: 20px; right: 28px; width: 44px; height: 44px;
+  border-radius: 50%; border: 1px solid var(--c-border); background: var(--c-surface);
+  color: #fff; font-size: 26px; cursor: pointer;
+}
