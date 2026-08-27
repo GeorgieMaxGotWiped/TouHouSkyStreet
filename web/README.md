@@ -2,6 +2,8 @@
 
 东方天空街 ~ Touhou Sky Street 官方资讯站点。纯静态 HTML / CSS / JavaScript，零构建依赖。
 
+设计取向：强烈的 2D 同人游戏官网气质，游戏原画/角色立绘承担主要视觉重量，避免 SaaS / Landing Page 式排版（无渐变、毛玻璃、胶囊按钮、统一卡片网格）。字体：`font1.ttf`（英文大标题）、`font2.otf`（中文与小字）。
+
 ## 运行（一键预览）
 
 - 双击 `web/启动预览.bat`：自动启动本地服务并打开浏览器。
@@ -14,11 +16,11 @@
 
 | 路径 | 说明 |
 | --- | --- |
-| `index.html` | 首页：Hero（头图 `bg_0`）、特色、截图、下载入口 |
+| `index.html` | 首页：标题画面（bg_0 原画）、特色、舞台、截图、手记 |
 | `gameplay.html` | 玩法、操作、难度与模式 |
 | `characters.html` | 六大舞台与主要 Boss（图鉴整理中） |
 | `items.html` | 物品图鉴（按罕见度/类型筛选） |
-| `gallery.html` | 人物画廊：玩家与 Boss 图鉴（WebP 优化） |
+| `gallery.html` | 人物画廊：玩家与 Boss 图鉴（瀑布流 + 灯箱） |
 | `ost.html` | 原声音乐页（曲目暂空） |
 | `download.html` | 下载、系统要求、运行方式 |
 | `about.html` | 项目简介、同人声明、素材许可 |
@@ -46,8 +48,9 @@ web/
   data/music.json       # 曲目数据（手动）
   assets/img/           # 站点位图素材（含 hero.webp 头图）
   assets/gallery/       # 人物图（WebP）
+  assets/fonts/         # font1.ttf（英文）/ font2.otf（中文）
   serve.py              # 本地多线程服务
+  启动预览.bat          # 一键预览
   tools/export_items.py # 物品数据导出脚本
   tools/build_assets.py # 头图/人物图优化 + 画廊数据
 ```
-
