@@ -33,6 +33,7 @@ class MenuState(GameState):
         super().__init__(game)
         self.options = ["Start Game", "Practice", "Settings", "Quit"]
         self.selected = 0
+        self._last_mouse_pos = (0, 0)
         # 背景图
         self.background = load_background(cfg.MENU_BACKGROUND,
                                           (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
@@ -110,11 +111,44 @@ class MenuState(GameState):
         keys = self.game.keys_just_pressed
         if keys.get(pygame.K_UP, False) or keys.get(pygame.K_w, False):
             self.selected = (self.selected - 1) % len(self.options)
+            self.game.play_sfx("cursor")
         if keys.get(pygame.K_DOWN, False) or keys.get(pygame.K_s, False):
             self.selected = (self.selected + 1) % len(self.options)
+            self.game.play_sfx("cursor")
 
         if keys.get(pygame.K_RETURN, False) or keys.get(pygame.K_z, False) or keys.get(pygame.K_SPACE, False):
+            self.game.play_sfx("ok")
             self._select()
+            return
+
+        # 鼠标：点击直接触发；悬停（且鼠标移动）切换选中项
+        mp = self.game.mouse_pos
+        clicked = self.game.mouse_clicked(1)
+        if clicked:
+            for i, rect in enumerate(self._menu_item_rects()):
+                if rect.collidepoint(mp):
+                    self.selected = i
+                    self.game.play_sfx("ok")
+                    self._select()
+                    return
+        moved = mp != self._last_mouse_pos
+        if moved:
+            self._last_mouse_pos = mp
+            for i, rect in enumerate(self._menu_item_rects()):
+                if rect.collidepoint(mp) and self.selected != i:
+                    self.selected = i
+                    self.game.play_sfx("cursor")
+
+    def _menu_item_rects(self):
+        """主菜单各选项的可点击区域（与 draw 布局一致）"""
+        start_x = 560
+        start_y = 380
+        rects = []
+        for i, option in enumerate(self.options):
+            w, h = self.game.font_medium.size(option)
+            rects.append(pygame.Rect(start_x - 30, start_y + i * 44 - 4,
+                                     w + 46, h + 8))
+        return rects
 
     def _debug_start_midboss(self, stage_num):
         """隐藏调试：直接进入指定关卡的战斗中Boss战，power 设为满值（400）。"""
@@ -261,10 +295,11 @@ class MenuState(GameState):
 
     def _select(self):
         if self.options[self.selected] == "Start Game":
-            # 新游戏：先进仓库出征准备，选择携带物品与金币
-            from src.ui.loadout import LoadoutState
-            self.game.switch_state(LoadoutState(self.game))
+            # 新游戏：先选难度，再进入仓库出征准备
+            from src.ui.difficulty import DifficultySelectState
+            self.game.switch_state(DifficultySelectState(self.game))
         elif self.options[self.selected] == "Quit":
+            self.game.play_sfx("cancel_menu")
             self.game.running = False
         elif self.options[self.selected] == "Settings":
             self.game.push_state(SettingsState(self.game))
@@ -281,6 +316,7 @@ class MenuState(GameState):
         # 菜单选项（首项定位于离左上角 x560 y380）
         start_x = 560
         start_y = 380
+        rects = self._menu_item_rects()
         for i, option in enumerate(self.options):
             color = cfg.COLOR_YELLOW if i == self.selected else cfg.COLOR_WHITE
             text = self.game.font_medium.render(option, True, color)
@@ -289,6 +325,13 @@ class MenuState(GameState):
             y = start_y + i * 44
 
             if i == self.selected:
+                # 高亮可点击区域，提示可用鼠标点击
+                hover_rect = rects[i]
+                hl = pygame.Surface((hover_rect.width, hover_rect.height), pygame.SRCALPHA)
+                hl.fill((255, 255, 80, 22))
+                screen.blit(hl, hover_rect.topleft)
+                pygame.draw.rect(screen, (150, 150, 60), hover_rect, 1)
+
                 indicator = "> "
                 ind_text = self.game.font_medium.render(indicator, True, cfg.COLOR_YELLOW)
                 screen.blit(ind_text, (x - 22, y))
@@ -300,7 +343,7 @@ class MenuState(GameState):
             screen.blit(text, (x, y))
 
         # 底部版本
-        version_text = self.game.font_small.render("v1.4.2 - Codex CLI Project", True, cfg.COLOR_DARK_GRAY)
+        version_text = self.game.font_small.render("v1.5.0 - Codex CLI Project", True, cfg.COLOR_DARK_GRAY)
         screen.blit(version_text, (10, cfg.SCREEN_HEIGHT - 18))
 
         # 撤离 / 操作提示（一次性通知）
@@ -313,15 +356,16 @@ class MenuState(GameState):
 
 
 class SettingsState(GameState):
-    """设置界面：音乐音量调节"""
+    """设置界面：音乐与音效音量调节"""
 
     def __init__(self, game):
         super().__init__(game)
         self.background = load_background(cfg.MENU_BACKGROUND,
                                           (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
-        self.selected = 0          # 0=音量行，1=返回行
+        self.selected = 0          # 0=音乐音量，1=音效音量，2=返回
         self.volume_step = 0.1     # 每次按键调节的音量幅度
         self._repeat_timer = 0     # 按住方向键时连续调节的间隔计时
+        self._last_mouse_pos = (0, 0)
 
     def enter(self, game):
         self.selected = 0
@@ -335,15 +379,20 @@ class SettingsState(GameState):
     def update(self, dt):
         keys = self.game.keys_just_pressed
         if keys.get(pygame.K_ESCAPE, False) or keys.get(pygame.K_x, False):
+            self.game.play_sfx("cancel_menu")
             self.game.pop_state()
             return
 
         if keys.get(pygame.K_UP, False) or keys.get(pygame.K_w, False):
-            self.selected = (self.selected - 1) % 2
+            self.selected = (self.selected - 1) % 3
+            self._repeat_timer = 0
+            self.game.play_sfx("cursor")
         if keys.get(pygame.K_DOWN, False) or keys.get(pygame.K_s, False):
-            self.selected = (self.selected + 1) % 2
+            self.selected = (self.selected + 1) % 3
+            self._repeat_timer = 0
+            self.game.play_sfx("cursor")
 
-        if self.selected == 0:
+        if self.selected in (0, 1):
             # 音量行：左/右方向键调节（支持按住连续调节）
             held = self.game.keys_held
             left = held.get(pygame.K_LEFT, False) or held.get(pygame.K_a, False)
@@ -359,11 +408,85 @@ class SettingsState(GameState):
             # 返回行：确认返回主菜单
             if (keys.get(pygame.K_RETURN, False) or keys.get(pygame.K_z, False)
                     or keys.get(pygame.K_SPACE, False)):
+                self.game.play_sfx("ok")
                 self.game.pop_state()
 
+        # 鼠标：悬停切换选中项；点击音量条直接设定音量；点击返回行返回
+        mp = self.game.mouse_pos
+        clicked = self.game.mouse_clicked(1)
+        row_rects = self._settings_row_rects()
+        back_rect = self._settings_back_rect()
+        if clicked:
+            for i, rect in enumerate(row_rects):
+                if rect.collidepoint(mp):
+                    self.selected = i
+                    self._repeat_timer = 0
+                    bar = pygame.Rect(430, 238 if i == 0 else 298, 180, 12)
+                    if bar.collidepoint(mp):
+                        self._settings_set_volume_from_bar(bar)
+                    return
+            if back_rect.collidepoint(mp):
+                self.game.play_sfx("ok")
+                self.game.pop_state()
+                return
+        else:
+            moved = mp != self._last_mouse_pos
+            if moved:
+                self._last_mouse_pos = mp
+                hover_rects = row_rects + [back_rect]
+                for i, rect in enumerate(hover_rects):
+                    if rect.collidepoint(mp) and self.selected != i:
+                        self.selected = i
+                        self._repeat_timer = 0
+                        self.game.play_sfx("cursor")
+                        break
+
+    def _settings_row_rects(self):
+        """设置界面两行音量条的可点击区域（与 _draw_volume_row 布局一致）"""
+        return [pygame.Rect(280, 224, 460, 40), pygame.Rect(280, 284, 460, 40)]
+
+    def _settings_back_rect(self):
+        """返回行的可点击区域"""
+        back = self.game.font_medium.render("返回", True, cfg.COLOR_WHITE)
+        bw, bh = back.get_size()
+        back_x = (cfg.SCREEN_WIDTH - bw) // 2
+        return pygame.Rect(back_x - 28, 426, bw + 56, bh + 8)
+
+    def _settings_set_volume_from_bar(self, bar):
+        """点击音量条直接设置音量"""
+        mp = self.game.mouse_pos
+        frac = max(0.0, min(1.0, (mp[0] - bar.x) / max(1, bar.width)))
+        volume = round(frac, 2)
+        if self.selected == 0:
+            self.game.set_music_volume(volume)
+        else:
+            self.game.set_sfx_volume(volume)
+            self.game.play_sfx("cursor")
+
     def _change_volume(self, delta):
-        volume = round(max(0.0, min(1.0, self.game.music_volume + delta)), 2)
-        self.game.set_music_volume(volume)
+        if self.selected == 0:
+            volume = round(max(0.0, min(1.0, self.game.music_volume + delta)), 2)
+            self.game.set_music_volume(volume)
+        else:
+            volume = round(max(0.0, min(1.0, self.game.sfx_volume + delta)), 2)
+            self.game.set_sfx_volume(volume)
+            # 即时播放一次音效，让玩家听到新的音量
+            self.game.play_sfx("cursor")
+
+    def _draw_volume_row(self, screen, label, volume, selected, y):
+        color = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
+        label_surf = self.game.font_medium.render(label, True, color)
+        percent = self.game.font_medium.render(f"{int(round(volume * 100))}%", True, color)
+        screen.blit(label_surf, (300, y))
+        screen.blit(percent, (640, y))
+
+        bar_x, bar_y, bar_w, bar_h = 430, y + 8, 180, 12
+        pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, (bar_x, bar_y, bar_w, bar_h))
+        if volume > 0:
+            fill_w = max(4, int(bar_w * volume))
+            pygame.draw.rect(screen, cfg.COLOR_GREEN if selected else cfg.COLOR_GRAY,
+                             (bar_x, bar_y, fill_w, bar_h))
+        pygame.draw.rect(screen, color, (bar_x, bar_y, bar_w, bar_h), 1)
 
     def draw(self, screen):
         if self.background:
@@ -376,32 +499,20 @@ class SettingsState(GameState):
         screen.blit(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 110))
 
         # 音量行
-        volume = self.game.music_volume
-        selected = self.selected == 0
-        color = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
-        label = self.game.font_medium.render("音乐音量", True, color)
-        percent = self.game.font_medium.render(f"{int(round(volume * 100))}%", True, color)
-        screen.blit(label, (300, 280))
-        screen.blit(percent, (640, 280))
-
-        # 音量条
-        bar_x, bar_y, bar_w, bar_h = 430, 288, 180, 12
-        pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, (bar_x, bar_y, bar_w, bar_h))
-        if volume > 0:
-            fill_w = max(4, int(bar_w * volume))
-            pygame.draw.rect(screen, cfg.COLOR_GREEN if selected else cfg.COLOR_GRAY,
-                             (bar_x, bar_y, fill_w, bar_h))
-        pygame.draw.rect(screen, color, (bar_x, bar_y, bar_w, bar_h), 1)
+        self._draw_volume_row(screen, "音乐音量", self.game.music_volume,
+                              self.selected == 0, 230)
+        self._draw_volume_row(screen, "音效音量", self.game.sfx_volume,
+                              self.selected == 1, 290)
 
         # 操作提示
         hint = self.game.font_small.render("< / > 调节音量    Esc 返回", True, cfg.COLOR_GRAY)
-        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 330))
+        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 355))
 
         # 返回行
-        back_color = cfg.COLOR_YELLOW if self.selected == 1 else cfg.COLOR_WHITE
+        back_color = cfg.COLOR_YELLOW if self.selected == 2 else cfg.COLOR_WHITE
         back = self.game.font_medium.render("返回", True, back_color)
         back_x = (cfg.SCREEN_WIDTH - back.get_width()) // 2
-        if self.selected == 1:
+        if self.selected == 2:
             ind = self.game.font_medium.render("> ", True, cfg.COLOR_YELLOW)
             screen.blit(ind, (back_x - 26, 430))
         screen.blit(back, (back_x, 430))
@@ -471,6 +582,7 @@ class PlayingState(GameState):
         self.fot_roses = []
         self.overflux_orbs = []
         self.summoned_minions = []
+        self.c_skill_fx = []
         # 判定点缩放（Maxor's Boots）
         self.player.hitbox_radius = cfg.PLAYER_HITBOX_RADIUS * self.item_effects["hitbox_scale"]
         self._apply_stage_start_bonuses()
@@ -511,6 +623,8 @@ class PlayingState(GameState):
         self.death_window = 0
         # Last Spell 中禁用 Bomb 的提示计时器
         self.bomb_blocked_timer = 0
+        # Boss/道中Boss 符卡横幅上一帧是否激活（用于 cardget 音效边沿检测）
+        self._prev_spell_banner_active = False
 
     def enter(self, game):
         # 练习模式：直接播放 Boss 战音乐，不显示关卡标题
@@ -729,6 +843,7 @@ class PlayingState(GameState):
 
         # 碰撞检测
         self._check_collisions()
+        self._update_spellcard_sfx()
 
         # 符卡击破：显示结算并清屏
         boss = getattr(self.stage, "boss", None)
@@ -911,12 +1026,14 @@ class PlayingState(GameState):
                     break
         if stage5_skip_done:
             self.dialogue = None
-            self.game.stop_music()
-            pygame.event.clear(self.game.music_end_event)
-            self.boss_music_intro = True
-            self.stage_music_intro = False
-            self.game.play_music(self.stage.boss_music_start_path, loops=0)
-            self._show_music_name(self.stage.boss_music_name)
+            # 五面道中Boss快捷跳转同样不重放音乐
+            if not getattr(self.stage, "keep_stage_music_on_boss", False):
+                self.game.stop_music()
+                pygame.event.clear(self.game.music_end_event)
+                self.boss_music_intro = True
+                self.stage_music_intro = False
+                self.game.play_music(self.stage.boss_music_start_path, loops=0)
+                self._show_music_name(self.stage.boss_music_name)
 
         # Stage6 debug skip: 1~6 during Kaeman pre-battle dialogue -> spell cards 1~6.
         stage6_skip_done = False
@@ -959,16 +1076,19 @@ class PlayingState(GameState):
                     # 战后对话结束：不重新开战，直接进入通关结算
                     self.stage.on_defeat_dialogue_end()
                 else:
-                    # 对话结束：停止道中曲，先播放一遍Boss战开场曲，再让Boss进场
-                    self.game.stop_music()
-                    # stop_music 也会触发一次音乐结束事件（pygame 行为），
-                    # 若不清理，下一帧会误判开场曲播完而立即切到循环曲
-                    pygame.event.clear(self.game.music_end_event)
-                    self.boss_music_intro = True
-                    self.stage_music_intro = False
-                    self.game.play_music(self.stage.boss_music_start_path, loops=0)
-                    # Boss战开始：显示Boss战音乐名
-                    self._show_music_name(self.stage.boss_music_name)
+                    # 对话结束：停止道中曲，先播放一遍Boss战开场曲，再让Boss进场。
+                    # 五面道中Boss（Watcher/Professor/Thorn/Livid）开战不重放音乐，
+                    # 继续播放道中曲 5_1_start/loop。
+                    if not getattr(self.stage, "keep_stage_music_on_boss", False):
+                        self.game.stop_music()
+                        # stop_music 也会触发一次音乐结束事件（pygame 行为），
+                        # 若不清理，下一帧会误判开场曲播完而立即切到循环曲
+                        pygame.event.clear(self.game.music_end_event)
+                        self.boss_music_intro = True
+                        self.stage_music_intro = False
+                        self.game.play_music(self.stage.boss_music_start_path, loops=0)
+                        # Boss战开始：显示Boss战音乐名
+                        self._show_music_name(self.stage.boss_music_name)
                     self.stage.on_dialogue_end()
 
         # 暂停（对话期间 ESC 用于跳过对话，不触发暂停；终端破解时 ESC 用于退出破解）
@@ -1122,10 +1242,12 @@ class PlayingState(GameState):
                                         portraits=self.stage.dialogue_portraits,
                                         portrait_sides=getattr(self.stage, "dialogue_portrait_sides", {}),
                                         portrait_scales=getattr(self.stage, "dialogue_portrait_scales", {}),
-                                        portrait_offsets=getattr(self.stage, "dialogue_portrait_offsets", {}))
+                                        portrait_offsets=getattr(self.stage, "dialogue_portrait_offsets", {}),
+                                        portrait_vertical_offsets=getattr(self.stage, "dialogue_portrait_vertical_offsets", {}))
 
         # 碰撞检测
         self._check_collisions()
+        self._update_spellcard_sfx()
 
         # 关底 Boss 可能经由 Last Spell 超时结束 / Miss 强退等非伤害路径死亡，
         # 这些路径不会调用 _reward_enemy_kill，需要在这里补登记 4 选 1 奖励。
@@ -1240,6 +1362,8 @@ class PlayingState(GameState):
             if not full_power:
                 self.homing_shot_skip = not self.homing_shot_skip
 
+        self.game.play_sfx("shot")
+
     def _bullet_damage(self, homing):
         """单发子弹伤害（含追踪/非追踪弹伤害加成）。"""
         base = self._weapon_damage()
@@ -1329,6 +1453,7 @@ class PlayingState(GameState):
                 gain = item.value // 2 if suction_active else item.value
                 self.power = min(self.player.max_power, self.power + gain)
                 self.game.global_data["power"] = self.power
+                self.game.play_sfx("powerup")
 
     def _spawn_bonus_drops(self, enemy):
         """Spawn boss reward drops (+Bomb / +Life) configured on this enemy."""
@@ -1378,6 +1503,7 @@ class PlayingState(GameState):
                 self._collect_bonus_item(item)
 
     def _collect_bonus_item(self, item):
+        self.game.play_sfx("bonus")
         from src.entities.pickup import OverfluxPowerOrbPickup, ReviveStonePickup
         if isinstance(item, ReviveStonePickup):
             self.lives = min(cfg.PLAYER_MAX_LIVES, self.lives + 1)
@@ -1420,6 +1546,10 @@ class PlayingState(GameState):
         self.skill_manager.add_xp("COMBAT", enemy.score // 10)
         eff = self.item_effects
         is_boss = isinstance(enemy, Boss)
+        if is_boss:
+            self.game.play_sfx("enemy_down_boss")
+        else:
+            self.game.play_sfx("enemy_down_small")
 
         # 击杀计数与效果（Maddox Batphone / Baby Yeti Pet / Shadow Assassin / Lapis）
         self.kill_counter += 1
@@ -1431,7 +1561,10 @@ class PlayingState(GameState):
             self.game.global_data["lives"] = self.lives
         if is_boss:
             self.shadow_damage += eff["kill_boss_damage_pct"]
-            if eff["kill_boss_coins"]:
+            if self._is_midboss_target(enemy):
+                if eff["kill_midboss_coins"]:
+                    self.item_inventory.add_coins(int(eff["kill_midboss_coins"]))
+            elif eff["kill_boss_coins"]:
                 self.item_inventory.add_coins(int(eff["kill_boss_coins"]))
         else:
             self.shadow_damage += eff["kill_small_damage_pct"]
@@ -1649,6 +1782,7 @@ class PlayingState(GameState):
         self.bomb_active = True
         self.bomb_timer = 0
         self.death_window = 0
+        self.game.play_sfx("bomb")
 
         # Bomb 本身也是符卡：开场立即清屏，展开自机符卡而不进入Boss符卡阶段。
         self.bullet_manager.cancel_all_enemy_bullets()
@@ -1663,6 +1797,20 @@ class PlayingState(GameState):
             deathbomb=deathbomb,
             damage_mult=bomb_mult,
         )
+
+    def _update_spellcard_sfx(self):
+        """Boss/道中Boss 展开符卡横幅激活时播放 cardget（只在上升沿触发）"""
+        cur = None
+        boss = getattr(self.stage, "boss", None)
+        mid = getattr(self.stage, "mid_boss", None)
+        if boss is not None and getattr(boss, "spell_banner_active", False):
+            cur = boss
+        elif mid is not None and getattr(mid, "spell_banner_active", False):
+            cur = mid
+        active = cur is not None
+        if active and not self._prev_spell_banner_active:
+            self.game.play_sfx("cardget")
+        self._prev_spell_banner_active = active
 
     def _check_collisions(self):
         from src.entities.boss import Boss
@@ -1818,6 +1966,7 @@ class PlayingState(GameState):
                     eb.grazed = True
                     self.graze += 1
                     self.score += 100
+                    self.game.play_sfx("graze")
 
     def _explode_shootable_orb(self, eb):
         """可击破大玉被击破：爆炸清掉周围敌弹，范围内玩家也受伤"""
@@ -1864,6 +2013,7 @@ class PlayingState(GameState):
                 and self.stage.boss.is_last_spell_active()):
             self._player_die()
             return
+        self.game.play_sfx("damage")
         self._start_death_window()
 
     def _start_death_window(self):
@@ -2035,6 +2185,7 @@ class PlayingState(GameState):
         self.fot_roses = []
         self.overflux_orbs = []
         self.summoned_minions = []
+        self.c_skill_fx = []
         self.spirit_bow_timer = 0
         self.end_stone_timer = 0
         self.precursor_timer = 0
@@ -2218,12 +2369,14 @@ class PlayingState(GameState):
 
     def _c_aspect_of_the_dragons(self):
         """龙怒：炸掉上方弹幕并对BOSS造成4800伤害。"""
+        from src.systems.c_skill_entities import DragonRageBurst
         limit_y = self.player.y + 30
         for b in self.bullet_manager.enemy_bullets[:]:
             if not b.alive or b.cancel_timer > 0:
                 continue
             if b.y < limit_y:
                 b.start_cancel()
+        self.c_skill_fx.append(DragonRageBurst(self.player.x, self.player.y))
         boss = self.stage.boss
         if boss is not None and boss.alive and getattr(boss, "combat_enabled", True):
             self._apply_boss_damage(boss, 4800)
@@ -2240,10 +2393,16 @@ class PlayingState(GameState):
 
     def _c_giants_sword(self):
         """清除全场弹幕并对BOSS造成当前阶段50%的伤害。"""
+        from src.systems.c_skill_entities import GiantsSwordStrike
         self.bullet_manager.cancel_all_enemy_bullets()
         boss = self.stage.boss
         if boss is not None and boss.alive and getattr(boss, "combat_enabled", True):
             self._apply_boss_damage(boss, boss.hp * 0.5)
+            fx_x, fx_y = boss.x, boss.y
+        else:
+            fx_x = cfg.BATTLE_AREA_WIDTH / 2
+            fx_y = cfg.BATTLE_AREA_HEIGHT * 0.35
+        self.c_skill_fx.append(GiantsSwordStrike(fx_x, fx_y))
         return True
 
     def _c_precursor_eye(self):
@@ -2352,6 +2511,11 @@ class PlayingState(GameState):
             m.update(self.bullet_manager, self.stage.boss)
         self.summoned_minions = [m for m in self.summoned_minions if m.alive]
 
+        # 技能视觉特效（龙怒 / 巨人之剑）
+        for fx in self.c_skill_fx[:]:
+            fx.update()
+        self.c_skill_fx = [f for f in self.c_skill_fx if f.alive]
+
         # 擦弹减速（Scarf's Studies）
         if eff["graze_slow_pct"] > 0:
             self._apply_graze_slow()
@@ -2388,6 +2552,8 @@ class PlayingState(GameState):
             orb.draw(screen, ox, oy)
         for m in self.summoned_minions:
             m.draw(screen, ox, oy)
+        for fx in self.c_skill_fx:
+            fx.draw(screen, ox, oy)
         self._draw_precursor_laser(screen, ox, oy)
 
     def _draw_c_skill_indicator(self, screen):

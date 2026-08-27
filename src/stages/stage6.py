@@ -2060,6 +2060,7 @@ class Stage6_FinalApproach(Stage):
         # Kaeman 说话时立绘放大 1.5x
         self.dialogue_portrait_scales = {"Kaeman": 1.5}
         self.dialogue_portrait_offsets = {"Kaeman": 120}  # Kaeman 立绘右移 120px
+        self.dialogue_portrait_vertical_offsets = {"Kaeman": 80}  # 上移，让脸与 Mage 同高
 
         # 前景遮罩（锁定圈 / 边缘压暗用，避免每帧新建 Surface）
         self._fg_overlay = pygame.Surface(

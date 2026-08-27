@@ -365,14 +365,14 @@ _SPIRIT_ZOO = {
     "duration": 1480,
     "ramp1": 420,
     "ramp2": 820,
-    "max_total": 32,
+    "max_total": 56,
     "bear_time": 1140,
     "bear_aim_frames": 78,
     "bear_end_delay": 46,
 
     "chicken": {
-        "max": 4, "max_mid": 8, "max_late": 8,
-        "first_spawn": 30, "interval": 300, "life": 660,
+        "max": 8, "max_mid": 16, "max_late": 16,
+        "first_spawn": 30, "interval": 150, "life": 660,
         "speed": 0.95,
         "x_amp": 84, "x_freq": 0.019,
         "first_mine": 64, "mine_every": 82,
@@ -436,6 +436,22 @@ _SPIRIT_ZOO = {
         "visual_count": 7,
         "visual_spread": 21,
     },
+    "bat2": {
+        # 镜像低位蝙蝠串：随 bat 成对生成，方向相反、位置略低。
+        "max": 4, "max_mid": 4, "max_late": 8,
+        "first_spawn": 55, "interval": 620, "life": 1320,
+        "y_base": 86,
+        "x_min": 110, "x_max": 466,
+        "speed": 0.65,
+        "bob_amp": 10,
+        "bob_speed": 0.021,
+        "fire_interval": 104,
+        "row_count": 5,
+        "row_spread": 17,
+        "bullet_speed": 1.38,
+        "visual_count": 7,
+        "visual_spread": 21,
+    },
 }
 
 _SPIRIT_KINDS = ("chicken", "bat", "rabbit", "sheep", "wolf")
@@ -445,6 +461,7 @@ _SPIRIT_SPRITE_PATHS = {
     "sheep": _SPIRIT_SHEEP_SPRITE,
     "wolf": _SPIRIT_WOLF_SPRITE,
     "bat": _SPIRIT_BAT_SPRITE,
+    "bat2": _SPIRIT_BAT_SPRITE,
     "bear": _SPIRIT_BEAR_SPRITE,
     "bow": _SPIRIT_BOW_SPRITE,
 }
@@ -669,6 +686,24 @@ def _spirit_zoo_spawn_animal(boss, kind, timer, player_x, player_y):
             sprite = _spirit_zoo_make_sprite(kind, rec["x"] + dx,
                                              rec["y"] + dy, 18, (160, 150, 230))
             rec["sprites"].append({"sprite": sprite, "dx": dx, "dy": dy})
+
+        # 低位镜像串：与上方蝙蝠方向相反，成对交错飞行。
+        low_spec = _SPIRIT_ZOO["bat2"]
+        low = {
+            "kind": "bat2", "alive": True, "age": 0,
+            "x": spec["x_max"] if direction == 1 else spec["x_min"],
+            "y": low_spec["y_base"], "dir": -direction,
+            "phase": random.random() * math.tau,
+            "fire_timer": 60,
+        }
+        low["sprites"] = []
+        for i in range(low_spec["visual_count"]):
+            dx = (i - (low_spec["visual_count"] - 1) / 2.0) * low_spec["visual_spread"]
+            dy = math.sin(i * 0.9) * 4
+            sprite = _spirit_zoo_make_sprite(
+                "bat2", low["x"] + dx, low["y"] + dy, 18, (175, 125, 245))
+            low["sprites"].append({"sprite": sprite, "dx": dx, "dy": dy})
+        state["animals"].append(low)
     else:
         return
 
@@ -862,7 +897,7 @@ def _spirit_zoo_update_wolf(boss, bullet_manager, rec):
 
 
 def _spirit_zoo_update_bat(boss, bullet_manager, rec):
-    spec = _SPIRIT_ZOO["bat"]
+    spec = _SPIRIT_ZOO[rec["kind"]]
     rec["age"] += 1
 
     rec["x"] += rec["dir"] * spec["speed"]
@@ -1011,7 +1046,7 @@ def _spirit_zoo_update(boss, bullet_manager, timer, dt, player_x, player_y):
             _spirit_zoo_update_sheep(boss, bullet_manager, rec, player_x, player_y)
         elif rec["kind"] == "wolf":
             _spirit_zoo_update_wolf(boss, bullet_manager, rec)
-        elif rec["kind"] == "bat":
+        elif rec["kind"] in ("bat", "bat2"):
             _spirit_zoo_update_bat(boss, bullet_manager, rec)
         if not rec.get("alive", True):
             state["animals"].remove(rec)
@@ -1064,7 +1099,7 @@ def _spirit_zoo_draw_animals(screen, boss, offset_x=0, offset_y=0):
     for rec in state["animals"]:
         if not rec.get("alive", True):
             continue
-        if rec["kind"] == "bat":
+        if rec["kind"] in ("bat", "bat2"):
             for entry in rec["sprites"]:
                 entry["sprite"].draw(screen, offset_x, offset_y)
             continue
@@ -2345,6 +2380,16 @@ class Stage5_WitherLords(Stage):
             return False
         return bool(state.get("input_locked"))
 
+    @property
+    def keep_stage_music_on_boss(self):
+        """五面道中Boss（Watcher/Professor/Thorn/Livid）开战时继续播放道中曲，不切换/重放Boss战音乐。"""
+        action = self._pending_dialogue_action
+        # 正常流程：开场 Watcher 与前置三连（normal_boss）为道中Boss
+        if action in ("watcher", "normal_boss"):
+            return True
+        # 调试快捷跳转：直接跳到前置三连时同样不切音乐
+        return action in ("professor", "thorn", "livid")
+
     def constrain_player(self, x, y):
         """机械符「Terminal Pursuit」：把自机约束在方形环路上；其它情况原样返回。"""
         boss = self.boss
@@ -2362,7 +2407,7 @@ class Stage5_WitherLords(Stage):
         boss = Boss(
             "The Watcher", hp=WATCHER_HP,
             x=cfg.BATTLE_AREA_WIDTH / 2, y=-60,
-            size=26, color=(90, 220, 230),
+            size=26, color=cfg.COLOR_RED,
             spell_by_hp_only=True, spell_resistance=0.5,
             non_spell_min_duration=60,
             hp_bar_inset=16,
@@ -2396,7 +2441,7 @@ class Stage5_WitherLords(Stage):
         boss = Boss(
             "Thorn", hp=THORN_HP,
             x=cfg.BATTLE_AREA_WIDTH / 2, y=-60,
-            size=24, color=(190, 110, 255),
+            size=24, color=(200, 200, 200),
             spell_by_hp_only=True, spell_resistance=0.5,
             non_spell_min_duration=170,
             non_spell_func=_non_spell_thorn,
@@ -2415,7 +2460,7 @@ class Stage5_WitherLords(Stage):
         boss = Boss(
             "Livid", hp=LIVID_HP,
             x=cfg.BATTLE_AREA_WIDTH / 2, y=-60,
-            size=24, color=(80, 210, 240),
+            size=24, color=(139, 28, 28),
             spell_by_hp_only=True, spell_resistance=0.5,
             non_spell_min_duration=170,
             non_spell_func=_non_spell_livid,
@@ -2433,7 +2478,7 @@ class Stage5_WitherLords(Stage):
         boss = Boss(
             "Maxor", hp=MAXOR_HP,
             x=cfg.BATTLE_AREA_WIDTH / 2, y=-60,
-            size=26, color=(255, 130, 60),
+            size=26, color=cfg.COLOR_PURPLE,
             spell_by_hp_only=True, spell_resistance=0.5,
             non_spell_min_duration=1,
             hp_bar_inset=16,
@@ -2488,7 +2533,7 @@ class Stage5_WitherLords(Stage):
         boss = Boss(
             "Necron", hp=NECRON_HP,
             x=cfg.BATTLE_AREA_WIDTH / 2, y=-60,
-            size=28, color=(190, 60, 235),
+            size=28, color=(255, 96, 40),
             spell_by_hp_only=True, spell_resistance=0.5,
             non_spell_min_duration=1,
             hp_bar_inset=16,

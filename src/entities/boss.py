@@ -14,12 +14,14 @@ from src.entities.bullet import Bullet, create_bullet_aimed, create_bullet_angle
 # 模块级字体缓存
 _boss_fonts = {}
 
-def _get_font(size):
-    key = size
+def _get_font(size, bold=False):
+    key = (size, bold)
     if key not in _boss_fonts:
         font_path = os.path.join(cfg.ASSETS_DIR, "fonts", "font1.ttf")
         fallback_path = os.path.join(cfg.ASSETS_DIR, "fonts", "font2.otf")
         _boss_fonts[key] = FallbackFont(font_path, fallback_path, size)
+        if bold:
+            _boss_fonts[key].set_bold(True)
     return _boss_fonts[key]
 
 
@@ -32,6 +34,10 @@ BOSS_NAME_Y = HP_BAR_TOP + HP_BAR_HEIGHT + 4   # Boss 名 / 符卡名共用行
 # 避免 Boss 边滑行边放弹导致弹幕变形；超时后就位兜底防卡死
 SPELL_SETTLE_EPS = 1.0       # 到达站位判定阈值（px）
 SPELL_SETTLE_MAX = 240       # 最长等待帧数（超时就位兜底）
+
+# 对话期间 Boss 机体轻微上下漂浮（纯视觉，不影响坐标与判定）
+BOSS_DIALOGUE_FLOAT_AMPLITUDE = 8   # 上下浮动幅度（px）
+BOSS_DIALOGUE_FLOAT_SPEED = 2.2     # 漂浮角速度（rad/s）
 
 
 def _english_only(text):
@@ -355,6 +361,9 @@ class Boss:
 
         self.start_x = self.x
         self.start_y = self.y
+        # 对话漂浮：相位推进 + 是否处于漂浮状态的标记
+        self._float_phase = 0.0
+        self._dialogue_float = False
 
     def add_spell_card(self, spell_card):
         self.spell_cards.append(spell_card)
@@ -442,6 +451,8 @@ class Boss:
         if not self.alive:
             return
         self._bullet_manager = bullet_manager
+        # 默认关闭漂浮；仅“对话待机”分支会开启
+        self._dialogue_float = False
 
         # 开战延迟倒计时（对话结束后 0.6s，期间每帧推进）
         if not self.combat_enabled and self.combat_delay > 0:
@@ -461,6 +472,10 @@ class Boss:
         # 尚未开战（对话阶段/登场等待）：只做入场定位移动，不攻击
         if not self.combat_enabled:
             self._move_toward_target(dt)
+            # 仅在“对话待机”（无开战延迟）时轻微漂浮，模仿浮空
+            if self.combat_delay <= 0:
+                self._float_phase += dt * BOSS_DIALOGUE_FLOAT_SPEED
+                self._dialogue_float = True
             return
 
         # 开符免疫倒计时
@@ -809,6 +824,10 @@ class Boss:
     def draw(self, screen, offset_x=0, offset_y=0):
         px = int(self.x + offset_x)
         py = int(self.y + offset_y)
+        # 对话漂浮：仅视觉上下偏移，不影响 Boss 坐标/判定
+        if self._dialogue_float:
+            py += int(round(math.sin(self._float_phase) *
+                            BOSS_DIALOGUE_FLOAT_AMPLITUDE))
 
         if self.entering and self.entry_timer % 6 < 3:
             return
@@ -1610,17 +1629,17 @@ class Boss:
                     sprite = _with_alpha(sprite, alpha)
                 screen.blit(sprite, (cx - sprite.get_width() // 2, cy - sprite.get_height() // 2))
 
-        # 符卡名（中间附近，带半透明底框）
+        # 符卡名（居中，加粗 + 下方投影，无底框）
         if self.spell_banner_name:
-            font = _get_font(34)
+            font = _get_font(34, bold=True)
+            shadow = font.render(self.spell_banner_name, True, self.color)
             text = font.render(self.spell_banner_name, True, cfg.COLOR_WHITE)
+            shadow = _with_alpha(shadow, int(alpha * 0.7))
             text = _with_alpha(text, alpha)
-            pad_x, pad_y = 18, 8
-            box = pygame.Surface((text.get_width() + pad_x * 2, text.get_height() + pad_y * 2), pygame.SRCALPHA)
-            box.fill((10, 14, 26, int(alpha * 0.62)))
-            pygame.draw.rect(box, (255, 255, 255, int(alpha * 0.85)), box.get_rect(), 2, border_radius=6)
-            box.blit(text, (pad_x, pad_y))
-            screen.blit(box, (cx - box.get_width() // 2, cy + 150 - box.get_height() // 2))
+            text_x = cx - text.get_width() // 2
+            text_y = cy + 150 - text.get_height() // 2
+            screen.blit(shadow, (text_x + 2, text_y + 3))
+            screen.blit(text, (text_x, text_y))
 
     def _draw_hp_bar(self, screen, y, offset_x=0):
         inset = self.hp_bar_inset          # 血条左右边距（默认 30）

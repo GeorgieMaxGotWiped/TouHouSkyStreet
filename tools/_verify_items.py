@@ -25,63 +25,63 @@ pygame.init()
 screen = pygame.display.set_mode((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
 os.makedirs("previews", exist_ok=True)
 
-# --- 1. 表格 54 个物品全部存在且价格正确 ---
+# --- 1. 表格 56 个物品全部存在且价格正确 ---
 EXPECTED = {
-    "aspect_of_the_jerry": ("COMMON", "weapon", "weapon", 10000, 1000),
-    "undead_sword": ("COMMON", "weapon", "weapon", 50000, 10000),
-    "sword_of_bad_health": ("UNCOMMON", "weapon", "weapon", 200000, 40000),
-    "bonzos_staff": ("RARE", "weapon", "weapon", 5000000, 2000000),
-    "golem_sword": ("RARE", "weapon", "weapon", 2000000, 500000),
-    "aspect_of_the_end": ("RARE", "weapon", "weapon", 1000000, 500000),
-    "arack": ("EPIC", "weapon", "weapon", 300000, 100000),
-    "end_stone_sword": ("EPIC", "weapon", "weapon", 2000000, 500000),
-    "wither_cloak_sword": ("EPIC", "weapon", "weapon", 5000000, 2000000),
-    "spirit_bow": ("EPIC", "weapon", "weapon", 3000000, 1500000),
-    "aspect_of_the_dragons": ("LEGENDARY", "weapon", "weapon", 15000000, 10000000),
-    "flower_of_truth": ("LEGENDARY", "weapon", "weapon", 6000000, 3000000),
-    "giants_sword": ("LEGENDARY", "weapon", "weapon", 100000000, 75000000),
-    "hyperion": ("LEGENDARY", "weapon", "weapon", 1000000000, 750000000),
-    "terminator": ("LEGENDARY", "weapon", "weapon", 1000000000, 400000000),
-    "dark_claymore": ("LEGENDARY", "weapon", "weapon", 1000000000, 100000000),
-    "lapis_armor_helmet": ("UNCOMMON", "armor", "helmet", 80000, 30000),
-    "lapis_armor_chestplate": ("UNCOMMON", "armor", "chestplate", 150000, 30000),
-    "lapis_armor_leggings": ("UNCOMMON", "armor", "leggings", 120000, 30000),
-    "lapis_armor_boots": ("UNCOMMON", "armor", "boots", 100000, 30000),
-    "heavy_armor_helmet": ("RARE", "armor", "helmet", 1000000, 500000),
-    "heavy_armor_chestplate": ("RARE", "armor", "chestplate", 2000000, 1000000),
-    "heavy_armor_leggings": ("RARE", "armor", "leggings", 1500000, 750000),
-    "heavy_armor_boots": ("RARE", "armor", "boots", 1000000, 500000),
-    "wither_goggles": ("EPIC", "armor", "helmet", 10000000, 5000000),
-    "shadow_assassin_boots": ("EPIC", "armor", "boots", 5000000, 3000000),
-    "tarantula_helmet": ("EPIC", "armor", "helmet", 5000000, 3000000),
-    "tarantula_boots": ("EPIC", "armor", "boots", 5000000, 3000000),
-    "necromancer_lord_leggings": ("LEGENDARY", "armor", "leggings", 40000000, 10000000),
-    "precursor_eye": ("LEGENDARY", "armor", "helmet", 40000000, 20000000),
-    "superior_dragon_chestplate": ("LEGENDARY", "armor", "chestplate", 25000000, 15000000),
-    "storms_leggings": ("LEGENDARY", "armor", "chestplate", 50000000, 30000000),
-    "goldors_helmet": ("LEGENDARY", "armor", "chestplate", 35000000, 25000000),
-    "necrons_chestplate": ("LEGENDARY", "armor", "chestplate", 65000000, 50000000),
-    "maxors_boots": ("LEGENDARY", "armor", "chestplate", 30000000, 20000000),
-    "balloon_snake": ("RARE", "accessory", "accessory", 3000000, 2000000),
-    "maddox_batphone": ("RARE", "accessory", "accessory", 1000000, 200000),
-    "overflux_power_orb": ("RARE", "accessory", "accessory", 10000000, 6000000),
-    "summoning_ring": ("RARE", "accessory", "accessory", 20000000, 10000000),
-    "tarantula_pet": ("RARE", "accessory", "accessory", 1000000, 200000),
-    "enderman_pet_epic": ("EPIC", "accessory", "accessory", 10000000, 2000000),
-    "spider_artifact": ("EPIC", "accessory", "accessory", 1000000, 500000),
-    "catacombs_expert_ring": ("EPIC", "accessory", "accessory", 30000000, 20000000),
-    "scarfs_studies": ("LEGENDARY", "accessory", "accessory", 12000000, 8000000),
-    "baby_yeti_pet": ("LEGENDARY", "accessory", "accessory", 40000000, 10000000),
-    "ender_dragon_pet": ("LEGENDARY", "accessory", "accessory", 1000000000, 20000000),
-    "wither_relic": ("LEGENDARY", "accessory", "accessory", 1000000000, 400000000),
-    "necromancers_brooch": ("RARE", "reforge_stone", None, 1000000, 500000),
-    "red_scarf": ("RARE", "reforge_stone", None, 5000000, 2000000),
-    "dragons_claw": ("EPIC", "reforge_stone", None, 3000, 600),
-    "wither_blood": ("EPIC", "reforge_stone", None, 3000, 600),
-    "precursor_gear": ("EPIC", "reforge_stone", None, 3000, 600),
-    "divans_alloy": ("LEGENDARY", "material", None, 1200000000, 1000000000),
-    "necrons_handle": ("LEGENDARY", "material", None, 1000000000, 600000000),
-    "judgement_core": ("LEGENDARY", "material", None, 500000000, 400000000),
+    "aspect_of_the_jerry": ("COMMON", "weapon", "weapon", 300000, 60000),
+    "undead_sword": ("COMMON", "weapon", "weapon", 800000, 200000),
+    "sword_of_bad_health": ("UNCOMMON", "weapon", "weapon", 2000000, 500000),
+    "bonzos_staff": ("RARE", "weapon", "weapon", 8000000, 2500000),
+    "golem_sword": ("RARE", "weapon", "weapon", 5000000, 1500000),
+    "aspect_of_the_end": ("RARE", "weapon", "weapon", 3000000, 900000),
+    "arack": ("EPIC", "weapon", "weapon", 4000000, 1200000),
+    "end_stone_sword": ("EPIC", "weapon", "weapon", 6000000, 2000000),
+    "wither_cloak_sword": ("EPIC", "weapon", "weapon", 22000000, 7000000),
+    "spirit_bow": ("EPIC", "weapon", "weapon", 10000000, 3500000),
+    "aspect_of_the_dragons": ("LEGENDARY", "weapon", "weapon", 30000000, 12000000),
+    "flower_of_truth": ("LEGENDARY", "weapon", "weapon", 25000000, 10000000),
+    "giants_sword": ("LEGENDARY", "weapon", "weapon", 100000000, 40000000),
+    "hyperion": ("LEGENDARY", "weapon", "weapon", 500000000, 200000000),
+    "terminator": ("LEGENDARY", "weapon", "weapon", 650000000, 260000000),
+    "dark_claymore": ("LEGENDARY", "weapon", "weapon", 150000000, 60000000),
+    "lapis_armor_helmet": ("UNCOMMON", "armor", "helmet", 350000, 120000),
+    "lapis_armor_chestplate": ("UNCOMMON", "armor", "chestplate", 1000000, 300000),
+    "lapis_armor_leggings": ("UNCOMMON", "armor", "leggings", 2000000, 600000),
+    "lapis_armor_boots": ("UNCOMMON", "armor", "boots", 300000, 100000),
+    "heavy_armor_helmet": ("RARE", "armor", "helmet", 2000000, 700000),
+    "heavy_armor_chestplate": ("RARE", "armor", "chestplate", 4000000, 1500000),
+    "heavy_armor_leggings": ("RARE", "armor", "leggings", 3000000, 1100000),
+    "heavy_armor_boots": ("RARE", "armor", "boots", 2500000, 900000),
+    "wither_goggles": ("EPIC", "armor", "helmet", 18000000, 7000000),
+    "shadow_assassin_boots": ("EPIC", "armor", "boots", 10000000, 4000000),
+    "tarantula_helmet": ("EPIC", "armor", "helmet", 8000000, 3000000),
+    "tarantula_boots": ("EPIC", "armor", "boots", 8000000, 3000000),
+    "necromancer_lord_leggings": ("LEGENDARY", "armor", "leggings", 45000000, 18000000),
+    "precursor_eye": ("LEGENDARY", "armor", "helmet", 35000000, 14000000),
+    "superior_dragon_chestplate": ("LEGENDARY", "armor", "chestplate", 30000000, 12000000),
+    "storms_leggings": ("LEGENDARY", "armor", "chestplate", 45000000, 18000000),
+    "goldors_helmet": ("LEGENDARY", "armor", "chestplate", 50000000, 20000000),
+    "necrons_chestplate": ("LEGENDARY", "armor", "chestplate", 75000000, 30000000),
+    "maxors_boots": ("LEGENDARY", "armor", "chestplate", 40000000, 16000000),
+    "balloon_snake": ("RARE", "accessory", "accessory", 5000000, 2000000),
+    "maddox_batphone": ("RARE", "accessory", "accessory", 3000000, 1000000),
+    "overflux_power_orb": ("RARE", "accessory", "accessory", 18000000, 7000000),
+    "summoning_ring": ("RARE", "accessory", "accessory", 25000000, 10000000),
+    "tarantula_pet": ("RARE", "accessory", "accessory", 3000000, 1000000),
+    "enderman_pet_epic": ("EPIC", "accessory", "accessory", 10000000, 4000000),
+    "spider_artifact": ("EPIC", "accessory", "accessory", 6000000, 2000000),
+    "catacombs_expert_ring": ("EPIC", "accessory", "accessory", 30000000, 12000000),
+    "scarfs_studies": ("LEGENDARY", "accessory", "accessory", 20000000, 8000000),
+    "baby_yeti_pet": ("LEGENDARY", "accessory", "accessory", 50000000, 20000000),
+    "ender_dragon_pet": ("LEGENDARY", "accessory", "accessory", 500000000, 200000000),
+    "wither_relic": ("LEGENDARY", "accessory", "accessory", 300000000, 120000000),
+    "necromancers_brooch": ("RARE", "reforge_stone", None, 1000000, 350000),
+    "red_scarf": ("RARE", "reforge_stone", None, 3000000, 1000000),
+    "dragons_claw": ("EPIC", "reforge_stone", None, 2000000, 700000),
+    "wither_blood": ("EPIC", "reforge_stone", None, 3000000, 1000000),
+    "precursor_gear": ("EPIC", "reforge_stone", None, 4000000, 1500000),
+    "divans_alloy": ("LEGENDARY", "material", None, 500000000, 250000000),
+    "necrons_handle": ("LEGENDARY", "material", None, 400000000, 200000000),
+    "judgement_core": ("LEGENDARY", "material", None, 300000000, 150000000),
     "skyblock_coin": ("SPECIAL", "material", None, 0, 0),
 }
 for item_id, (rarity, itype, slot, buy, sell) in EXPECTED.items():
@@ -111,9 +111,9 @@ for iid in ("sword_of_bad_health", "bonzos_staff", "golem_sword"):
 ok, _ = inv.equip("sword_of_bad_health")
 assert ok
 ok, err = inv.equip("bonzos_staff")
-assert not ok and "C技能" in err, "C skill uniqueness not enforced"
-assert inv.get_c_skill_equipped_id() == "sword_of_bad_health"
-print("[2] C skill metadata + uniqueness OK")
+assert ok, f"C skill swap failed: {err}"
+assert inv.get_c_skill_equipped_id() == "bonzos_staff"
+print("[2] C skill metadata + swap OK")
 
 # --- 3. 效果聚合 ---
 inv2 = ItemInventory()
@@ -123,8 +123,9 @@ for iid in ("lapis_armor_helmet", "lapis_armor_chestplate", "lapis_armor_legging
 eff = aggregate_effects(inv2, 1)
 assert eff["epic_drop_rate_mult"] == 1.2, f"lapis set {eff['epic_drop_rate_mult']}"
 assert eff["coin_drop_pct"] == 5.0
-assert eff["kill_small_coins"] == 100000
+assert eff["kill_small_coins"] == 80000
 assert eff["kill_boss_coins"] == 10000000
+assert eff["kill_midboss_coins"] == 5000000
 print("[3a] lapis set effects OK")
 
 inv3 = ItemInventory()

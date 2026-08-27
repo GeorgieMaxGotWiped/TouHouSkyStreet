@@ -39,6 +39,19 @@ class Game:
             except Exception:
                 pass
 
+        # 音效（从 config.json 读取音量并预加载，无音频设备时静默降级）
+        self.sfx_volume = float(self.user_config.get("sfx_volume", DEFAULT_SFX_VOLUME))
+        self.sfx_cache = {}
+        if self.audio_ok:
+            try:
+                for _name, _path in SFX_PATHS.items():
+                    if os.path.exists(_path):
+                        _sfx = pygame.mixer.Sound(_path)
+                        _sfx.set_volume(self.sfx_volume)
+                        self.sfx_cache[_name] = _sfx
+            except Exception as e:
+                print(f"[Audio] SFX load failed, audio disabled: {e}")
+
         # 音乐自然播放结束的事件（用于Boss战开场曲播完后切换循环曲）
         self.music_end_event = pygame.USEREVENT + 1
 
@@ -178,6 +191,38 @@ class Game:
             except Exception:
                 pass
 
+    # --- 音效控制 ---
+
+    def play_sfx(self, name, volume=None):
+        """播放一个预加载音效；volume 为 None 时使用全局 sfx_volume"""
+        if not self.audio_ok:
+            return False
+        sfx = self.sfx_cache.get(name)
+        if sfx is None:
+            return False
+        try:
+            if volume is None:
+                sfx.set_volume(self.sfx_volume)
+            else:
+                sfx.set_volume(max(0.0, min(1.0, float(volume))))
+            sfx.play()
+            return True
+        except Exception as e:
+            print(f"[Audio] Failed to play sfx {name}: {e}")
+            return False
+
+    def set_sfx_volume(self, volume):
+        """设置音效音量（0.0 ~ 1.0）并保存配置"""
+        self.sfx_volume = max(0.0, min(1.0, float(volume)))
+        self.user_config["sfx_volume"] = self.sfx_volume
+        save_user_config(self.user_config)
+        if self.audio_ok:
+            try:
+                for sfx in self.sfx_cache.values():
+                    sfx.set_volume(self.sfx_volume)
+            except Exception:
+                pass
+
     def toggle_fullscreen(self):
         """F11????? / ????"""
         self.fullscreen = not self.fullscreen
@@ -254,6 +299,23 @@ class Game:
 
         self.keys = pygame.key.get_pressed()
         self.mouse_pos = self._unscale_mouse(pygame.mouse.get_pos())
+
+    def mouse_hover(self, rect):
+        """鼠标是否悬停在 pygame.Rect 上（供各界面鼠标交互使用）"""
+        try:
+            return rect.collidepoint(self.mouse_pos)
+        except AttributeError:
+            return False
+
+    def mouse_clicked(self, button=1):
+        """鼠标按键是否刚刚按下（默认左键 1）"""
+        return bool(self.mouse_buttons_just_pressed.get(button))
+
+    def wheel_direction(self):
+        """返回鼠标滚轮方向：上= -1，下= +1，无滚动= 0"""
+        up = bool(self.mouse_buttons_just_pressed.get(4))
+        down = bool(self.mouse_buttons_just_pressed.get(5))
+        return -1 if up else (1 if down else 0)
 
     def _update(self):
         if self.current_state:

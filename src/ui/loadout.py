@@ -56,6 +56,9 @@ class LoadoutState(GameState):
                 self.selected = (self.selected - 1) % len(self.entries)
             if keys.get(pygame.K_DOWN, False) or keys.get(pygame.K_s, False):
                 self.selected = (self.selected + 1) % len(self.entries)
+            wheel_dir = self.game.wheel_direction()
+            if wheel_dir:
+                self.selected = (self.selected + wheel_dir) % len(self.entries)
 
             entry = self.entries[self.selected]
             item_id = entry["id"]
@@ -80,6 +83,94 @@ class LoadoutState(GameState):
 
         if keys.get(pygame.K_n, False):
             self._start_run()
+
+        # 鼠标：左列单击=携带，右列携带清单单击=卸下，金币±调整，N 提示开始；滚动用滚轮/键盘
+        mp = self.game.mouse_pos
+        clicked = self.game.mouse_clicked(1)
+        # 不再通过鼠标悬停滚动长列表；悬停仅用于视觉高亮，滚动由滚轮/键盘完成
+        if clicked:
+            for global_idx, rect in self._loadout_item_rects():
+                if rect.collidepoint(mp):
+                    self.selected = global_idx
+                    entry = self.entries[global_idx]
+                    item_id = entry["id"]
+                    if self.carried.get(item_id, 0) < entry["count"]:
+                        self.carried[item_id] = self.carried.get(item_id, 0) + 1
+                    else:
+                        self._set_message("仓库中没有更多该物品")
+                    return
+            for item_id, rect in self._loadout_carried_rects():
+                if rect.collidepoint(mp):
+                    if self.carried.get(item_id, 0) > 0:
+                        self.carried[item_id] -= 1
+                        if self.carried[item_id] <= 0:
+                            self.carried.pop(item_id, None)
+                    else:
+                        self._set_message("未携带该物品")
+                    return
+            minus_rect, plus_rect = self._coin_button_rects()
+            if minus_rect.collidepoint(mp):
+                self.carried_coins = max(0, self.carried_coins - self.coin_step)
+                return
+            if plus_rect.collidepoint(mp):
+                self.carried_coins = min(self.warehouse.coins, self.carried_coins + self.coin_step)
+                return
+            if self._loadout_start_rect().collidepoint(mp):
+                self._start_run()
+                return
+
+    def _loadout_item_rects(self):
+        """左列仓库物品行的可点击区域（返回 (全局序号, rect)）"""
+        visible, start = self._visible_slice(self.entries, self.selected, 10)
+        rects = []
+        y = 158
+        for offset, _entry in enumerate(visible):
+            rects.append((start + offset, pygame.Rect(60, y, 470, 32)))
+            y += 32
+        return rects
+
+    def _loadout_carried_rects(self):
+        """右列携带清单每行的可点击区域（返回 (item_id, rect)）"""
+        rects = []
+        y = 158
+        for item_id, _count in self.carried.items():
+            rects.append((item_id, pygame.Rect(600, y, 360, 24)))
+            y += 24
+        return rects
+
+    def _loadout_coins_y(self):
+        """右列“携带金币”文本的 y 坐标（与 draw 布局一致）"""
+        y = 158
+        if not self.carried:
+            y += 26
+        else:
+            y += len(self.carried) * 24
+        return y + 10
+
+    def _coin_button_rects(self):
+        """金币调整按钮：返回 (减少按钮 rect, 增加按钮 rect)"""
+        y = self._loadout_coins_y()
+        coin_text = f"携带金币：{self.carried_coins}  /  仓库：{self.warehouse.coins}"
+        w = self.game.font_small.size(coin_text)[0]
+        minus = pygame.Rect(600 - 50, y - 5, 42, 30)
+        plus = pygame.Rect(600 + w + 14, y - 5, 42, 30)
+        return minus, plus
+
+    def _loadout_start_rect(self):
+        """底部“进入休整”提示行的可点击区域（与 draw 提示布局一致）"""
+        line = "N：进入休整（穿戴携带物品）   Esc：返回主菜单"
+        x = (cfg.SCREEN_WIDTH - self.game.font_small.size(line)[0]) // 2
+        return pygame.Rect(x - 8, 686 - 3, self.game.font_small.size(line)[0] + 16, 26)
+
+    def _draw_coin_button(self, screen, rect, label, enabled):
+        """绘制金币 ± 按钮（悬停高亮）"""
+        hover = self.game.mouse_hover(rect)
+        color = cfg.COLOR_YELLOW if hover and enabled else cfg.COLOR_GRAY
+        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, rect)
+        pygame.draw.rect(screen, color, rect, 1)
+        surf = self.game.font_medium.render(label, True, color)
+        screen.blit(surf, (rect.x + (rect.width - surf.get_width()) // 2,
+                           rect.y + (rect.height - surf.get_height()) // 2))
 
     def _start_run(self):
         """从仓库扣减携带物资，写入本局背包并进入出发前休整界面。"""
@@ -138,11 +229,17 @@ class LoadoutState(GameState):
                             cfg.COLOR_GRAY, self.game.font_medium)
         else:
             visible, start = self._visible_slice(self.entries, self.selected, 10)
+            item_rects = self._loadout_item_rects()
             for offset, entry in enumerate(visible):
                 idx = start + offset
                 selected = idx == self.selected
                 item = entry["item"]
                 color = cfg.COLOR_YELLOW if selected else item.rarity_color
+                row_rect = item_rects[offset][1]
+                if selected:
+                    pygame.draw.rect(screen, (70, 70, 24), row_rect)
+                elif self.game.mouse_hover(row_rect):
+                    pygame.draw.rect(screen, (110, 110, 40), row_rect, 1)
                 prefix = "> " if selected else "  "
                 draw_item_icon(screen, item.id, left_x, y, size=28)
                 name = self.game.font_small.render(
@@ -181,6 +278,11 @@ class LoadoutState(GameState):
             f"共携带 {self._carry_total()} 件物品", True, cfg.COLOR_GRAY)
         screen.blit(total_line, (right_x, y))
 
+        # 金币调整按钮（鼠标可点击）
+        minus_rect, plus_rect = self._coin_button_rects()
+        self._draw_coin_button(screen, minus_rect, "−", self.carried_coins > 0)
+        self._draw_coin_button(screen, plus_rect, "+", self.carried_coins < self.warehouse.coins)
+
         # 底部：当前选中仓库物品的属性
         selected_item = None
         if self.entries:
@@ -198,6 +300,9 @@ class LoadoutState(GameState):
             hint = self.game.font_small.render(line, True, cfg.COLOR_DARK_GRAY)
             screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, hint_y))
             hint_y += 20
+        start_rect = self._loadout_start_rect()
+        if self.game.mouse_hover(start_rect):
+            pygame.draw.rect(screen, cfg.COLOR_GREEN, start_rect, 1)
 
         if self.message:
             msg = self.game.font_medium.render(self.message, True, cfg.COLOR_GREEN)

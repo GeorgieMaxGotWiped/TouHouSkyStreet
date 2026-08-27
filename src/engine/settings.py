@@ -15,11 +15,13 @@ else:
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 SOUNDS_DIR = os.path.join(ASSETS_DIR, "sounds")
 MUSIC_DIR = os.path.join(SOUNDS_DIR, "musics")
+SFX_DIR = os.path.join(SOUNDS_DIR, "se")
 BACKGROUNDS_DIR = os.path.join(ASSETS_DIR, "backgrounds")
 SRC_DIR = os.path.join(BASE_DIR, "src")
 
 # --- 用户配置（音量等）：源码运行保存到项目根目录，打包后保存到 exe 同目录 ---
 DEFAULT_MUSIC_VOLUME = 0.8
+DEFAULT_SFX_VOLUME = 0.7
 
 if getattr(sys, 'frozen', False):
     CONFIG_DIR = os.path.dirname(sys.executable)
@@ -34,6 +36,7 @@ def load_user_config():
     """读取用户配置（音量等），文件缺失或损坏时返回默认值"""
     config = {
         "music_volume": DEFAULT_MUSIC_VOLUME,
+        "sfx_volume": DEFAULT_SFX_VOLUME,
     }
     try:
         if os.path.exists(CONFIG_PATH):
@@ -41,6 +44,8 @@ def load_user_config():
                 data = json.load(f)
             if isinstance(data.get("music_volume"), (int, float)):
                 config["music_volume"] = max(0.0, min(1.0, float(data["music_volume"])))
+            if isinstance(data.get("sfx_volume"), (int, float)):
+                config["sfx_volume"] = max(0.0, min(1.0, float(data["sfx_volume"])))
     except Exception as e:
         print(f"[Config] Failed to load {CONFIG_PATH}: {e}")
     return config
@@ -358,20 +363,20 @@ STAGE3_MUSIC_NAME = "墓穴回响 ~ Echoes of the Catacombs"
 STAGE3_BOSS_MUSIC_NAME = "小丑嘉年华 ~ Bonzo's Carnival"
 
 
-# 音乐（第4面）——当前复用三面音乐文件；后续可替换为四面专属曲
-STAGE4_MUSIC_START = STAGE3_MUSIC_START
-STAGE4_MUSIC_LOOP = STAGE3_MUSIC_LOOP
-STAGE4_MUSIC = STAGE3_MUSIC
-STAGE4_BOSS_MUSIC_START = STAGE3_BOSS_MUSIC_START
-STAGE4_BOSS_MUSIC_LOOP = STAGE3_BOSS_MUSIC_LOOP
+# 音乐（第4面）——文件未就绪时 play_music 会自动跳过
+STAGE4_MUSIC_START = os.path.join(MUSIC_DIR, "4_1_start.wav")   # 道中开场曲（播放一遍）
+STAGE4_MUSIC_LOOP = os.path.join(MUSIC_DIR, "4_1_loop.wav")     # 道中循环曲（无限循环）
+STAGE4_MUSIC = STAGE4_MUSIC_START
+STAGE4_BOSS_MUSIC_START = os.path.join(MUSIC_DIR, "4_2.wav")   # Boss战音乐（单曲，直接循环）
+STAGE4_BOSS_MUSIC_LOOP = os.path.join(MUSIC_DIR, "4_2.wav")    # 开场播完后循环同一曲
 
 # 曲名（每面开始 / Boss战开始时显示当前播放的音乐名）
 STAGE4_MUSIC_NAME = "墓穴深处 ~ The Catacombs"
 STAGE4_BOSS_MUSIC_NAME = "死灵王的狂宴 ~ Necromancer's Feast"
 
-# 音乐（第5面）——当前复用四面 Boss 战音乐；后续可替换为五面专属曲
-STAGE5_MUSIC_START = STAGE4_BOSS_MUSIC_START
-STAGE5_MUSIC_LOOP = STAGE4_BOSS_MUSIC_LOOP
+# 音乐（第5面）——文件未就绪时 play_music 会自动跳过
+STAGE5_MUSIC_START = os.path.join(MUSIC_DIR, "5_1_start.wav")   # 道中开场曲（播放一遍）
+STAGE5_MUSIC_LOOP = os.path.join(MUSIC_DIR, "5_1_loop.wav")     # 道中循环曲（无限循环）
 STAGE5_MUSIC = STAGE5_MUSIC_START
 STAGE5_BOSS_MUSIC_START = STAGE4_BOSS_MUSIC_START
 STAGE5_BOSS_MUSIC_LOOP = STAGE4_BOSS_MUSIC_LOOP
@@ -391,6 +396,38 @@ STAGE6_BOSS_MUSIC_NAME = "凋零之王的王座 ~ Throne of the Wither King"
 
 # 曲名横幅显示时长（帧，60FPS）
 MUSIC_BANNER_DURATION = 300
+
+# --- 音效（游玩/菜单短音效，8-bit 复古风） ---
+# 文件名构成约定：assets/sounds/se/<name>.wav
+SFX_SHOT = os.path.join(SFX_DIR, "se_shot.mp3")
+SFX_ENEP00 = os.path.join(SFX_DIR, "se_enep00.mp3")
+SFX_ENEP01 = os.path.join(SFX_DIR, "se_enep01.mp3")
+SFX_DAMAGE = os.path.join(SFX_DIR, "se_damage.wav")
+SFX_GRAZE = os.path.join(SFX_DIR, "se_graze.wav")
+SFX_BOMB = os.path.join(SFX_DIR, "se_bomb.wav")
+SFX_CARDGET = os.path.join(SFX_DIR, "se_cardget.wav")
+SFX_BONUS = os.path.join(SFX_DIR, "se_bonus.wav")
+SFX_POWERUP = os.path.join(SFX_DIR, "se_powerup.wav")
+SFX_CURSOR = os.path.join(SFX_DIR, "se_cursor.wav")
+SFX_OK = os.path.join(SFX_DIR, "se_ok.wav")
+SFX_CANCEL_MENU = os.path.join(SFX_DIR, "se_cancel_menu.wav")
+
+# 音效注册表：逻辑名 -> 文件路径（供 Game.play_sfx 使用）
+SFX_PATHS = {
+    "shot": SFX_SHOT,
+    "enemy_down_small": SFX_ENEP00,
+    "enemy_down_boss": SFX_ENEP01,
+    "damage": SFX_DAMAGE,
+    "graze": SFX_GRAZE,
+    "bomb": SFX_BOMB,
+    "cardget": SFX_CARDGET,
+    "bonus": SFX_BONUS,
+    "powerup": SFX_POWERUP,
+    "cursor": SFX_CURSOR,
+    "ok": SFX_OK,
+    "cancel_menu": SFX_CANCEL_MENU,
+}
+
 
 # --- Skyblock 技能 ---
 SKILL_XP_TABLE = [0, 50, 125, 200, 300, 500, 750, 1000, 1500, 2000,

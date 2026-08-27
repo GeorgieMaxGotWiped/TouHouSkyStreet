@@ -26,6 +26,7 @@ class BossRewardState(GameState):
         self.selected = 0
         self.confirming = False
         self.confirm_choice = 0
+        self._last_mouse_pos = (0, 0)
 
     def enter(self, game):
         self.game.stop_music()
@@ -53,9 +54,114 @@ class BossRewardState(GameState):
         if self._confirm_pressed(keys) and self.offer:
             self.confirming = True
             self.confirm_choice = 0
+            return
+
+        # 鼠标：悬停选中卡片；单击已选中卡片或“确认领取”打开确认框
+        mp = self.game.mouse_pos
+        clicked = self.game.mouse_clicked(1)
+        moved = mp != self._last_mouse_pos
+        if moved:
+            self._last_mouse_pos = mp
+        if not clicked and moved:
+            for idx, rect in self._card_rects():
+                if rect.collidepoint(mp):
+                    if self.selected != idx:
+                        self.selected = idx
+                    break
+        if clicked:
+            for idx, rect in self._card_rects():
+                if rect.collidepoint(mp):
+                    if self.selected != idx:
+                        self.selected = idx
+                    else:
+                        self.confirming = True
+                        self.confirm_choice = 0
+                    return
+            if self._confirm_claim_rect().collidepoint(mp):
+                self.confirming = True
+                self.confirm_choice = 0
+                return
+
+    def _card_rects(self):
+        """三张奖励卡的可点击区域（与 draw 布局一致）"""
+        card_w = 250
+        gap = 22
+        total = card_w * 3 + gap * 2
+        start_x = (cfg.SCREEN_WIDTH - total) // 2
+        card_y = 150
+        pad = 12
+        text_w = card_w - pad * 2
+        font_small = self.game.font_small
+        font_medium = self.game.font_medium
+        line_h = font_small.get_height() + 4
+        rects = []
+        for idx, item in enumerate(self.offer):
+            x = start_x + idx * (card_w + gap)
+            name_surf = font_medium.render(item.name, True, item.rarity_color)
+            if name_surf.get_width() > text_w:
+                name_surf = font_small.render(item.name, True, item.rarity_color)
+            raw_lines = []
+            price_text = self._price_text(item)
+            if price_text:
+                raw_lines.append((cfg.COLOR_YELLOW, price_text))
+            if item.stat_text():
+                raw_lines.append((cfg.COLOR_GREEN, item.stat_text()))
+            for lore_line in item.lore[:3]:
+                raw_lines.append((cfg.COLOR_WHITE, lore_line))
+            text_lines = []
+            for color, text in raw_lines:
+                for line in self._wrap_text(font_small, text, text_w):
+                    text_lines.append((color, line))
+            shown = text_lines[:9]
+            rarity_y = card_y + 78 + name_surf.get_height() + 4
+            content_y = rarity_y + font_small.get_height() + 4
+            if item.slot:
+                content_y += font_small.get_height() + 4
+            hint_y = content_y + len(shown) * line_h + 10
+            card_h = max(250, (hint_y - card_y) + 34)
+            rects.append((idx, pygame.Rect(x, card_y, card_w, card_h)))
+        return rects
+
+    def _confirm_claim_rect(self):
+        """“确认领取”按钮区域"""
+        return pygame.Rect(cfg.SCREEN_WIDTH // 2 - 90, 585, 180, 40)
+
+    def _confirm_button_rects(self):
+        """确认框中的“确定/返回”按钮区域（与 _draw_confirm 布局一致）"""
+        labels = ["确定", "返回"]
+        gap = 48
+        box_w = 620
+        box = pygame.Rect((cfg.SCREEN_WIDTH - box_w) // 2, 280, box_w, 220)
+        total_w = sum(self.game.font_medium.size(label)[0] + 44 for label in labels) + gap
+        x = (cfg.SCREEN_WIDTH - total_w) // 2
+        y = box.y + box.h - 60
+        rects = []
+        for label in labels:
+            w = self.game.font_medium.size(label)[0] + 44
+            rects.append(pygame.Rect(x, y, w, 38))
+            x += w + gap
+        return rects
 
     def _update_confirm(self, keys):
         """确认领取环节：确定 / 返回。"""
+        # 鼠标：点击按钮直接确定 / 返回
+        mp = self.game.mouse_pos
+        clicked = self.game.mouse_clicked(1)
+        if clicked:
+            button_rects = self._confirm_button_rects()
+            for i, rect in enumerate(button_rects):
+                if rect.collidepoint(mp):
+                    self.confirm_choice = i
+                    if i == 0:
+                        item = self.offer[self.selected]
+                        self.inventory.add_item(item.id, 1)
+                        self.inventory.save_to_global_data(self.game.global_data)
+                        from src.ui.intermission import IntermissionState
+                        self.game.switch_state(IntermissionState(self.game, self.stage_num))
+                    else:
+                        self.confirming = False
+                    return
+            return
         if keys.get(pygame.K_ESCAPE, False) or keys.get(pygame.K_x, False):
             self.confirming = False
             return
@@ -169,6 +275,8 @@ class BossRewardState(GameState):
             screen.blit(pygame.Surface((0, 0)), (0, 0))  # no-op keep pygame import
             pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, panel)
             pygame.draw.rect(screen, item.rarity_color, panel, 3 if selected else 1)
+            if self.game.mouse_hover(panel) and not selected:
+                pygame.draw.rect(screen, cfg.COLOR_YELLOW, panel, 1)
             if selected:
                 arrow = self.game.font_large.render(">", True, cfg.COLOR_YELLOW)
                 screen.blit(arrow, (x - 24, card_y + card_h // 2 - 16))
@@ -196,6 +304,16 @@ class BossRewardState(GameState):
             if selected:
                 mark = font_medium.render("按 Enter 确认领取", True, cfg.COLOR_YELLOW)
                 screen.blit(mark, (x + (card_w - mark.get_width()) // 2, hint_y))
+
+        claim_rect = self._confirm_claim_rect()
+        claim_hover = self.game.mouse_hover(claim_rect)
+        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, claim_rect)
+        pygame.draw.rect(screen, cfg.COLOR_YELLOW if claim_hover else cfg.COLOR_GRAY,
+                         claim_rect, 2 if claim_hover else 1)
+        claim_text = self.game.font_medium.render(
+            "确认领取", True, cfg.COLOR_YELLOW if claim_hover else cfg.COLOR_WHITE)
+        screen.blit(claim_text, (claim_rect.x + (claim_rect.width - claim_text.get_width()) // 2,
+                                 claim_rect.y + (claim_rect.height - claim_text.get_height()) // 2))
 
         hint = self.game.font_small.render(
             "← → / A D：选择     Enter / Z / Space：确认领取", True, cfg.COLOR_DARK_GRAY)

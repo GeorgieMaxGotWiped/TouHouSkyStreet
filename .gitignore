@@ -25,5 +25,8 @@ config.json
 # 本地仓库存档（撤离后物资持久化保存）
 warehouse.json
 
+# 旧版背景备份
+assets/backgrounds/bg_0_old.png
+
 # 工具脚本生成的启动日志
 tools/_boot_*.txt

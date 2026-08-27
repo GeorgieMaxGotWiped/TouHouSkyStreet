@@ -1,3 +1,21 @@
+## v1.5.0
+
+### 新增内容
+- 难度选择界面：主菜单 Start Game 后先进入「选择难度」（`src/ui/difficulty.py`），当前仅开放 Normal，其余难度显示「未开放」；命令行参数 `easy|normal|hard|lunatic` 仍可直接指定
+- 全界面鼠标操作：主菜单 / 设置 / 出征准备 / 符卡练习 / Boss 奖励 / 休整界面 / 对话 均支持悬停切换、左键点击确认、滚轮滚动；休整界面底部页签、装备槽、背包、商店、锻造等全部可鼠标点击
+- 音效系统：新增 SE 音效（`assets/sounds/se/`，系统音、擦弹、符卡展开、击中、Bomb 等），音量由 `config.json` 的 `sfx_volume` 控制并支持运行时调整；新增第 4 面后半与第 5 面 BGM（`4_1_*`、`4_2`、`5_1_*`）
+- C 技能视觉特效：召唤物/龙怒等技能增加透明冲击波、龙焰柱等演出（`src/systems/c_skill_entities.py`）
+
+### 调整
+- 五面道中 Boss 开战不再切换/重放 BGM（`keep_stage_music_on_boss`）
+- 五面各 Boss 立绘配色校正；六面 Kaeman 对话立绘对齐
+- 第 1 面标题图与多处关卡背景更新
+
+### 文件
+- 新增 `src/ui/difficulty.py`（难度选择界面）
+- 新增 `assets/sounds/se/`、`assets/sounds/effects/` 与 `assets/sounds/musics/4_1_*.wav`、`4_2.wav`、`5_1_*.wav`
+- 更新 `src/engine/game.py`、`src/engine/settings.py`、`src/engine/spell_bg.py`、`src/entities/boss.py`、`src/stages/stage3.py`、`src/stages/stage5.py`、`src/stages/stage6.py`、`src/systems/c_skill_entities.py`、`src/systems/item_effects.py`、`src/systems/item_system.py`、`src/ui/menu.py`、`src/ui/dialogue.py`、`src/ui/intermission.py`、`src/ui/loadout.py`、`src/ui/practice.py`、`src/ui/boss_reward.py`
+
 ## v1.4.2
 
 ### 新增内容

@@ -1,6 +1,7 @@
 # 对话系统
 # 底部对话框：Z/Enter 继续，ESC 跳过
 
+import math
 import re
 import pygame
 from src.engine import settings as cfg
@@ -12,32 +13,45 @@ _CJK_LEAD = re.compile(r"^[\u4e00-\u9fff\uff00-\uffef\u3000-\u303f]+\s*")
 DIALOGUE_BOX_HEIGHT = 112
 # 立绘目标：头顶对齐战斗框上 1/3 线（半身露在对话框上方，下半被遮挡）
 DIALOGUE_PORTRAIT_TOP_TARGET = cfg.BATTLE_OFFSET_Y + cfg.BATTLE_AREA_HEIGHT // 3
-# 立绘淡入帧数（快速由透明变实心）
-DIALOGUE_PORTRAIT_FADE_FRAMES = 15
+# 立绘状态平滑速率（越大过渡越快）：控制说话者/非说话者透明度与后退的渐变
+DIALOGUE_PORTRAIT_STATE_RATE = 10.0
+# 立绘投影：偏移 (右, 下) 与基准不透明度（随立绘淡入）
+DIALOGUE_PORTRAIT_SHADOW_OFFSET = (8, 10)
+DIALOGUE_PORTRAIT_SHADOW_ALPHA = 120
+# 立绘基准缩放：避免半身立绘占满整条对话区，使自机/boss 左右站位一目了然
+DIALOGUE_PORTRAIT_BASE_SCALE = 0.62
+# 非当前说话角色的立绘：半透明，并向自己一侧后退一定像素
+DIALOGUE_PORTRAIT_INACTIVE_ALPHA = 110
+DIALOGUE_PORTRAIT_RETREAT = 30
+# 所有人物统一向自己一侧外移的像素（说话者/非说话者都移动；非说话者再叠加 RETREAT）
+DIALOGUE_PORTRAIT_SIDE_SHIFT = 60
 
 
 class DialogueBox:
     """底部对话框（逐条推进）"""
     def __init__(self, game, lines, portraits=None, portrait_sides=None,
-                 portrait_scales=None, portrait_offsets=None):
+                 portrait_scales=None, portrait_offsets=None,
+                 portrait_vertical_offsets=None):
         self.game = game
         self.lines = lines          # [(name, text), ...]
         self.portraits = portraits or {}   # {角色名: 贴图路径}
         self.portrait_sides = portrait_sides or {}   # {角色名: "left"/"right"}，默认右侧
         self.portrait_scales = portrait_scales or {}   # {角色名: 立绘放大倍率}，默认 1.0
         self.portrait_offsets = portrait_offsets or {}   # {角色名: 立绘水平偏移px}，正值右移
+        self.portrait_vertical_offsets = portrait_vertical_offsets or {}   # {角色名: 立绘垂直偏移px}，正值上移
         self.index = 0
         self.finished = False
         self.wait_frames = 20       # 换行后输入缓冲，防止误跳过
         self._portrait_cache = {}   # 贴图路径 -> Surface
         self._portrait_attempted = set()
-        self.portrait_path = None     # 当前显示的立绘路径（换行时重新淡入）
-        self.portrait_fade = 0        # 立绘当前透明度（0-255）
-        self.portrait_fade_timer = 0  # 立绘淡入剩余帧数
+        self._portrait_shadow_cache = {}   # id(立绘Surface) -> 柔化投影
+        self._portrait_content_boxes = {}   # 立绘键 -> (内容左,内容右,内容顶) 像素(缩放后)
+        self._portrait_states = {}   # 角色名 -> [当前透明度, 当前后退像素]（平滑过渡用）
         self.boss_card = self._find_boss_card()   # 本段对话涉及的 BOSS 英文名，无则 None
 
     def _get_portrait(self, path, name):
-        """加载并缓存立绘：等比放大到「头顶对齐战斗框上1/3线」，失败返回 None。
+        """加载并缓存立绘：按基准缩放等比缩小（自机/boss 左右站位更清晰），
+        并记录内容顶部偏移，draw 中据此让头顶对齐战斗框上1/3线。
         name 对应的角色可通过 portrait_scales 额外放大。"""
         scale = self.portrait_scales.get(name, 1.0)
         key = (path, scale)
@@ -54,11 +68,26 @@ class DialogueBox:
             if h <= 0:
                 raise ValueError("invalid portrait height")
             ph = self._portrait_height(img, h)
-            if scale != 1.0:
-                ph = max(1, int(round(ph * scale)))
+            ph = max(1, int(round(ph * scale * DIALOGUE_PORTRAIT_BASE_SCALE)))
             new_w = max(1, round(w * ph / h))
-            self._portrait_cache[key] = pygame.transform.smoothscale(
-                img, (new_w, ph))
+            sprite = pygame.transform.smoothscale(img, (new_w, ph))
+            self._portrait_cache[key] = sprite
+            try:
+                rects = pygame.mask.from_surface(img).get_bounding_rects()
+                if rects:
+                    cr = rects[0]
+                    for r in rects[1:]:
+                        cr = cr.union(r)
+                else:
+                    cr = pygame.Rect(0, 0, w, h)
+            except Exception:
+                cr = pygame.Rect(0, 0, w, h)
+            kx = ph / h
+            self._portrait_content_boxes[key] = (
+                max(0, int(round(cr.left * kx))),
+                max(0, int(round((cr.left + cr.width) * kx))),
+                max(0, int(round(cr.top * kx))),
+            )
         except Exception as e:
             print(f"[Dialogue] Failed to load portrait {path}: {e}")
         return self._portrait_cache.get(key)
@@ -100,22 +129,73 @@ class DialogueBox:
         result.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
         return result
 
+    def _draw_portrait(self, screen, name, portrait_path, alpha, retreat):
+        """绘制单个立绘：alpha 为整体不透明度(0-255)，retreat 为向自己一侧后退像素。"""
+        sprite = self._get_portrait(portrait_path, name)
+        if sprite is None:
+            return
+        key = (portrait_path, self.portrait_scales.get(name, 1.0))
+        shadow = self._portrait_shadow_cache.get(id(sprite))
+        if shadow is None:
+            shadow = self._make_shadow(sprite)
+            self._portrait_shadow_cache[id(sprite)] = shadow
+        if alpha < 255:
+            shadow = self._with_alpha(shadow, alpha)
+            sprite = self._with_alpha(sprite, alpha)
+        pw, ph = sprite.get_size()
+        # 侧位规则：显式配置优先；未配置时自机靠左，其余靠右
+        side = self.portrait_sides.get(name)
+        if side is None:
+            side = "left" if portrait_path == cfg.SELF_SPRITE else "right"
+        box_w = cfg.BATTLE_AREA_WIDTH - 24
+        x = cfg.BATTLE_OFFSET_X + 12
+        box_l, box_r, _ctop = self._portrait_content_boxes.get(key, (0, pw, 0))
+        if side == "left":
+            px = x - box_l - retreat
+        else:
+            px = x + box_w - box_r + self.portrait_offsets.get(name, 0) + retreat
+        # 头顶对齐战斗框上1/3线，立绘下半被对话框遮挡（半身效果）
+        py = (DIALOGUE_PORTRAIT_TOP_TARGET - _ctop
+              - self.portrait_vertical_offsets.get(name, 0))
+        # 超出战斗框的部分裁剪掉，不显示
+        old_clip = screen.get_clip()
+        screen.set_clip((cfg.BATTLE_OFFSET_X, cfg.BATTLE_OFFSET_Y,
+                         cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
+        sx, sy = DIALOGUE_PORTRAIT_SHADOW_OFFSET
+        screen.blit(shadow, (px + sx, py + sy))
+        screen.blit(sprite, (px, py))
+        screen.set_clip(old_clip)
+
+    def _make_shadow(self, sprite):
+        """根据立绘透明通道生成柔化投影（黑色 + 降采样模糊），
+        并把基准不透明度烘焙进 alpha 通道，便于后续整体淡入。"""
+        shadow = sprite.copy()
+        shadow.fill((0, 0, 0, 255), special_flags=pygame.BLEND_RGBA_MULT)
+        w, h = shadow.get_size()
+        small = pygame.transform.smoothscale(
+            shadow, (max(1, w // 6), max(1, h // 6)))
+        shadow = pygame.transform.smoothscale(small, (w, h))
+        shadow.fill((255, 255, 255, DIALOGUE_PORTRAIT_SHADOW_ALPHA),
+                    special_flags=pygame.BLEND_RGBA_MULT)
+        return shadow
+
     def update(self, dt):
         if self.finished:
             return
 
-        # 立绘淡入：当前说话角色带立绘且与上次不同时，快速由透明变实心
+        # 立绘平滑过渡：说话者 全透明+正常位，其余 半透明+向自己一侧后退
         name, _text = self.lines[self.index]
-        portrait_path = self.portraits.get(name)
-        if portrait_path != self.portrait_path:
-            self.portrait_path = portrait_path
-            self.portrait_fade_timer = (DIALOGUE_PORTRAIT_FADE_FRAMES
-                                        if portrait_path else 0)
-            self.portrait_fade = 0
-        if self.portrait_fade_timer > 0:
-            self.portrait_fade_timer -= 1
-            self.portrait_fade = min(255, int(
-                255 * (1 - self.portrait_fade_timer / DIALOGUE_PORTRAIT_FADE_FRAMES)))
+        k = 1.0 - math.exp(-dt * DIALOGUE_PORTRAIT_STATE_RATE)
+        for cname in self.portraits:
+            alpha_t = 255.0 if cname == name else float(DIALOGUE_PORTRAIT_INACTIVE_ALPHA)
+            retreat_t = float(
+                DIALOGUE_PORTRAIT_SIDE_SHIFT
+                if cname == name
+                else DIALOGUE_PORTRAIT_SIDE_SHIFT + DIALOGUE_PORTRAIT_RETREAT)
+            cur = self._portrait_states.setdefault(
+                cname, [0.0, float(DIALOGUE_PORTRAIT_SIDE_SHIFT + DIALOGUE_PORTRAIT_RETREAT)])
+            cur[0] += (alpha_t - cur[0]) * k
+            cur[1] += (retreat_t - cur[1]) * k
 
         if self.wait_frames > 0:
             self.wait_frames -= 1
@@ -123,7 +203,7 @@ class DialogueBox:
 
         keys = self.game.keys_just_pressed
         if (keys.get(pygame.K_z, False) or keys.get(pygame.K_RETURN, False)
-                or keys.get(pygame.K_SPACE, False)):
+                or keys.get(pygame.K_SPACE, False) or self.game.mouse_clicked(1)):
             self.index += 1
             if self.index >= len(self.lines):
                 self.finished = True
@@ -144,25 +224,20 @@ class DialogueBox:
         x = cfg.BATTLE_OFFSET_X + 12
         y = cfg.BATTLE_OFFSET_Y + cfg.BATTLE_AREA_HEIGHT - box_h - 12
 
-        # 说话角色的立绘：贴在对话框上方（无边框），默认右侧；自机在左侧
-        portrait_path = self.portraits.get(name)
-        if portrait_path:
-            sprite = self._get_portrait(portrait_path, name)
-            if sprite is not None:
-                if self.portrait_fade < 255:
-                    sprite = self._with_alpha(sprite, self.portrait_fade)
-                pw, ph = sprite.get_size()
-                if self.portrait_sides.get(name) == "left":
-                    px = x
-                else:
-                    px = x + box_w - pw + self.portrait_offsets.get(name, 0)
-                py = y - ph // 2   # 立绘下半部分被对话框遮挡（半身效果）
-                # 超出战斗框的部分裁剪掉，不显示
-                old_clip = screen.get_clip()
-                screen.set_clip((cfg.BATTLE_OFFSET_X, cfg.BATTLE_OFFSET_Y,
-                                 cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
-                screen.blit(sprite, (px, py))
-                screen.set_clip(old_clip)
+        # 立绘：说话者正常不透明度、正常位置；其他角色半透明并向自己一侧后退。
+        # 先画非说话者，最后画说话者，保证说话者叠在最上层。
+        for cname, cpath in self.portraits.items():
+            if cname == name:
+                continue
+            alpha, retreat = self._portrait_states.get(
+                cname, (DIALOGUE_PORTRAIT_INACTIVE_ALPHA, DIALOGUE_PORTRAIT_RETREAT))
+            self._draw_portrait(screen, cname, cpath,
+                                int(round(alpha)), int(round(retreat)))
+        speaker_path = self.portraits.get(name)
+        if speaker_path:
+            alpha, retreat = self._portrait_states.get(name, (255.0, 0.0))
+            self._draw_portrait(screen, name, speaker_path,
+                                int(round(alpha)), int(round(retreat)))
 
         box = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
         box.fill((10, 10, 28, 235))

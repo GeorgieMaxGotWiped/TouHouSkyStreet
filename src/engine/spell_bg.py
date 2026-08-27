@@ -531,9 +531,8 @@ STYLES = {
         "base": (8, 6, 20),
         "glow": (24, 10, 42),
         "ring": (190, 110, 255),
+        "warp": False,
         "layers": [
-            _Layer("soul_violet", rot_speed=0.24, scale=2.2, pulse=0.07, freq=0.3),
-            _Layer("web_violet", rot_speed=-0.12, scale=2.6, pulse=0.05, freq=0.25),
             _Layer("thread_pale", scroll=(0.0, 0.35), blend="alpha"),
             _Layer("icon_fragment", rot_speed=0.40, scale=0.72, pulse=0.06, freq=0.35),
             _Layer("icon_fang", rot_speed=1.40, scale=0.50, orbit=(140, 1.00)),
@@ -661,32 +660,28 @@ STYLES = {
         "base": (7, 9, 8),
         "glow": (18, 26, 16),
         "ring": (150, 230, 120),
+        "warp": False,
         "dim": 0.52,
         "layers": [
             _Layer(None, panorama=dict(key="scarf", speed=16.0, fov=60,
                                         floor=os.path.join(cfg.BACKGROUNDS_DIR,
                                                            "stage4", "scarf", "fl_scarf.png")),
                    blend="alpha"),
-            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
             _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
-            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
-            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
         ],
     },
     "sadan": {  # Sadan 亡灵符卡专属（暂复制 Bonzo 背景占位）
         "base": (7, 9, 8),
         "glow": (18, 26, 16),
         "ring": (150, 230, 120),
+        "warp": False,
         "dim": 0.52,
         "layers": [
             _Layer(None, panorama=dict(key="sadan", speed=16.0, fov=60,
                                         floor=os.path.join(cfg.BACKGROUNDS_DIR,
                                                            "stage4", "sadan", "fl_sadan.png")),
                    blend="alpha"),
-            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
             _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
-            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
-            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
         ],
     },
     "professor": {  # Professor 专属：绿色护符环形大厅
@@ -699,26 +694,19 @@ STYLES = {
                                         floor=os.path.join(cfg.BACKGROUNDS_DIR,
                                                            "stage5", "professor", "fl_professor.png")),
                    blend="alpha"),
-            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
             _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
-            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
-            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
         ],
     },
-    "necron": {  # Necron 凋符专属（暂复制 Bonzo 背景占位）
+    "necron": {  # Necron 凋符专属：仅墙壁无地板（全帧墙壁贴图铺满屏幕）
         "base": (7, 9, 8),
         "glow": (18, 26, 16),
         "ring": (150, 230, 120),
+        "warp": False,
         "dim": 0.52,
         "layers": [
-            _Layer(None, panorama=dict(key="necron", speed=16.0, fov=60,
-                                        floor=os.path.join(cfg.BACKGROUNDS_DIR,
-                                                           "stage5", "necron", "fl_necron.png")),
+            _Layer(None, panorama=dict(key="necron", speed=16.0, fov=60),
                    blend="alpha"),
-            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
             _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
-            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
-            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
         ],
     },
     "thorn": {  # Thorn 专属（暂复制 Bonzo 背景占位）
@@ -731,10 +719,7 @@ STYLES = {
                                         floor=os.path.join(cfg.BACKGROUNDS_DIR,
                                                            "stage5", "thorn", "fl_thorn.png")),
                    blend="alpha"),
-            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
             _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
-            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
-            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
         ],
     },
     "livid": {  # Livid 专属（暂复制 Bonzo 背景占位）
@@ -747,16 +732,14 @@ STYLES = {
                                         floor=os.path.join(cfg.BACKGROUNDS_DIR,
                                                            "stage5", "livid", "fl_livid.png")),
                    blend="alpha"),
-            _Layer("soul_violet", rot_speed=0.30, scale=2.2, pulse=0.07, freq=0.35),
             _Layer("thread_pale", scroll=(0.0, 0.6), blend="alpha"),
-            _Layer("icon_skull", rot_speed=0.50, scale=0.62, pulse=0.06, freq=0.4),
-            _Layer("icon_dark_orb", rot_speed=1.20, scale=0.40, pulse=0.08, freq=0.5, orbit=(140, 0.9)),
         ],
     },
     "maxor": {  # Maxor 专属：凋零竞技场全屏背景
         "base": (9, 6, 6),
         "glow": (26, 14, 8),
         "ring": (255, 150, 70),
+        "warp": False,
         "dim": 0.75,
         "layers": [
             _Layer(None, image="maxor"),
@@ -766,6 +749,7 @@ STYLES = {
         "base": (6, 8, 14),
         "glow": (10, 20, 34),
         "ring": (170, 220, 255),
+        "warp": False,
         "dim": 0.75,
         "layers": [
             _Layer(None, image="storm"),
@@ -775,6 +759,7 @@ STYLES = {
         "base": (10, 9, 5),
         "glow": (28, 22, 8),
         "ring": (255, 210, 90),
+        "warp": False,
         "dim": 0.78,
         "layers": [
             _Layer(None, image="goldor"),
@@ -917,6 +902,7 @@ class SpellBackground:
 
         self.layers = conf["layers"]
         self.ring_color = conf["ring"]
+        self.warp = conf.get("warp", True)
 
         # 伪3D环形全景层：为带 panorama 配置的层创建渲染器（贴图缺失时回退普通层）
         self.panoramas = []
@@ -1114,8 +1100,9 @@ class SpellBackground:
             canvas.fill((f, f, f), special_flags=pygame.BLEND_RGB_ADD)
         self._draw_burst(canvas, t, cx, cy)
 
-        # 正弦扭曲（旋转/缩放/流动之上再加一层波浪位移）
-        self._apply_warp(canvas, t)
+        # 正弦扭曲（旋转/缩放/流动之上再加一层波浪位移）；部分老板风格关闭
+        if self.warp:
+            self._apply_warp(canvas, t)
 
         # 中心微光 + 四周暗角：提神但整体压暗，保证弹幕可读
         canvas.blit(self.glow, (0, 0), special_flags=pygame.BLEND_RGB_ADD)

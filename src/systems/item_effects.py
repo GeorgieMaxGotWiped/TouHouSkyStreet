@@ -47,7 +47,8 @@ def _empty_effects():
         "kill50_bombs": 0,                # 每50杀+BOMB
         "kill50_lives": 0,                # 每50杀+残机
         "kill_small_coins": 0,            # 击杀小怪金币
-        "kill_boss_coins": 0,             # 击杀BOSS金币
+        "kill_boss_coins": 0,             # 击杀关底BOSS金币
+        "kill_midboss_coins": 0,          # 击杀道中BOSS金币
         "kill_small_damage_pct": 0.0,     # 击杀小怪堆叠伤害%每只
         "kill_boss_damage_pct": 0.0,      # 击杀BOSS堆叠伤害%每只
         "midboss_damage_pct": 0.0,        # 对道中BOSS伤害%

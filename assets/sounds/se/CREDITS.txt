@@ -1,0 +1,12 @@
+Sound effect credits
+====================
+占位音效（se_shot.wav / se_hit.wav / se_enemy_down.wav）来源：
+  "8-Bit Sound Effects Pack Vol.001" by @Shades (Noshades)
+  https://soundcloud.com/noshades
+  https://opengameart.org/content/8-bit-sound-effect-pack-vol-001
+
+其余 se_*.wav 来自本地同人音效素材：
+  D:/pyz/my thingses/TouHou/assets/sounds/effects/
+  （东方Project风格同人音效，文件名即语义）
+
+本文件仅供署名/来源参考。

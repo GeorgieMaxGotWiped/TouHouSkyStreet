@@ -1696,7 +1696,7 @@ class Stage3_CatacombsF1(Stage):
         """47s 出场的道中Boss：The Watcher（注视之眼）——专属非符 + 一张符卡"""
         self.mid_boss = Boss("The Watcher", hp=WATCHER_MAX_HP,
                              x=cfg.BATTLE_AREA_WIDTH / 2, y=-40,
-                             size=26, color=(90, 220, 230),
+                             size=26, color=cfg.COLOR_RED,
                              spell_by_hp_only=True, spell_resistance=0.5,
                              non_spell_min_duration=180,
                              non_spell_func=_non_spell_watcher_gaze,

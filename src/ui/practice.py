@@ -329,6 +329,7 @@ class PracticeSelectState(GameState):
         self.pane = 0          # 0=左侧 Boss 列表，1=右侧符卡列表
         self.boss_scroll = 0
         self.card_scroll = 0
+        self._last_mouse_pos = (0, 0)
 
     def _build_boss_rows(self):
         rows = []
@@ -340,6 +341,36 @@ class PracticeSelectState(GameState):
 
     def enter(self, game):
         pass
+
+    def _boss_visible_rows(self):
+        """当前可见的 Boss 列表行，返回 [(row, y, height)]（与 draw 布局一致）"""
+        visible = self.PANE_H // self.ROW_H
+        rows = []
+        row_y = self.PANE_Y
+        for row in self.boss_rows[self.boss_scroll:self.boss_scroll + visible + 1]:
+            if row_y > self.PANE_Y + self.PANE_H - self.ROW_H:
+                break
+            h = self.HEADER_H if row[0] == "group" else self.ROW_H
+            rows.append((row, row_y, h))
+            row_y += h
+        return rows
+
+    def _card_visible_rows(self):
+        """当前可见的符卡列表行，返回 [(card_idx, y, height)]（与 draw 布局一致）"""
+        visible = self.PANE_H // self.ROW_H
+        rows = []
+        row_y = self.PANE_Y
+        cards = self.entries[self.boss_index]["cards"]
+        for ci in range(self.card_scroll, min(len(cards), self.card_scroll + visible + 1)):
+            if row_y > self.PANE_Y + self.PANE_H - self.ROW_H:
+                break
+            rows.append((ci, row_y, self.ROW_H))
+            row_y += self.ROW_H
+        return rows
+
+    def _practice_start_rect(self):
+        """底部“开始练习”按钮区域（与 draw 按钮布局一致）"""
+        return pygame.Rect(cfg.SCREEN_WIDTH // 2 - 90, 684, 180, 36)
 
     def _clamp_scroll(self, scroll, index, visible):
         if index < scroll:
@@ -391,6 +422,40 @@ class PracticeSelectState(GameState):
                 or keys.get(pygame.K_SPACE, False)):
             launch_practice(self.game, self.entries[self.boss_index],
                             self.card_index)
+            return
+
+        # 鼠标：悬停选择，点击列表行选中，点击“开始练习”启动
+        mp = self.game.mouse_pos
+        clicked = self.game.mouse_clicked(1)
+        moved = mp != self._last_mouse_pos
+        if moved:
+            self._last_mouse_pos = mp
+        if moved:
+            for row, y, h in self._boss_visible_rows():
+                if row[0] == "boss":
+                    rect = pygame.Rect(96, y, 420, h)
+                    if rect.collidepoint(mp):
+                        idx = row[2]
+                        if self.boss_index != idx:
+                            self.boss_index = idx
+                            self.card_index = min(
+                                self.card_index,
+                                len(self.entries[idx]["cards"]) - 1)
+                        self.pane = 0
+                        self.boss_scroll = self._clamp_scroll(
+                            self.boss_scroll, self.boss_row_pos[idx], visible)
+                        break
+            for ci, y, h in self._card_visible_rows():
+                rect = pygame.Rect(540, y, 390, h)
+                if rect.collidepoint(mp):
+                    self.card_index = ci
+                    self.pane = 1
+                    self.card_scroll = self._clamp_scroll(
+                        self.card_scroll, ci, visible)
+                    break
+        if clicked and self._practice_start_rect().collidepoint(mp):
+            launch_practice(self.game, self.entries[self.boss_index],
+                            self.card_index)
 
     def draw(self, screen):
         if self.background:
@@ -421,6 +486,9 @@ class PracticeSelectState(GameState):
                 row_y += self.HEADER_H
                 continue
             is_sel = row[2] == self.boss_index
+            row_rect = pygame.Rect(bx, row_y, bw, self.ROW_H)
+            if is_sel or self.game.mouse_hover(row_rect):
+                pygame.draw.rect(screen, (60, 60, 22), row_rect)
             color = cfg.COLOR_YELLOW if is_sel else cfg.COLOR_WHITE
             text = self.game.font_medium.render(row[1], True, color)
             screen.blit(text, (bx + 26, row_y))
@@ -446,6 +514,9 @@ class PracticeSelectState(GameState):
             label = spec["name"]
             if spec["last"]:
                 label += "（Last）"
+            row_rect = pygame.Rect(cx, row_y, cw, self.ROW_H)
+            if is_sel or self.game.mouse_hover(row_rect):
+                pygame.draw.rect(screen, (60, 60, 22), row_rect)
             text = self.game.font_small.render(
                 _elide(self.game.font_small, label, max_text_w), True, color)
             screen.blit(text, (cx + 20, row_y + 6))
@@ -468,6 +539,17 @@ class PracticeSelectState(GameState):
             "↑↓ 选择    ←→ 切换列表    Enter/Z 开始练习    Esc 返回",
             True, cfg.COLOR_GRAY)
         screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 652))
+
+        # 开始练习按钮（鼠标可点击）
+        start_rect = self._practice_start_rect()
+        start_hover = self.game.mouse_hover(start_rect)
+        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, start_rect)
+        pygame.draw.rect(screen, cfg.COLOR_YELLOW if start_hover else cfg.COLOR_GRAY,
+                         start_rect, 2 if start_hover else 1)
+        btn = self.game.font_medium.render("▶ 开始练习", True,
+                                           cfg.COLOR_YELLOW if start_hover else cfg.COLOR_WHITE)
+        screen.blit(btn, (start_rect.x + (start_rect.width - btn.get_width()) // 2,
+                          start_rect.y + (start_rect.height - btn.get_height()) // 2))
 
 
 # ---------------------------------------------------------------------------
