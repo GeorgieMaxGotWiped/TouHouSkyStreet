@@ -2,15 +2,13 @@
 
 东方天空街 ~ Touhou Sky Street 官方资讯站点。纯静态 HTML / CSS / JavaScript，零构建依赖。
 
-## 运行
+## 运行（一键预览）
 
-```bash
-python web/serve.py
-# 打开 http://127.0.0.1:8000
-```
-也可用 `cd web` 后执行 `python -m http.server 8000`。
+- 双击 `web/启动预览.bat`：自动启动本地服务并打开浏览器。
+- 或手动：`python web/serve.py`，浏览器访问 `http://127.0.0.1:8000`。
 
-图鉴 / 画廊 / OST 页通过 `fetch` 读取 `data/*.json`，因此**必须经由 HTTP 服务访问**（直接双击 HTML 文件无法加载）。
+> 请用 `127.0.0.1` 而不是 `localhost`，避免 IPv6 解析导致的连接问题。
+> 图鉴 / 画廊 / OST 页通过 `fetch` 读取 `data/*.json`，**必须经由 HTTP 服务访问**（直接双击 HTML 文件无法加载）。
 
 ## 页面
 
@@ -52,3 +50,4 @@ web/
   tools/export_items.py # 物品数据导出脚本
   tools/build_assets.py # 头图/人物图优化 + 画廊数据
 ```
+
