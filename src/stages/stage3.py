@@ -174,11 +174,14 @@ _WATCHER_EXHIBITION = {
     "fan_orb_hp": 10,                    # 生命值（玩家弹单发伤害 10，1 发击破）
     "fan_orb_explode_radius": 80,        # 击破后爆炸清弹半径（px），范围内玩家也受伤
 
-    # —— The Watcher 本体环形弹：自身发出的深紫亡灵能量环（少量、固定弹、不追踪） ——
-    "boss_ring_start": 90,            # 第一环出现的帧（开符 1.5s 后）
-    "boss_ring_step": 170,            # 每环间隔（帧，约 2.8s 一环，少量）
-    "boss_ring_count": 14,            # 每环弹数（下一环整体旋转半个弹距，交错互补）
-    "boss_ring_speed": 1.7,           # 弹速（px/帧，偏慢）
+    # —— The Watcher 本体螺旋弹：自身发出的深紫亡灵能量旋臂（360度旋转、固定弹、不追踪） ——
+    "boss_ring_start": 90,            # 第一臂出现的帧（开符 1.5s 后）
+    "boss_ring_step": 21,             # 每臂间隔（帧，再翻倍：频率从原来×4 变为×8）
+    "boss_ring_count": 28,            # 每臂弹数（旋臂内子弹数；240度内密度翻倍）
+    "boss_ring_arc": math.radians(240),   # 每臂扇形角度（弧度）；整臂 240 度
+    "boss_ring_phase": math.radians(-120),# 起始相位逆时针偏转（弧度）；首臂起点由正下方逆时针转 120 度
+    "boss_ring_spin": 0.03,           # 全周旋转速率（弧度/帧）；随后 360 度旋转
+    "boss_ring_speed": 1.7,           # 弹速（px/帧，偏慢，不追踪）
     "boss_ring_radius": 3,            # 弹半径
     "boss_ring_color": (150, 70, 210),  # 深紫亡灵能量
 
@@ -330,22 +333,26 @@ def _watcher_lane_fan(bullet_manager, x, y, count, speed, phase=0.0):
 
 
 def _watcher_boss_ring(boss, bullet_manager, timer):
-    """The Watcher 本体环形弹：从自身向四周放出的深紫亡灵能量环。
-    每环均匀分布、不追踪玩家；下一环整体旋转半个弹距，缓慢交错成环网。"""
+    """The Watcher 本体螺旋弹：从自身向四周放出的深紫亡灵能量旋臂。
+    每臂为 240 度扇形，逐轮以随时间连续旋转的发射角打出；子弹沿各自方向匀速直线飞出，
+    因发射角随轮次持续旋转，新旧旋臂在全周盘绕成旋转螺旋（阿基米德螺线）。
+    起始相位由正下方逆时针转 120 度（首臂起点 330°），此后整周 360 度扫动。
+    频率×8（每臂间隔由 170 帧压到 21 帧，较最初再翻倍）。整臂固定弹、不追踪玩家。"""
     P = _WATCHER_EXHIBITION
     if timer < P["boss_ring_start"]:
         return
     if (timer - P["boss_ring_start"]) % P["boss_ring_step"] != 0:
         return
     n = P["boss_ring_count"]
-    ring_idx = (timer - P["boss_ring_start"]) // P["boss_ring_step"]
-    base = ring_idx * (math.pi / n)   # 每环旋转半个弹距，交错互补
+    arm_step = P["boss_ring_arc"] / (n - 1)
+    base = math.pi / 2 + P["boss_ring_phase"] + (timer - P["boss_ring_start"]) * P["boss_ring_spin"]
     for i in range(n):
-        a = base + i * math.tau / n
+        a = base + i * arm_step
         b = create_bullet_angle(boss.x, boss.y, a, P["boss_ring_speed"],
                                 Bullet.TYPE_CIRCLE, radius=P["boss_ring_radius"],
                                 color=P["boss_ring_color"])
         b.manager = bullet_manager
+        b.orb_explode_immune = True             # 同符卡缺口大玉爆炸不清除此螺旋弹
         bullet_manager.add_enemy_bullet(b)
     _watcher_fire_flash(bullet_manager, boss.x, boss.y)
 
@@ -417,8 +424,9 @@ def spell_watcher_undead_exhibition(boss, bullet_manager, timer, dt, player_x=0,
       阶段3：全员轮番齐射并持续，5 具亡灵随机顺序错开发射、弹柱依次压下，
              到达后不再回到单体阶段，直到符卡被击破。
     带缺口的扇形会在缺口正中放一颗可被玩家子弹击破的大玉，击破后爆炸清弹
-    （玩家在爆炸范围内也会受伤）。The Watcher 本体还会周期性地向四周放出
-    缓慢旋转交错的深紫亡灵能量环（少量，不追踪玩家）。全程无自机狙、无随机乱射。
+    （玩家在爆炸范围内也会受伤），但不会清除本体放出的螺旋弹。The Watcher 本体
+    还会周期性地自起始相位（正下方逆时针转 120 度）起、全周 360 度旋转，放出
+    240 度扇形、蜿蜒盘绕的深紫亡灵能量螺旋臂（频率×8、不追踪玩家）。全程无自机狙、无随机乱射。
     """
     P = _WATCHER_EXHIBITION
 

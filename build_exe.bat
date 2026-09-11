@@ -5,6 +5,9 @@ REM 自动检测用户电脑上的 Python 与 PyInstaller，无需手动配置
 
 cd /d "%~dp0"
 
+REM pip 安装参数：网络超时与自动重试
+set "PIP_ARGS=--retries 8 --timeout 60"
+
 REM ========== 第一步：查找 Python（优先选择带运行依赖的版本） ==========
 set "PY_CMD="
 set "PY_CMD_FALLBACK="
@@ -64,12 +67,8 @@ if errorlevel 1 (
 if defined MISSING_DEPS (
     echo.
     echo [提示] 当前 Python 缺少运行依赖，正在自动安装...
-    %PY_CMD% -m pip install -r requirements.txt
-    if errorlevel 1 (
-        echo   首次安装失败，尝试 --user 安装...
-        %PY_CMD% -m pip install --user -r requirements.txt
-        if errorlevel 1 goto INSTALL_FAIL
-    )
+    call :PIP_INSTALL -r requirements.txt
+    if errorlevel 1 goto INSTALL_FAIL
     %PY_CMD% -c "import pygame, numpy, PIL" >nul 2>nul
     if errorlevel 1 goto INSTALL_STILL_MISSING
     echo [完成] 依赖安装成功。
@@ -78,12 +77,8 @@ if defined MISSING_DEPS (
 %PY_CMD% -m PyInstaller --version >nul 2>nul
 if errorlevel 1 (
     echo [提示] 未检测到 PyInstaller，正在安装...
-    %PY_CMD% -m pip install pyinstaller
-    if errorlevel 1 (
-        echo   首次安装失败，尝试 --user 安装...
-        %PY_CMD% -m pip install --user pyinstaller
-        if errorlevel 1 goto INSTALL_FAIL
-    )
+    call :PIP_INSTALL pyinstaller
+    if errorlevel 1 goto INSTALL_FAIL
 )
 
 REM ========== 第三步：打包 ==========
@@ -120,6 +115,20 @@ echo   %PY_CMD% -m pip install -r requirements.txt
 echo.
 pause
 exit /b 1
+
+REM ========== 子程序：带重试与备用镜像的 pip 安装（%* 为 pip 参数） ==========
+:PIP_INSTALL
+%PY_CMD% -m pip install %* %PIP_ARGS%
+if not errorlevel 1 exit /b 0
+echo   默认源安装失败，改用镜像源重试...
+%PY_CMD% -m pip install %* %PIP_ARGS% -i https://pypi.tuna.tsinghua.edu.cn/simple
+if not errorlevel 1 exit /b 0
+echo   镜像源也失败，改用官方源重试...
+%PY_CMD% -m pip install %* %PIP_ARGS% -i https://pypi.org/simple
+if not errorlevel 1 exit /b 0
+echo   默认/镜像/官方源均失败，尝试 --user 安装...
+%PY_CMD% -m pip install --user %* %PIP_ARGS% -i https://pypi.tuna.tsinghua.edu.cn/simple
+exit /b %errorlevel%
 
 REM ========== 子程序：尝试一个 Python 候选（%~1 为完整路径） ==========
 :TRY_CANDIDATE

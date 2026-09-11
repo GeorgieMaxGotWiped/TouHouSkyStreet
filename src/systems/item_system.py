@@ -9,6 +9,10 @@
 import random
 from src.engine import settings as cfg
 
+
+# 用于 is_equipped / get_equipped_slot 的“任意前缀”哨兵
+_ANY_PREFIX = object()
+
 # 装备槽顺序：界面与存档都使用这个顺序
 EQUIPMENT_SLOTS = ["helmet", "chestplate", "leggings", "boots", "weapon", "accessory"]
 
@@ -103,6 +107,7 @@ _EFFECT_LORE = {
     "arack_pct": "失去1残机后的10秒内伤害+35%",
     "spider_artifact": "失去1残机后的10秒内再次失去残机时，改为失去1B并放出决死Bomb",
     "deathbomb_refund": "使用决死Bomb消耗2B时回复1B",
+    "first_hit_invincible": "每关首次被弹时，改为获得3秒无敌时间",
 }
 
 
@@ -378,12 +383,12 @@ SKYBLOCK_ITEMS = {
     "storms_leggings": SkyblockItem(
         "storms_leggings", "Storm's Leggings", "LEGENDARY", "armor",
         effects={"bomb_damage_pct": 35, "start_bombs": 1},
-        slot="chestplate", buy_price="45M", sell_price="18M",
+        slot="leggings", buy_price="45M", sell_price="18M",
     ),
     "goldors_helmet": SkyblockItem(
         "goldors_helmet", "Goldor's Helmet", "LEGENDARY", "armor",
         effects={"start_lives": 1},
-        slot="chestplate", buy_price="50M", sell_price="20M",
+        slot="helmet", buy_price="50M", sell_price="20M",
     ),
     "necrons_chestplate": SkyblockItem(
         "necrons_chestplate", "Necron's Chestplate", "LEGENDARY", "armor",
@@ -393,7 +398,7 @@ SKYBLOCK_ITEMS = {
     "maxors_boots": SkyblockItem(
         "maxors_boots", "Maxor's Boots", "LEGENDARY", "armor",
         effects={"speed_pct": 25, "hitbox_scale": 0.5},
-        slot="chestplate", buy_price="40M", sell_price="16M",
+        slot="boots", buy_price="40M", sell_price="16M",
     ),
 
     # ============ 护符 ============
@@ -533,8 +538,8 @@ SKYBLOCK_ITEMS = {
     "bonzos_mask": SkyblockItem(
         "bonzos_mask", "Bonzo's Mask", "RARE", "armor",
         stats={"health": 125, "defense": 100, "intelligence": 150},
-        lore=["Returns you from the dead."],
-        slot="helmet", buy_price=7000,
+        effects={"first_hit_invincible": True},
+        slot="helmet", buy_price="20M", sell_price="4M",
     ),
     "guardian_pet_rare": SkyblockItem(
         "guardian_pet_rare", "Guardian Pet [R]", "RARE", "accessory",
@@ -697,50 +702,91 @@ class ItemDropManager:
 
 
 class ItemInventory:
-    """跨关卡背包与装备槽"""
+    """跨关卡背包与装备槽。同一物品按重铸前缀分栈保存，重铸只影响其中一份。"""
 
     def __init__(self, inventory=None, equipment=None, coins=0, reforges=None):
-        self.items = {}
+        # (item_id, prefix_id|None) -> count：按前缀分栈
+        self.stacks = {}
+        self.equipment = {slot: None for slot in EQUIPMENT_SLOTS}
+        self.equipment_prefix = {slot: None for slot in EQUIPMENT_SLOTS}
+        self.coins = max(0, int(coins or 0))
+
         if inventory:
             for entry in inventory:
                 item_id = entry.get("id") if isinstance(entry, dict) else entry
                 count = entry.get("count", 1) if isinstance(entry, dict) else 1
+                prefix = entry.get("prefix") if isinstance(entry, dict) else None
                 if item_id in SKYBLOCK_ITEMS:
-                    self.items[item_id] = self.items.get(item_id, 0) + max(0, int(count))
-
-        self.equipment = {slot: None for slot in EQUIPMENT_SLOTS}
+                    self.add_item(item_id, count, prefix)
         if equipment:
             for slot in EQUIPMENT_SLOTS:
-                item_id = equipment.get(slot)
+                val = equipment.get(slot)
+                if isinstance(val, dict):
+                    item_id = val.get("id")
+                    prefix = val.get("prefix")
+                elif isinstance(val, tuple):
+                    item_id, prefix = val
+                else:
+                    item_id, prefix = val, None
                 if item_id in SKYBLOCK_ITEMS and SKYBLOCK_ITEMS[item_id].slot == slot:
                     self.equipment[slot] = item_id
-
-        self.coins = max(0, int(coins or 0))
-        self.applied_reforges = {}
+                    self.equipment_prefix[slot] = prefix if prefix in REFORGES else None
         if reforges:
+            # 旧存档兼容：reforges 按 item_id 记录单前缀
             for item_id, prefix_id in reforges.items():
                 if item_id in SKYBLOCK_ITEMS and prefix_id in REFORGES:
-                    self.applied_reforges[item_id] = prefix_id
+                    self._apply_legacy_prefix(item_id, prefix_id)
+
+    def _apply_legacy_prefix(self, item_id, prefix_id):
+        """旧存档回填：把该物品所有副本合并为带该前缀的一个分栈。"""
+        total = self.total_count(item_id)
+        if total <= 0:
+            return
+        for (iid, pfx) in list(self.stacks.keys()):
+            if iid == item_id:
+                del self.stacks[(iid, pfx)]
+        self.stacks[(item_id, prefix_id)] = total
+        # 旧存档装备槽只需记录 item_id；回填前缀后同步装备前缀，避免属性/显示不一致
+        for slot, equipped_id in self.equipment.items():
+            if equipped_id == item_id:
+                self.equipment_prefix[slot] = prefix_id
 
     @classmethod
     def from_global_data(cls, data):
+        inventory = data.get("inventory", [])
+        # 新格式的背包条目自带 prefix 字段；此时 reforges 字段仅作旧兼容冗余，
+        # 若仍按旧逻辑合并会把同物品的多个栈错误合并为单个前缀栈。
+        legacy = not any(isinstance(e, dict) and "prefix" in e for e in inventory)
         return cls(
-            inventory=data.get("inventory", []),
+            inventory=inventory,
             equipment=data.get("equipment", {}),
             coins=data.get("coins", 0),
-            reforges=data.get("reforges", {}),
+            reforges=data.get("reforges", {}) if legacy else {},
         )
 
     def to_data(self):
         inventory = []
-        for item_id, count in self.items.items():
+        for (item_id, prefix_id), count in self.stacks.items():
             if count > 0:
-                inventory.append({"id": item_id, "count": count})
+                inventory.append({"id": item_id, "count": count, "prefix": prefix_id})
+        # 兼容旧读取：为前缀唯一的物品保留 reforges 字段
+        ref = {}
+        by_id = {}
+        for (item_id, prefix_id), count in self.stacks.items():
+            if count > 0 and prefix_id:
+                by_id.setdefault(item_id, set()).add(prefix_id)
+        for item_id, prefixes in by_id.items():
+            if len(prefixes) == 1:
+                ref[item_id] = next(iter(prefixes))
+        equipment = {}
+        for slot, item_id in self.equipment.items():
+            if item_id:
+                equipment[slot] = {"id": item_id, "prefix": self.equipment_prefix[slot]}
         return {
             "inventory": inventory,
-            "equipment": dict(self.equipment),
+            "equipment": equipment,
             "coins": self.coins,
-            "reforges": dict(self.applied_reforges),
+            "reforges": ref,
         }
 
     def save_to_global_data(self, global_data):
@@ -752,39 +798,68 @@ class ItemInventory:
 
     def merge_from(self, other):
         """把另一份背包的物品、金币与重铸前缀并入本背包（撤离入库用）。"""
-        for item_id, count in other.items.items():
-            self.add_item(item_id, count)
+        for (item_id, prefix_id), count in other.stacks.items():
+            self.add_item(item_id, count, prefix_id)
         self.add_coins(other.coins)
-        for item_id, prefix_id in other.applied_reforges.items():
-            if self.has_item(item_id):
-                self.applied_reforges[item_id] = prefix_id
         self._clear_missing_equipment()
 
-    def add_item(self, item_id, count=1):
-        if item_id not in SKYBLOCK_ITEMS or count <= 0:
-            return
-        self.items[item_id] = self.items.get(item_id, 0) + int(count)
+    # --- 分栈与数量 ---
 
-    def remove_item(self, item_id, count=1):
-        if self.items.get(item_id, 0) < count:
-            return False
-        self.items[item_id] -= count
-        if self.items[item_id] <= 0:
-            self.items.pop(item_id, None)
-            self.applied_reforges.pop(item_id, None)
-            self._clear_missing_equipment()
-        return True
+    def total_count(self, item_id):
+        return sum(cnt for (iid, _pfx), cnt in self.stacks.items() if iid == item_id)
 
     def count_item(self, item_id):
-        return self.items.get(item_id, 0)
+        return self.total_count(item_id)
 
     def has_item(self, item_id):
-        return self.count_item(item_id) > 0
+        return self.total_count(item_id) > 0
+
+    def iter_stacks(self):
+        """按分栈迭代，产出 (item_id, prefix_id|None, count)。"""
+        for (item_id, prefix_id), count in list(self.stacks.items()):
+            if count > 0:
+                yield item_id, prefix_id, count
+
+    def add_item(self, item_id, count=1, prefix=None):
+        if item_id not in SKYBLOCK_ITEMS or count <= 0:
+            return
+        if prefix not in REFORGES:
+            prefix = None
+        key = (item_id, prefix)
+        self.stacks[key] = self.stacks.get(key, 0) + int(count)
+
+    def remove_item(self, item_id, count=1, prefix=None):
+        if prefix not in REFORGES:
+            prefix = None
+        if self.total_count(item_id) < count:
+            return False
+        remaining = int(count)
+        if prefix is None:
+            order = [(item_id, None)]
+            order += [(item_id, p) for p in REFORGES if (item_id, p) in self.stacks]
+        else:
+            order = [(item_id, prefix)] if (item_id, prefix) in self.stacks else []
+        for key in order:
+            if remaining <= 0:
+                break
+            cur = self.stacks.get(key, 0)
+            if cur <= 0:
+                continue
+            take = min(cur, remaining)
+            self.stacks[key] = cur - take
+            remaining -= take
+            if self.stacks[key] <= 0:
+                del self.stacks[key]
+        if remaining > 0:
+            return False
+        self._clear_missing_equipment()
+        return True
 
     def _clear_missing_equipment(self):
         for slot, item_id in list(self.equipment.items()):
             if item_id and not self.has_item(item_id):
                 self.equipment[slot] = None
+                self.equipment_prefix[slot] = None
 
     def add_coins(self, amount):
         self.coins = max(0, self.coins + int(amount or 0))
@@ -800,46 +875,63 @@ class ItemInventory:
         item = SKYBLOCK_ITEMS.get(item_id)
         return item is not None and item.is_equippable and self.has_item(item_id)
 
-    def equip(self, item_id):
+    def equip(self, item_id, prefix=None):
         """装备物品；返回 (成功, 错误信息)。同一时间只能装备 1 件带 C 技能的物品。"""
         item = SKYBLOCK_ITEMS.get(item_id)
         if not item or not item.is_equippable:
             return False, "该物品无法装备"
-        if not self.has_item(item_id):
+        if self.total_count(item_id) <= 0:
+            return False, "背包中没有该物品"
+        if prefix not in REFORGES:
+            prefix = None
+        if self.stacks.get((item_id, prefix), 0) <= 0:
             return False, "背包中没有该物品"
         if item_id in C_SKILLS:
-            # 换装另一件 C 技能物品时，自动卸下原来的那件
+            # 同一时间只能装 1 件 C 技能物品：其它部位已装备时禁止并装，
+            # 仅同部位可通过覆盖换装。
             for slot, equipped_id in self.equipment.items():
-                if equipped_id and equipped_id in C_SKILLS and equipped_id != item_id:
-                    self.equipment[slot] = None
+                if (equipped_id in C_SKILLS and equipped_id != item_id
+                        and slot != item.slot):
+                    return False, "已装备其他部位的C技能物品，无法同时装备"
         self.equipment[item.slot] = item_id
+        self.equipment_prefix[item.slot] = prefix
         return True, None
 
     def unequip_slot(self, slot):
         if slot not in self.equipment or not self.equipment[slot]:
             return False
         self.equipment[slot] = None
+        self.equipment_prefix[slot] = None
         return True
 
     def unequip_item(self, item_id):
         for slot, equipped_id in self.equipment.items():
             if equipped_id == item_id:
                 self.equipment[slot] = None
+                self.equipment_prefix[slot] = None
                 return True
         return False
 
-    def toggle_equip(self, item_id):
-        if self.is_equipped(item_id):
+    def toggle_equip(self, item_id, prefix=None):
+        if self.is_equipped(item_id, prefix):
             return self.unequip_item(item_id)
-        ok, _ = self.equip(item_id)
+        ok, _ = self.equip(item_id, prefix)
         return ok
 
-    def is_equipped(self, item_id):
-        return item_id in self.equipment.values()
-
-    def get_equipped_slot(self, item_id):
+    def is_equipped(self, item_id, prefix=_ANY_PREFIX):
+        """是否装备了该物品。默认任意前缀匹配；传入前缀（可为 None）则精确匹配。"""
         for slot, equipped_id in self.equipment.items():
-            if equipped_id == item_id:
+            if equipped_id != item_id:
+                continue
+            if prefix is _ANY_PREFIX or self.equipment_prefix.get(slot) == prefix:
+                return True
+        return False
+
+    def get_equipped_slot(self, item_id, prefix=_ANY_PREFIX):
+        for slot, equipped_id in self.equipment.items():
+            if equipped_id != item_id:
+                continue
+            if prefix is _ANY_PREFIX or self.equipment_prefix.get(slot) == prefix:
                 return slot
         return None
 
@@ -850,9 +942,12 @@ class ItemInventory:
     def get_equipped_ids(self):
         return [item_id for item_id in self.equipment.values() if item_id]
 
+    def get_equipped_prefix(self, slot):
+        return self.equipment_prefix.get(slot)
+
     def get_equipped_stats(self):
         stats = {}
-        for item_id in self.equipment.values():
+        for slot, item_id in self.equipment.items():
             if not item_id:
                 continue
             item = SKYBLOCK_ITEMS.get(item_id)
@@ -860,7 +955,7 @@ class ItemInventory:
                 continue
             for key, value in item.stats.items():
                 stats[key] = stats.get(key, 0) + value
-            prefix_id = self.applied_reforges.get(item_id)
+            prefix_id = self.equipment_prefix.get(slot)
             if prefix_id and prefix_id in REFORGES:
                 for key, value in REFORGES[prefix_id].get("stats", {}).items():
                     stats[key] = stats.get(key, 0) + value
@@ -869,60 +964,76 @@ class ItemInventory:
     # --- 重铸（锻造） ---
 
     def get_item_prefix(self, item_id):
-        """返回物品已打上的前缀 id；未重铸返回 None"""
-        return self.applied_reforges.get(item_id)
+        """返回该物品唯一带前缀栈的前缀；若有多个不同前缀栈则返回 None。"""
+        prefixes = {pfx for (iid, pfx), cnt in self.stacks.items()
+                    if iid == item_id and cnt > 0 and pfx}
+        if len(prefixes) == 1:
+            return next(iter(prefixes))
+        return None
 
-    def get_display_name(self, item_id):
-        """带前缀的显示名，例如 Fabled Aspect of the Dragons"""
+    def get_display_name(self, item_id, prefix=None):
+        """前缀显示名，如 Fabled Aspect of the Dragons。"""
         item = SKYBLOCK_ITEMS.get(item_id)
         if not item:
             return ""
-        prefix_id = self.get_item_prefix(item_id)
-        if prefix_id and prefix_id in REFORGES:
-            return f"{REFORGES[prefix_id]['name']} {item.name}"
+        if prefix not in REFORGES:
+            prefix = None
+        if prefix:
+            return f"{REFORGES[prefix]['name']} {item.name}"
         return item.name
 
     def get_reforge_cost(self, item_id):
-        """按稀有度返回重铸费用"""
+        """按稀有度返回重铸费用。"""
         item = SKYBLOCK_ITEMS.get(item_id)
         if not item:
             return 0
         return REFORGE_COSTS.get(item.rarity, 1000)
 
     def can_reforge(self, item_id):
-        """物品是否可锻造且已在背包中"""
+        """物品是否可重铸且存在于背包中。"""
         item = SKYBLOCK_ITEMS.get(item_id)
         return item is not None and item.can_reforge and self.has_item(item_id)
 
-    def apply_reforge(self, item_id, stone_id):
-        """用重铸石给物品打前缀：消耗重铸石 + 金币；已有前缀则直接替换。
-        返回 (成功, 错误信息)。"""
+    def apply_reforge(self, item_id, stone_id, prefix=None):
+        """仅对指定栈中的 1 份物品重铸：消耗 1 颗重铸石 + 金币，
+        将该栈的 1 份变为新前缀。返回 (成功, 错误信息)。"""
         stone = SKYBLOCK_ITEMS.get(stone_id)
         item = SKYBLOCK_ITEMS.get(item_id)
         if not stone or stone.item_type != "reforge_stone":
-            return False, "这不是重铸石"
+            return False, "这不能作为重铸石"
         if not item or not item.can_reforge:
             return False, "该物品无法重铸"
-        if not self.has_item(item_id):
+        if prefix not in REFORGES:
+            prefix = None
+        key = (item_id, prefix)
+        if self.stacks.get(key, 0) <= 0:
             return False, "背包中没有该物品"
         if not self.has_item(stone_id):
             return False, "背包中没有该重铸石"
         cost = self.get_reforge_cost(item_id)
         if not self.spend_coins(cost):
-            return False, f"金币不足（需要 {cost} 金币）"
+            return False, f"钱不够（需要 {cost} 金币）"
         self.remove_item(stone_id, 1)
-        prefix_id = REFORGE_STONES.get(stone_id)
-        self.applied_reforges[item_id] = prefix_id
+        new_prefix = REFORGE_STONES.get(stone_id)
+        if new_prefix not in REFORGES:
+            new_prefix = None
+        # 从原栈中精确移除 1 份，再新增到新前缀栈（避免卸下装备）
+        cur = self.stacks.get(key, 0)
+        self.stacks[key] = cur - 1
+        if self.stacks[key] <= 0:
+            del self.stacks[key]
+        self.add_item(item_id, 1, new_prefix)
+        # 若被重铸的正是已装备的那份，则同步更新装备前缀
+        for slot, equipped_id in self.equipment.items():
+            if equipped_id == item_id and self.equipment_prefix.get(slot) == prefix:
+                self.equipment_prefix[slot] = new_prefix
+                break
         return True, None
 
-    def remove_reforge(self, item_id):
-        """移除物品前缀，返回是否真的移除了"""
-        return self.applied_reforges.pop(item_id, None) is not None
-
     def get_forge_entries(self):
-        """锻造页数据：返回 (可用重铸石列表, 可锻造物品列表)"""
+        """锻造页数据：返回 (重铸石列表, 可重铸物品列表)。物品按栈拆分。"""
         stones = []
-        for item_id, count in self.items.items():
+        for item_id, _prefix, count in self.iter_stacks():
             item = SKYBLOCK_ITEMS.get(item_id)
             if item and item.item_type == "reforge_stone" and count > 0:
                 stones.append({
@@ -934,64 +1045,76 @@ class ItemInventory:
         stones.sort(key=lambda e: e["item"].name)
 
         items = []
-        for item_id, count in self.items.items():
+        for item_id, prefix, count in self.iter_stacks():
             item = SKYBLOCK_ITEMS.get(item_id)
             if item and item.can_reforge and count > 0:
                 items.append({
                     "id": item_id,
                     "item": item,
                     "count": count,
-                    "prefix": self.get_item_prefix(item_id),
+                    "prefix": prefix,
                     "cost": self.get_reforge_cost(item_id),
-                    "equipped": self.get_equipped_slot(item_id),
-                    "display_name": self.get_display_name(item_id),
+                    "equipped": self.is_equipped(item_id, prefix),
+                    "display_name": self.get_display_name(item_id, prefix),
                 })
-        items.sort(key=lambda e: e["item"].name)
+        items.sort(key=lambda e: (e["display_name"], e["item"].name))
         return stones, items
 
     def get_inventory_entries(self):
+        """背包条目：按栈拆分；仅当该栈正好是已装备的那份且数量为 1 时隐藏。"""
         entries = []
-        for item_id, count in self.items.items():
+        for item_id, prefix, count in self.iter_stacks():
             item = SKYBLOCK_ITEMS.get(item_id)
-            if item and count > 0:
-                entries.append({
-                    "id": item_id,
-                    "item": item,
-                    "count": count,
-                    "equipped": self.get_equipped_slot(item_id),
-                    "display_name": self.get_display_name(item_id),
-                })
-        entries.sort(key=lambda e: e["item"].name)
+            if not item or count <= 0:
+                continue
+            # 已装备的那一份（数量 1 时）不再显示在背包中；同栈还有多余则仍显示
+            if count <= 1 and self.is_equipped(item_id, prefix):
+                continue
+            entries.append({
+                "id": item_id,
+                "item": item,
+                "count": count,
+                "prefix": prefix,
+                "equipped": self.get_equipped_slot(item_id, prefix),
+                "display_name": self.get_display_name(item_id, prefix),
+            })
+        entries.sort(key=lambda e: (e["display_name"], e["item"].name))
         return entries
 
     def get_equippable_entries_for_slot(self, slot):
+        """可装备到指定槽位的条目：按栈拆分。"""
         entries = []
-        for item_id, count in self.items.items():
+        for item_id, prefix, count in self.iter_stacks():
             item = SKYBLOCK_ITEMS.get(item_id)
             if item and item.slot == slot and count > 0:
                 entries.append({
                     "id": item_id,
                     "item": item,
                     "count": count,
-                    "equipped": self.equipment.get(slot) == item_id,
-                    "display_name": self.get_display_name(item_id),
+                    "prefix": prefix,
+                    "equipped": (self.equipment.get(slot) == item_id
+                                 and self.equipment_prefix.get(slot) == prefix),
+                    "display_name": self.get_display_name(item_id, prefix),
                 })
-        entries.sort(key=lambda e: e["item"].name)
+        entries.sort(key=lambda e: (e["display_name"], e["item"].name))
         return entries
 
     def get_sellable_entries(self):
+        """可出售条目：按栈拆分。"""
         entries = []
-        for item_id, count in self.items.items():
+        for item_id, prefix, count in self.iter_stacks():
             item = SKYBLOCK_ITEMS.get(item_id)
             if item and item.sell_price > 0 and count > 0:
                 entries.append({
                     "id": item_id,
                     "item": item,
                     "count": count,
-                    "equipped": self.get_equipped_slot(item_id),
+                    "prefix": prefix,
+                    "equipped": self.get_equipped_slot(item_id, prefix),
                     "sell_price": item.sell_price,
+                    "display_name": self.get_display_name(item_id, prefix),
                 })
-        entries.sort(key=lambda e: e["item"].name)
+        entries.sort(key=lambda e: (e["display_name"], e["item"].name))
         return entries
 
     def get_shop_stock(self):

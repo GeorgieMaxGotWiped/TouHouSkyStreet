@@ -16,6 +16,9 @@ class HUD:
         # 面板布局
         self.panel_x = cfg.PANEL_LEFT
         self.panel_w = cfg.PANEL_WIDTH
+        # 面板背景：半透明，露出战斗区外的 bg_0.png 背景，同时保证文字可读
+        self.panel_bg = pygame.Surface((self.panel_w, cfg.SCREEN_HEIGHT), pygame.SRCALPHA)
+        self.panel_bg.fill((*cfg.COLOR_PANEL_BG, 128))
 
     def _draw_icon_row(self, screen, icon, count, color, y, max_width):
         """?????????????????????????? 12 ??????"""
@@ -33,11 +36,8 @@ class HUD:
 
     def draw(self, screen, player, score, lives, bombs, power, graze, stage_name="", stage_timer=0, boss=None):
         """绘制右侧信息面板"""
-        # 面板背景
-        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG,
-                         (self.panel_x, 0, self.panel_w, cfg.SCREEN_HEIGHT))
-        # 左侧分隔线
-        pygame.draw.line(screen, cfg.COLOR_GRAY, (self.panel_x, 0), (self.panel_x, cfg.SCREEN_HEIGHT), 2)
+        # 面板背景（半透明，露出战斗区外的 bg_0.png）
+        screen.blit(self.panel_bg, (self.panel_x, 0))
 
         cx = self.panel_x + self.panel_w // 2
         y = 24
@@ -128,8 +128,9 @@ class HUD:
             "X: 炸弹",
             "ESC: 暂停",
             "F11: 全屏",
+            f"速度: {cfg.format_game_speed(self.game.game_speed)} (F8/F9)",
         ]
-        hint_y = cfg.SCREEN_HEIGHT - 100
+        hint_y = cfg.SCREEN_HEIGHT - 144
         for line in hint_lines:
             hint = self.font_small.render(line, True, cfg.COLOR_DARK_GRAY)
             screen.blit(hint, (self.panel_x + 24, hint_y))

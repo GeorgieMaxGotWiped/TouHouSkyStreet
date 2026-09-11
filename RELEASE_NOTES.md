@@ -1,3 +1,25 @@
+## v1.6.0
+
+### 新增内容
+- 休整 / 出征准备界面对齐 Hypixel SkyBlock 原版 Minecraft GUI 风格：新增绘制模块 `src/ui/skyblock_ui.py`（浅灰容器、9 列凹陷槽位网格、物品只显示图标、悬停显示 Minecraft 暗色提示框——名称 / 稀有度 / 属性 / lore），装备、背包、商店、锻造、仓库等页面全部按该风格重绘
+- 主菜单新增 `Storage`（仓库）入口（`src/ui/storage.py`）：可直接查看本地仓库存货，并对仓库中的装备使用重铸石锻造，无需先进入一局游戏
+- 全局游戏速度：战斗中 `F8` 减速 / `F9` 加速 / `F10` 恢复 `1.0x`（`0.25x ~ 2.0x`），弹幕 / 敌机 / 玩家 / 关卡 / 特效时间轴整体缩放（音乐与音效保持原速）；设置界面新增调节条，数值保存到 `config.json` 的 `game_speed`
+- 新版 Boss 立绘实装：立绘按套组存放 `assets/sprites/bosses/{new,another,legacy}`，白底 PNG 载入时自动抠成透明背景并按内容裁剪（`src/engine/boss_art.py`），Boss 战贴图 / 符卡立绘 / 对话立绘共用同一套处理；设置界面新增「Boss 立绘」行，方向键或点击分段按钮即时切换，选择保存到 `config.json` 的 `boss_art`
+- 五面 BOSS RUSH 终符演出：Necron 焚符「Nuclear Frenzy」与终符「Necron's Frenzy」（八臂螺旋 + 大玉环 + 烈焰上涌），Scarf 职业轮换（战士 / 弓手 / 法师两两激活），Dark Queen 扇与 Gagouji 旋风 / 锯齿环等符卡重做
+- 物品系统扩展：装备可按部位分别记录重铸前缀（同名装备不同前缀互不混淆），仓库按堆叠存取；修正 Goldor's Leggings / Storm's Helmet / Maxor's Boots 的装备部位，Bonzo's Mask 改为「每关首次被弹时获得 3 秒无敌」并将价格调整为 20M / 4M
+- 新资源：`assets/gui/`（Minecraft 原版 GUI 贴图 `mc_inventory.png`、`mc_widgets.png`）、`assets/sounds/effects/`（擦弹 / 符卡展开 / 火力升级 / 残机炸弹 / 激光等效果音）与第 5 面后半 BGM `5_2_start.wav`
+
+### 调整
+- 无边框全屏：全屏改为 `NOFRAME` 并按屏幕居中定位窗口（`_position_window`），修复多显示器与系统缩放下的窗口错位
+- 难度选择：当前开放 Easy（默认难度同步改为 EASY），其余难度显示为锁定
+- 二面「电光」符卡新增 20 秒未击破自动结算；三面 The Watcher 本体螺旋弹改为 240 度扇形旋转臂（不追踪、不清弹）
+- 旧版 Boss 立绘统一移入 `assets/sprites/bosses/legacy/` 作为缺图兜底，不再放在 `bosses/` 根目录
+- 官网更新：画廊改用 /new 套组立绘重新出图，物品数据同步（Bonzo's Mask 效果与价格、护甲部位）
+
+### 文件
+- 新增 `src/ui/skyblock_ui.py`、`src/ui/storage.py`、`src/engine/boss_art.py`
+- 新增 `assets/gui/`、`assets/sounds/effects/`、`assets/sprites/bosses/{new,another,legacy}/`
+- 更新 `src/engine/game.py`、`src/engine/settings.py`、`src/engine/spell_bg.py`、`src/entities/boss.py`、`src/entities/bullet.py`、`src/stages/stage2.py`、`src/stages/stage3.py`、`src/stages/stage4.py`、`src/stages/stage5.py`、`src/stages/stage6.py`、`src/systems/item_effects.py`、`src/systems/item_icons.py`、`src/systems/item_system.py`、`src/ui/dialogue.py`、`src/ui/difficulty.py`、`src/ui/hud.py`、`src/ui/intermission.py`、`src/ui/loadout.py`、`src/ui/menu.py`
 ## v1.5.0
 
 ### 新增内容

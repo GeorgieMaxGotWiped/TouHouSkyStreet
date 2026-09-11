@@ -438,12 +438,14 @@
         "defense": 100,
         "intelligence": 150
       },
-      "effects": {},
+      "effects": {
+        "first_hit_invincible": true
+      },
       "lore": [
-        "Returns you from the dead."
+        "每关首次被弹时，改为获得3秒无敌时间"
       ],
-      "buy_price": 7000,
-      "sell_price": 1400,
+      "buy_price": 20000000,
+      "sell_price": 4000000,
       "image": "../assets/items/bonzos_mask.png"
     },
     {
@@ -1065,8 +1067,8 @@
       "rarity_color": "#ffaa00",
       "item_type": "armor",
       "type_label": "护甲",
-      "slot": "chestplate",
-      "slot_label": "胸甲",
+      "slot": "helmet",
+      "slot_label": "头盔",
       "equippable": true,
       "can_reforge": true,
       "stats": {},
@@ -1088,8 +1090,8 @@
       "rarity_color": "#ffaa00",
       "item_type": "armor",
       "type_label": "护甲",
-      "slot": "chestplate",
-      "slot_label": "胸甲",
+      "slot": "boots",
+      "slot_label": "靴子",
       "equippable": true,
       "can_reforge": true,
       "stats": {},
@@ -1181,8 +1183,8 @@
       "rarity_color": "#ffaa00",
       "item_type": "armor",
       "type_label": "护甲",
-      "slot": "chestplate",
-      "slot_label": "胸甲",
+      "slot": "leggings",
+      "slot_label": "护腿",
       "equippable": true,
       "can_reforge": true,
       "stats": {},

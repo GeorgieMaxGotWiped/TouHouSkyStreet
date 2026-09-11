@@ -5,6 +5,7 @@ import math
 import re
 import pygame
 from src.engine import settings as cfg
+from src.engine import boss_art
 
 # 对话说话名只显示英文：去掉中文前缀（如「魔法使 Mage」→「Mage」）
 _CJK_LEAD = re.compile(r"^[\u4e00-\u9fff\uff00-\uffef\u3000-\u303f]+\s*")
@@ -59,11 +60,10 @@ class DialogueBox:
             return self._portrait_cache.get(key)
         self._portrait_attempted.add(key)
         try:
-            img = pygame.image.load(path)
-            try:
-                img = img.convert_alpha()
-            except Exception:
-                pass
+            # 白底立绘（如新版 Boss 立绘）在这里抠掉背景并按内容裁剪
+            img = boss_art.load_sprite(path)
+            if img is None:
+                raise ValueError("portrait unavailable")
             w, h = img.get_size()
             if h <= 0:
                 raise ValueError("invalid portrait height")

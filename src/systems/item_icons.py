@@ -36,9 +36,13 @@ def get_item_icon(item_id, size=32):
     return _icon_cache.get(key)
 
 
-def draw_item_icon(screen, item_id, x, y, size=32):
-    """在屏幕坐标 (x, y) 处绘制物品图标（居中于 size x size 方格）；无图标时跳过"""
-    icon = get_item_icon(item_id, size)
+def draw_item_icon(screen, item_id, x, y, size=32, padding=0):
+    """在屏幕坐标 (x, y) 处绘制物品图标（居中于 size x size 方格）；无图标时跳过。
+    padding 会在四周留白，使图标缩进并完整落在框内。"""
+    inner = size - 2 * padding
+    if inner <= 0:
+        return
+    icon = get_item_icon(item_id, inner)
     if icon is None:
         return
     screen.blit(icon, (x + (size - icon.get_width()) // 2,

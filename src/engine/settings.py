@@ -22,6 +22,10 @@ SRC_DIR = os.path.join(BASE_DIR, "src")
 # --- 用户配置（音量等）：源码运行保存到项目根目录，打包后保存到 exe 同目录 ---
 DEFAULT_MUSIC_VOLUME = 0.8
 DEFAULT_SFX_VOLUME = 0.7
+DEFAULT_GAME_SPEED = 1.0
+GAME_SPEED_MIN = 0.25
+GAME_SPEED_MAX = 2.0
+GAME_SPEED_STEP = 0.25
 
 if getattr(sys, 'frozen', False):
     CONFIG_DIR = os.path.dirname(sys.executable)
@@ -37,6 +41,8 @@ def load_user_config():
     config = {
         "music_volume": DEFAULT_MUSIC_VOLUME,
         "sfx_volume": DEFAULT_SFX_VOLUME,
+        "game_speed": DEFAULT_GAME_SPEED,
+        "boss_art": BOSS_ART_DEFAULT,
     }
     try:
         if os.path.exists(CONFIG_PATH):
@@ -46,6 +52,11 @@ def load_user_config():
                 config["music_volume"] = max(0.0, min(1.0, float(data["music_volume"])))
             if isinstance(data.get("sfx_volume"), (int, float)):
                 config["sfx_volume"] = max(0.0, min(1.0, float(data["sfx_volume"])))
+            if isinstance(data.get("game_speed"), (int, float)):
+                config["game_speed"] = max(GAME_SPEED_MIN, min(GAME_SPEED_MAX,
+                                                               float(data["game_speed"])))
+            if data.get("boss_art") in BOSS_ART_SETS:
+                config["boss_art"] = data["boss_art"]
     except Exception as e:
         print(f"[Config] Failed to load {CONFIG_PATH}: {e}")
     return config
@@ -58,6 +69,12 @@ def save_user_config(config):
             json.dump(config, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"[Config] Failed to save {CONFIG_PATH}: {e}")
+
+
+def format_game_speed(speed):
+    """把流速显示为简洁的 0.5x / 1x / 1.25x 等形式"""
+    text = f"{float(speed):.2f}".rstrip("0").rstrip(".")
+    return f"{text}x"
 
 
 # --- 窗口（宽度固定）---
@@ -119,6 +136,115 @@ STAGE_TITLE_SHADOW_ALPHA = 150
 # --- 贴图 ---
 SPRITES_DIR = os.path.join(ASSETS_DIR, "sprites")
 ITEMS_DIR = os.path.join(ASSETS_DIR, "items")
+
+# --- Boss 立绘套组（可在设置界面切换，见 set_boss_art） ---
+# 立绘放在 assets/sprites/bosses/<套组>/ 下，套组之间仅文件名大小写不同
+BOSSES_DIR = os.path.join(SPRITES_DIR, "bosses")
+BOSS_ART_SETS = ("new", "another")          # 套组顺序 = 设置界面的切换顺序
+BOSS_ART_LABELS = {"new": "新版", "another": "另一版"}
+BOSS_ART_DEFAULT = "new"
+# Boss 键 → {套组: 文件名}；legacy 仅作为缺图时的兜底，不在设置里出现
+BOSS_ART_FILES = {
+    "arachne": {"new": "Arachne.png", "another": "Arachne.png",
+                "legacy": "arachne.png"},
+    "bonzo": {"new": "Bonzo.png", "another": "bonzo.png",
+              "legacy": "bonzo.png"},
+    "end_stone_protector": {"new": "End_Stone_Protector.png",
+                            "another": "end_stone_protector.png",
+                            "legacy": "end_stone_protector.png"},
+    "ender_dragon": {"new": "Ender_Dragon.png", "another": "ender_dragon.png",
+                     "legacy": "ender_dragon.png"},
+    "goldor": {"new": "Goldor.png", "another": "Goldor.png",
+               "legacy": "goldor.png"},
+    "livid": {"new": "Livid.png", "another": "Livid.png",
+              "legacy": "livid.png"},
+    "maxor": {"new": "Maxor.png", "another": "Maxor.png",
+              "legacy": "maxor.png"},
+    "necron": {"new": "Necron.png", "another": "Necron.png",
+               "legacy": "necron.png"},
+    "professor": {"new": "The_Professor.png", "another": "The_Professor.png",
+                  "legacy": "professor.png"},
+    "sadan": {"new": "Sadan.png", "another": "Sadan.png",
+              "legacy": "sadan.png"},
+    "scarf": {"new": "Scarf.png", "another": "Scarf.png",
+              "legacy": "scarf.png"},
+    "storm": {"new": "Storm.png", "another": "storm.png",
+              "legacy": "storm.png"},
+    "thorn": {"new": "Thorn.png", "another": "thorn.png",
+              "legacy": "thorn.png"},
+    "watcher": {"new": "The_Watcher.png", "another": "watcher.png",
+                "legacy": "watcher.png"},
+    "wither_king": {"new": "Wither_King.png", "another": "Wither_King.png",
+                    "legacy": "wither_king.png"},
+}
+# 常量名 → Boss 键：切换套组时统一刷新（含各面的别名常量）
+BOSS_SPRITE_ATTRS = {
+    "ARACHNE_BOSS_SPRITE": "arachne",
+    "END_DRAGON_BOSS_SPRITE": "ender_dragon",
+    "END_STONE_PROTECTOR_SPRITE": "end_stone_protector",
+    "WATCHER_BOSS_SPRITE": "watcher",
+    "BONZO_BOSS_SPRITE": "bonzo",
+    "SCARF_BOSS_SPRITE": "scarf",
+    "SADAN_BOSS_SPRITE": "sadan",
+    "STAGE5_WATCHER_BOSS_SPRITE": "watcher",
+    "STAGE5_PROFESSOR_BOSS_SPRITE": "professor",
+    "STAGE5_THORN_BOSS_SPRITE": "thorn",
+    "STAGE5_LIVID_BOSS_SPRITE": "livid",
+    "STAGE5_MAXOR_BOSS_SPRITE": "maxor",
+    "STAGE5_STORM_BOSS_SPRITE": "storm",
+    "STAGE5_GOLDOR_BOSS_SPRITE": "goldor",
+    "STAGE5_NECRON_BOSS_SPRITE": "necron",
+    "STAGE6_WITHER_KING_BOSS_SPRITE": "wither_king",
+    "STAGE6_KAEMAN_PORTRAIT": "wither_king",
+}
+# 各面用到的 Boss 立绘：关卡开始时后台预热，避免 Boss 出场瞬间卡顿
+STAGE_BOSS_ART = {
+    1: ("arachne",),
+    2: ("ender_dragon", "end_stone_protector"),
+    3: ("watcher", "bonzo"),
+    4: ("scarf", "sadan"),
+    5: ("watcher", "professor", "thorn", "livid", "maxor", "storm",
+        "goldor", "necron"),
+    6: ("wither_king",),
+}
+
+_boss_art_set = BOSS_ART_DEFAULT
+
+
+def boss_art_path(key, art=None):
+    """Boss 立绘贴图路径；art 为 None 时使用当前套组。
+    当前套组缺少该文件时回退到 legacy 目录，避免换套组后「缺图」。"""
+    if art not in BOSS_ART_SETS:
+        art = _boss_art_set
+    files = BOSS_ART_FILES.get(key) or {}
+    path = os.path.join(BOSSES_DIR, art, files.get(art) or files.get(BOSS_ART_DEFAULT, ""))
+    if not os.path.exists(path):
+        legacy_name = files.get("legacy")
+        legacy_path = os.path.join(BOSSES_DIR, "legacy", legacy_name or "")
+        if legacy_name and os.path.exists(legacy_path):
+            return legacy_path
+    return path
+
+
+def get_boss_art():
+    """当前 Boss 立绘套组名"""
+    return _boss_art_set
+
+
+def set_boss_art(name):
+    """切换 Boss 立绘套组（new / another），返回实际生效的套组名"""
+    global _boss_art_set
+    _boss_art_set = name if name in BOSS_ART_SETS else BOSS_ART_DEFAULT
+    for attr, key in BOSS_SPRITE_ATTRS.items():
+        globals()[attr] = boss_art_path(key)
+    return _boss_art_set
+
+
+def stage_boss_art_paths(stage_num):
+    """某一面需要预热的 Boss 立绘路径"""
+    return [boss_art_path(key) for key in STAGE_BOSS_ART.get(stage_num, ())]
+
+
 PLAYER_BULLET_SPRITE = os.path.join(SPRITES_DIR, "bullets", "Frozen_Scythe_Projectile.png")
 PLAYER_BULLET_SPRITE_SIZE = 30   # 玩家子弹贴图显示尺寸（px）
 # 敌弹贴图图集：一整张 etama.png（256x256），按格子裁剪使用
@@ -142,7 +268,7 @@ ENEMY_BULLET_SPRITE_MAX_RADIUS = 9.0
 ENEMY_BULLET_HITBOX_FACTOR = 0.5
 # 敌弹已改为“原图颜色匹配”，不再染色；此开关保留给开发预览工具使用。
 ENEMY_BULLET_SPRITE_TINT = False
-ARACHNE_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "arachne.png")
+ARACHNE_BOSS_SPRITE = boss_art_path("arachne")
 SELF_SPRITE = os.path.join(SPRITES_DIR, "self", "self1.png")
 PLAYER_SPRITE_IDLE = os.path.join(SPRITES_DIR, "self", "stg1.png")
 PLAYER_SPRITE_MOVE = os.path.join(SPRITES_DIR, "self", "stg2.png")
@@ -153,9 +279,9 @@ PLAYER_SPRITE_GLOW_RADIUS = 6
 PLAYER_SPRITE_GLOW_ALPHA = 28
 
 # --- 贴图（第2面：末地 / Dragon's Nest） ---
-END_DRAGON_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "ender_dragon.png")
+END_DRAGON_BOSS_SPRITE = boss_art_path("ender_dragon")
 END_DRAGON_PET_SPRITE = os.path.join(BACKGROUNDS_DIR, "stage2", "Ender_Dragon_Pet.png")   # 龙符幻影龙贴图
-END_STONE_PROTECTOR_SPRITE = os.path.join(SPRITES_DIR, "bosses", "end_stone_protector.png")
+END_STONE_PROTECTOR_SPRITE = boss_art_path("end_stone_protector")
 ENEMY_SPRITES_DIR_STAGE2 = os.path.join(SPRITES_DIR, "enemies", "stage2")
 STAGE2_FAIRY_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE2, "fairy.png")]
 STAGE2_SPIRIT_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE2, "spirit.png")]
@@ -166,8 +292,8 @@ STAGE2_SPIRIT_SPRITE_HEIGHT = 96
 STAGE2_GUARD_SPRITE_HEIGHT = 110
 
 # --- 贴图（第3面：地下墓穴 / Catacombs Floor 1） ---
-WATCHER_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "watcher.png")
-BONZO_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "bonzo.png")
+WATCHER_BOSS_SPRITE = boss_art_path("watcher")
+BONZO_BOSS_SPRITE = boss_art_path("bonzo")
 ENEMY_SPRITES_DIR_STAGE3 = os.path.join(SPRITES_DIR, "enemies", "stage3")
 STAGE3_FAIRY_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE3, "undead.png")]
 STAGE3_SPIRIT_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE3, "soul.png")]
@@ -190,8 +316,8 @@ STAGE3_WATCHER_SUMMONINGS = [
 # 戏符「Grand Illusion」的小丑面具节点（Bonzo 头部面具贴图）
 STAGE3_BONZO_MASK_SPRITE = os.path.join(BACKGROUNDS_DIR, "stage3", "Bonzo_Head.png")
 # --- 贴图（第4面：地下墓穴深处 / The Catacombs） ---
-SCARF_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "scarf.png")
-SADAN_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "sadan.png")
+SCARF_BOSS_SPRITE = boss_art_path("scarf")
+SADAN_BOSS_SPRITE = boss_art_path("sadan")
 ENEMY_SPRITES_DIR_STAGE4 = os.path.join(SPRITES_DIR, "enemies", "stage4")
 STAGE4_FAIRY_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE4, "undead.png")]
 STAGE4_SPIRIT_SPRITES = [os.path.join(ENEMY_SPRITES_DIR_STAGE4, "soul.png")]
@@ -214,14 +340,14 @@ STAGE4_CASTER_SPRITE_HEIGHT = 88
 STAGE4_SKELETOR_SPRITE_HEIGHT = 96
 
 # --- 五面 Boss 贴图（BOSS RUSH：The Watcher / Wither Lords 与前置 Boss） ---
-STAGE5_WATCHER_BOSS_SPRITE = WATCHER_BOSS_SPRITE
-STAGE5_PROFESSOR_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "professor.png")
-STAGE5_THORN_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "thorn.png")
-STAGE5_LIVID_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "livid.png")
-STAGE5_MAXOR_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "maxor.png")
-STAGE5_STORM_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "storm.png")
-STAGE5_GOLDOR_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "goldor.png")
-STAGE5_NECRON_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "necron.png")
+STAGE5_WATCHER_BOSS_SPRITE = boss_art_path("watcher")
+STAGE5_PROFESSOR_BOSS_SPRITE = boss_art_path("professor")
+STAGE5_THORN_BOSS_SPRITE = boss_art_path("thorn")
+STAGE5_LIVID_BOSS_SPRITE = boss_art_path("livid")
+STAGE5_MAXOR_BOSS_SPRITE = boss_art_path("maxor")
+STAGE5_STORM_BOSS_SPRITE = boss_art_path("storm")
+STAGE5_GOLDOR_BOSS_SPRITE = boss_art_path("goldor")
+STAGE5_NECRON_BOSS_SPRITE = boss_art_path("necron")
 
 # --- 六面素材（Final Approach：亡灵军队 / Kaeman 干涉 / 凋零要塞 / Wither King） ---
 ENEMY_SPRITES_DIR_STAGE6 = os.path.join(SPRITES_DIR, "enemies", "stage6")
@@ -242,8 +368,8 @@ STAGE6_STORM_GHOST_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "storm_ghost.
 STAGE6_GOLDOR_GHOST_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "goldor_ghost.png")
 STAGE6_NECRON_GHOST_SPRITE = os.path.join(ENEMY_SPRITES_DIR_STAGE6, "necron_ghost.png")
 # Wither King（六面最终 Boss，立绘为程序生成占位）
-STAGE6_WITHER_KING_BOSS_SPRITE = os.path.join(SPRITES_DIR, "bosses", "wither_king.png")
-STAGE6_KAEMAN_PORTRAIT = STAGE6_WITHER_KING_BOSS_SPRITE
+STAGE6_WITHER_KING_BOSS_SPRITE = boss_art_path("wither_king")
+STAGE6_KAEMAN_PORTRAIT = boss_art_path("wither_king")
 # 对话中 BOSS 头衔表：英文名 -> 中文头衔（对话框右上角显示）
 BOSS_TITLES = {
     "Arachne": "巢穴中的妖怪蜘蛛",
@@ -378,8 +504,8 @@ STAGE4_BOSS_MUSIC_NAME = "死灵王的狂宴 ~ Necromancer's Feast"
 STAGE5_MUSIC_START = os.path.join(MUSIC_DIR, "5_1_start.wav")   # 道中开场曲（播放一遍）
 STAGE5_MUSIC_LOOP = os.path.join(MUSIC_DIR, "5_1_loop.wav")     # 道中循环曲（无限循环）
 STAGE5_MUSIC = STAGE5_MUSIC_START
-STAGE5_BOSS_MUSIC_START = STAGE4_BOSS_MUSIC_START
-STAGE5_BOSS_MUSIC_LOOP = STAGE4_BOSS_MUSIC_LOOP
+STAGE5_BOSS_MUSIC_START = os.path.join(MUSIC_DIR, "5_2_start.wav")   # Boss战音乐（单曲，直接循环）
+STAGE5_BOSS_MUSIC_LOOP = os.path.join(MUSIC_DIR, "5_2_start.wav")    # 开场播完后循环同一曲
 
 # 曲名（每面开始 / Boss战开始时显示当前播放的音乐名）
 STAGE5_MUSIC_NAME = "凋零之厅 ~ Hall of the Wither Lords"

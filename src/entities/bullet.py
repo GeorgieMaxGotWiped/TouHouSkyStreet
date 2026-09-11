@@ -137,6 +137,7 @@ class Bullet:
         self.shootable = False   # 可被玩家子弹击破的敌弹（如展符缺口大玉）
         self.hp = 0              # 可击破敌弹的剩余生命值（<=0 时被击破）
         self.explode_radius = 0  # 击破后的爆炸清弹半径（0=无爆炸）
+        self.orb_explode_immune = False  # 免疫可击破大玉的爆炸清弹（如 Watcher 螺旋弹）
         self.sprite_slot = None      # 图集槽位覆盖（None=按弹种默认映射）
         self.custom_sprite_path = None      # optional external sprite
         self.custom_sprite_height = None
@@ -168,6 +169,10 @@ class Bullet:
         self.emit_spec = None        # continuous emitter config
         self.emit_timer = 0          # emitter frame counter
         self.beam_length = 0.0       # 光束线长度（TYPE_BEAM 专用）
+        self.beam_width = 3          # 光束线宽（TYPE_BEAM 专用）
+        self.beam_glow_color = None  # 光束外辉光颜色（None=不发光）
+        self.beam_glow_width = 0     # 光束外辉光线宽
+        self.beam_core = True        # 是否绘制白色中心线（装饰线可关闭）
         self.ignore_offscreen = False  # 桥/通道等长弹幕允许长时间待在屏幕外
 
         # 速度加速子弹
@@ -498,7 +503,8 @@ class Bullet:
                 bright = tuple(min(255, c + 100) for c in self.color)
                 pygame.draw.circle(screen, bright, (px, py), max(1, r - 2), 0)
             return
-        pygame.draw.circle(screen, cfg.COLOR_WHITE, (px, py), r, 0)
+        fill = getattr(self, "fill_color", cfg.COLOR_WHITE)
+        pygame.draw.circle(screen, fill, (px, py), r, 0)
         pygame.draw.circle(screen, self.color, (px, py), r, 2)
 
     def _draw_rice(self, screen, px, py):
@@ -579,8 +585,17 @@ class Bullet:
                 screen.blit(sprite, (midx - sprite.get_width() * 0.5,
                                      midy - sprite.get_height() * 0.5))
                 return
-        pygame.draw.line(screen, cfg.COLOR_WHITE, (px, py), (int(ex), int(ey)), 3)
-        pygame.draw.line(screen, self.color, (px, py), (int(ex), int(ey)), 1)
+        if self.beam_glow_color is not None and self.beam_glow_width > 0:
+            pygame.draw.line(screen, self.beam_glow_color,
+                             (px, py), (int(ex), int(ey)), self.beam_glow_width)
+        if not self.beam_core:
+            pygame.draw.line(screen, self.color,
+                             (px, py), (int(ex), int(ey)), self.beam_width)
+            return
+        pygame.draw.line(screen, cfg.COLOR_WHITE,
+                         (px, py), (int(ex), int(ey)), self.beam_width)
+        pygame.draw.line(screen, self.color,
+                         (px, py), (int(ex), int(ey)), max(1, self.beam_width - 2))
 
     def _get_beam_pattern(self):
         """取 etama.png 第一行「射线」图案：白芯沿光束长度、有色在光束两侧。

@@ -29,6 +29,27 @@
 - 较长的物品列表（仓库 / 背包 / 商店 / 锻造 / 装备选择）支持鼠标滚轮上下滚动，不再因鼠标悬停而自动滚动
 - 对话推进也支持鼠标左键点击
 
+## 界面风格与仓库
+
+- 休整 / 出征准备等界面采用 Hypixel SkyBlock 原版 Minecraft GUI 风格（`src/ui/skyblock_ui.py`）：槽位网格 + 悬停提示框，物品只显示图标
+- 主菜单 `Storage` 可打开本地仓库（`src/ui/storage.py`）：查看库存物品、对仓库中的装备使用重铸石锻造
+
+## 难度选择
+
+- 主菜单 Start Game 后先进入难度选择界面，当前仅开放 Easy，其余难度显示为锁定
+- 命令行参数 `python main.py easy|normal|hard|lunatic` 仍可直接指定难度
+## 游戏速度
+
+- 战斗中按 `F8` 减速、`F9` 加速、`F10` 恢复 `1.0x`，可选范围 `0.25x ~ 2.0x`
+- 主菜单「设置 → 游戏速度」也可用方向键/鼠标条调节，数值保存到 `config.json` 的 `game_speed`
+- 流速会同步缩放弹幕、敌机、玩家、关卡与特效时间轴；音乐与音效保持原速
+
+## Boss 立绘
+
+- Boss 立绘按套组存放在 `assets/sprites/bosses/<套组>/`：`new`（默认，新版立绘）、`another`（另一版立绘），`legacy` 为缺图时的兜底
+- 主菜单「设置 → Boss 立绘」可在两套之间切换（方向键 / 点击分段按钮），选择保存到 `config.json` 的 `boss_art`
+- `new` 套组为白底 PNG，载入时自动抠成透明背景并按内容裁剪（`src/engine/boss_art.py`），游戏内展示大小与旧立绘保持一致
+
 ## 练习模式
 
 - 主菜单选择 `Practice` 进入符卡练习：左侧选择 Boss（含道中 Boss 与 BOSS RUSH 各 Boss），右侧选择符卡（含 Last Spell），Enter 开始
@@ -45,8 +66,8 @@
 | 路径 | 说明 |
 | --- | --- |
 | `main.py` | 游戏入口 |
-| `src/` | 源码：`engine`（引擎/设置/字体/伪3D/符卡背景）、`entities`（玩家/敌人/Boss/子弹）、`stages`（关卡 1-6）、`systems`（物品/掉落/效果/仓库/C技能）、`ui`（菜单/HUD/对话/过场/Boss奖励） |
-| `assets/` | 资源：`backgrounds`（背景）、`sprites`（精灵）、`fonts`（字体）、`sounds/musics`（音乐）、`titles`（标题图） |
+| `src/` | 源码：`engine`（引擎/设置/字体/伪3D/符卡背景）、`entities`（玩家/敌人/Boss/子弹）、`stages`（关卡 1-6）、`systems`（物品/掉落/效果/仓库/C技能）、`ui`（菜单/HUD/对话/过场/Boss奖励/难度/SkyBlock风格UI/仓库） |
+| `assets/` | 资源：`backgrounds`（背景）、`sprites`（精灵/立绘套组）、`fonts`（字体）、`sounds`（音乐/音效/SE）、`gui`（Minecraft 风格 GUI 贴图）、`titles`（标题图） |
 | `tools/` | 开发辅助脚本；`archive/` 存放已使用完毕的一次性补丁脚本 |
 | `backup/` | 旧版源码备份 |
 | `dist/` | 打包产物 |

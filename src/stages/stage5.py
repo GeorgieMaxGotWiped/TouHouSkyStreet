@@ -12,6 +12,7 @@ import random
 import pygame
 
 from src.engine import settings as cfg
+from src.engine import boss_art
 from src.engine.collision import point_segment_distance
 from src.engine.pseudo3d import Pseudo3DFloor
 from src.entities.boss import Boss, SpellCard
@@ -1245,7 +1246,9 @@ def _get_livid_clone_sprite(height):
         return _livid_clone_sprite_cache[height]
     sprite = None
     try:
-        image = pygame.image.load(cfg.STAGE5_LIVID_BOSS_SPRITE).convert_alpha()
+        image = boss_art.load_sprite(cfg.STAGE5_LIVID_BOSS_SPRITE)
+        if image is None:
+            raise ValueError("Livid sprite unavailable")
         w, h = image.get_size()
         new_w = max(1, int(round(w * height / h)))
         sprite = pygame.transform.smoothscale(image, (new_w, height))
@@ -1348,8 +1351,8 @@ class _LividClone:
         self.size = _LIVID_CLONE_SIZE
         self.score = 0
         self.bonus_drops = None
-        self.hp = boss.livid_spell_hp * 0.5
-        self.max_hp = boss.livid_spell_hp * 0.5
+        self.hp = boss.livid_spell_hp * 0.25
+        self.max_hp = boss.livid_spell_hp * 0.25
 
     def get_hitbox(self):
         return (self.x, self.y, self.size * 0.85, self.size * 0.85)
@@ -2247,53 +2250,284 @@ def spell_storm_giga(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
         _storm_giga_frenzy(boss, bullet_manager, player_x, player_y)
 
 
-def spell_necron_withering(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
-    """凋符「Necron's Withering」：黑紫凋零头骨弹幕环绕并向玩家收缩。"""
-    if timer % 84 == 0:
-        boss.move_to(_clamp_x(player_x + random.choice((-60, 60))), 116)
-    if timer % 22 == 0:
-        base = math.atan2(player_y - boss.y, player_x - boss.x)
-        for i in range(5):
-            offset = (i - 2) * 0.16
-            _add(bullet_manager,
-                 create_bullet_angle(boss.x, boss.y, base + offset, 2.9,
-                                     Bullet.TYPE_CIRCLE, radius=3, color=(180, 80, 235)))
-    if timer % 41 == 0:
-        for i in range(20):
-            angle = timer * 0.038 + i * math.tau / 20
-            _add(bullet_manager,
-                 create_bullet_angle(boss.x, boss.y, angle, 1.7,
-                                     Bullet.TYPE_RICE, radius=2.5, color=(120, 50, 190)))
-    if timer % 66 == 0:
-        for side in (-1, 1):
-            x = _clamp_x(boss.x + side * 88)
-            _add(bullet_manager,
-                 create_bullet_angle(x, boss.y, math.pi / 2, 2.2,
-                                     Bullet.TYPE_KNIFE, radius=2.5, color=(210, 110, 250)))
+# ---------------------------------------------------------------------------
+# Necron 终符「Necron's Frenzy」：旋转八臂螺旋 + 大玉环 + 烈焰上涌
+# ---------------------------------------------------------------------------
+_FRENZY_RED = (255, 92, 92)          # 赤红：螺旋弹 / 大玉
+_FRENZY_PURPLE = (206, 84, 255)      # 亮紫：螺旋弹
+_FRENZY_DEEP_PURPLE = (196, 74, 255) # 深紫：大玉
+_FRENZY_FLAME = (255, 138, 70)       # 烈火：橙红
+_FRENZY_FLAME_HOT = (255, 88, 56)    # 烈火：炽红
+_FRENZY_FLAME_PALE = (255, 206, 110) # 烈火：淡黄火星
+
+# 八臂螺旋：匀速直线弹，弹速随时间逐渐加快
+_FRENZY_SPIRAL_INTERVAL = 5         # 每 5 帧放一圈八臂（密度×2）
+_FRENZY_SPIRAL_ARMS = 8
+_FRENZY_SPIRAL_STEP = 0.51          # 每圈发射角步进（旋转速度×2，形成螺旋）
+_FRENZY_SPIRAL_SPEED_BASE = 1.55    # 起始弹速（px/帧，恢复为初版原值）
+_FRENZY_SPIRAL_SPEED_ACCEL = 0.00055  # 每帧弹速增量
+_FRENZY_SPIRAL_SPEED_MAX = 7.0      # 弹速上限
+
+# 大玉环：一圈接一圈向外扩散
+_FRENZY_ORB_RING_INTERVAL = 72      # 每 72 帧放一圈大玉
+_FRENZY_ORB_RING_COUNT = 12
+_FRENZY_ORB_SPEED = 1.9
+_FRENZY_ORB_LIFETIME = 340
+
+# 烈焰上涌：底部密集不稳定弹幕，火线从屏幕底端下方逐渐浮现并向上燃烧
+_FRENZY_FIRE_INTERVAL = 5           # 每 5 帧喷发一波火
+_FRENZY_FIRE_PER_WAVE = 9           # 每波火焰弹数
+_FRENZY_FIRE_START_Y = 720.0        # 火线起始高度（屏幕底端下方，不可见处）
+_FRENZY_FIRE_TOP_Y = 400.0          # 火线上限
+_FRENZY_FIRE_RISE = 0.0235          # 火线每帧上移速度（px/帧，0.047 的 1/2）
+_FRENZY_FIRE_LIFETIME = 240
 
 
-def spell_necron_apocalypse(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
-    """终符「Necron's Apocalypse」：最终连击，凋零环、刀扇与自机狙三线并行。"""
-    if timer % 68 == 0:
-        boss.move_to(cfg.BATTLE_AREA_WIDTH / 2, 110)
-    if timer % 18 == 0:
-        base = math.atan2(player_y - boss.y, player_x - boss.x)
-        for offset in (-0.34, -0.12, 0.12, 0.34):
+def spell_necron_frenzy(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
+    """终符「Necron's Frenzy」：旋转八臂螺旋 + 大玉环 + 烈焰上涌。
+
+    Necron 原地旋转放出八臂螺旋弹（每颗匀速直线，弹速随时间持续加快），
+    同时一圈接一圈向外扩散大玉；屏幕底端下方由密集、蛇形摆动、忽左忽右
+    的不稳定火焰弹组成地狱火，火线从不可见处逐渐浮现并向上燃烧，
+    逼迫玩家缓慢向场地顶部撤退。
+    """
+    # Necron 悬停场地中央缓慢绕圈（模拟旋转），保持发射中心稳定
+    bx = cfg.BATTLE_AREA_WIDTH / 2 + math.cos(timer * 0.018) * 22
+    by = 122 + math.sin(timer * 0.024) * 12
+    boss.move_to(bx, by)
+    bx, by = boss.x, boss.y
+
+    # 1) 八臂螺旋：每圈 8 发匀速直线弹，发射角持续旋转形成螺旋；
+    #    弹速随符卡时间逐渐加快（单发弹自身保持匀速直线）
+    spiral_speed = min(_FRENZY_SPIRAL_SPEED_MAX,
+                       _FRENZY_SPIRAL_SPEED_BASE + _FRENZY_SPIRAL_SPEED_ACCEL * timer)
+    if timer % _FRENZY_SPIRAL_INTERVAL == 0:
+        base_angle = timer * _FRENZY_SPIRAL_STEP
+        for arm in range(_FRENZY_SPIRAL_ARMS):
+            angle = base_angle + arm * math.tau / _FRENZY_SPIRAL_ARMS
             _add(bullet_manager,
-                 create_bullet_angle(boss.x, boss.y, base + offset, 3.1,
-                                     Bullet.TYPE_CIRCLE, radius=3, color=(200, 90, 255)))
-    if timer % 32 == 0:
-        for i in range(24):
-            angle = -timer * 0.055 + i * math.tau / 24
+                 create_bullet_angle(bx, by, angle, spiral_speed,
+                                     Bullet.TYPE_CIRCLE, radius=3.0,
+                                     color=_FRENZY_RED if arm % 2 == 0 else _FRENZY_PURPLE,
+                                     lifetime=320))
+
+    # 2) 大玉环：红/紫整圈大玉一圈接一圈向外扩散
+    if timer % _FRENZY_ORB_RING_INTERVAL == 0:
+        ring_no = timer // _FRENZY_ORB_RING_INTERVAL
+        ring_color = _FRENZY_RED if ring_no % 2 == 0 else _FRENZY_DEEP_PURPLE
+        for i in range(_FRENZY_ORB_RING_COUNT):
+            angle = i * math.tau / _FRENZY_ORB_RING_COUNT + ring_no * 0.07
             _add(bullet_manager,
-                 create_bullet_angle(boss.x, boss.y, angle, 1.8,
-                                     Bullet.TYPE_KNIFE, radius=2.5, color=(160, 60, 230)))
-    if timer % 53 == 0:
-        for i in range(12):
-            angle = timer * 0.043 + i * math.tau / 12
-            _add(bullet_manager,
-                 create_bullet_angle(boss.x, boss.y, angle, 2.2,
-                                     Bullet.TYPE_BIG, radius=4, color=(130, 40, 210)))
+                 create_bullet_angle(bx, by, angle, _FRENZY_ORB_SPEED,
+                                     Bullet.TYPE_BIG, radius=4.0,
+                                     color=ring_color, lifetime=_FRENZY_ORB_LIFETIME))
+
+    # 3) 烈焰上涌：火线从屏幕底端下方不可见处逐渐浮现并向上燃烧，
+    #    火线附近持续喷发大量密集的不稳定火焰弹（如 Sadan 终符的桥）
+    fire_y = max(_FRENZY_FIRE_TOP_Y,
+                 _FRENZY_FIRE_START_Y - _FRENZY_FIRE_RISE * timer)
+    if fire_y <= _FRENZY_FIRE_TOP_Y:
+        fire_y += math.sin(timer * 0.012) * 14   # 到顶后轻微起伏，保持燃烧呼吸感
+    if timer % _FRENZY_FIRE_INTERVAL == 0:
+        for _ in range(_FRENZY_FIRE_PER_WAVE):
+            fx = random.uniform(30, cfg.BATTLE_AREA_WIDTH - 30)
+            fy = fire_y + random.uniform(-15, 60)
+            vx = random.uniform(-0.9, 0.9)
+            # 上跳显著降低：火焰弹最高仅高出火线约 150px，随火墙整体上移
+            vy = -random.uniform(0.3, 0.6)
+            b = Bullet(fx, fy, vx, vy, Bullet.TYPE_RICE, radius=2.6,
+                       color=random.choice(
+                           (_FRENZY_FLAME, _FRENZY_FLAME_HOT, _FRENZY_FLAME_PALE)),
+                       lifetime=_FRENZY_FIRE_LIFETIME)
+            b.ignore_offscreen = True   # 允许从底端下方不可见处生成，逐步浮现
+            b.wobble_amp = random.uniform(5.0, 14.0)
+            b.wobble_freq = random.uniform(0.05, 0.12)
+            b.wobble_phase = random.uniform(0.0, math.tau)
+            b.turn_rate = random.uniform(-0.02, 0.02)
+            _add(bullet_manager, b)
+
+
+
+# ---------------------------------------------------------------------------
+# Necron 第一张符卡「焚符 Nuclear Frenzy」：核能积蓄爆炸领域
+# ---------------------------------------------------------------------------
+_NUKE_CY = 148                 # Necron 停留在场地中央的悬浮高度
+_NUKE_START_R = 70.0           # 开符初始领域半径（px）
+_NUKE_MIN_R = 64.0             # 爆炸领域最小半径（全力压制下不会更小）
+_NUKE_MAX_GROW = 1.0 / 3.0     # 近窗命中为 0 时的最大扩张速度（px/帧，原 1.0 的 1/3）
+_NUKE_MIN_GROW = 0.1           # 近窗命中量充足时的最小扩张速度（px/帧，原 0.3 的 1/3）
+_NUKE_HIT_WINDOW = 30          # 命中计数滑动窗口（帧，约 0.5 秒）
+_NUKE_HIT_FULL = 100           # 窗口内命中达到该数量即触发最慢扩张 0.3（整体压制能力下调，
+                               # 使追踪弹按全权重计入后，各档位最终速度与旧版大体一致）
+_NUKE_EDGE_BURST_INTERVAL = 18  # 领域边缘向外喷发弹墙的间隔（帧，密度为初版的一半）
+_NUKE_EDGE_BURST_COUNT = 13    # 每波喷发的弹数（数量为当前的 1/2，约为旧版总弹幕的 1/4）
+_NUKE_EDGE_BURST_ARC = 2.4     # 喷发弧面宽度（弧度，朝向玩家）
+_NUKE_SUN_GROW_MULT = 2.0    # 太阳扩大速度倍率（相对领域半径）：开符后翻倍扩大
+_NUKE_SUN_GROW_MULT_SLOW = 1.2   # 下端触及 2/3 后改用较慢倍率（1.2x）
+_NUKE_SUN_THRESHOLD_Y_FRAC = 2.0 / 3.0   # 太阳下端触达战斗框高度的比例（2/3 处）
+_NUKE_SUN_OFFSET = (150.0 + 16.0) - _NUKE_SUN_GROW_MULT * _NUKE_START_R  # 原始尺寸固定偏移（2×70+26）
+_NUKE_SUN_RAMP_FRAMES = 60.0   # 进场从 0 放大到原始尺寸的时间（1 秒，60fps）
+
+
+def _necron_nuclear_register_damage(boss, damage, source=None):
+    """焚符伤害回调：命中 Necron 的子弹统一计入命中窗口（由 Boss.take_damage 调用）。
+
+    追踪弹与主弹权重相同；整体压制能力已下调（_NUKE_HIT_FULL 提高到 100），
+    使追踪弹按全权重计入后，各输出档位的最终扩张速度与旧版大体一致。
+    """
+    nuke = getattr(boss, "necron_nuclear", None)
+    if nuke is not None:
+        nuke["hits_this_frame"] += 1
+
+
+def _necron_nuclear_init(boss):
+    """焚符开符初始化：记录爆炸领域状态并挂接伤害回调。"""
+    boss.necron_nuclear = {
+        "cx": cfg.BATTLE_AREA_WIDTH / 2,
+        "cy": _NUKE_CY,
+        "radius": _NUKE_START_R,
+        "growth": 0.0,
+        "hits_this_frame": 0,
+        "hit_window": [0] * _NUKE_HIT_WINDOW,
+        "hit_total": 0,
+        "spin": 1.0,
+    }
+    boss.spell_damage_hook = lambda dmg, src=None: _necron_nuclear_register_damage(boss, dmg, src)
+    boss.move_to(cfg.BATTLE_AREA_WIDTH / 2, _NUKE_CY)
+
+
+def _necron_nuclear_bullets(boss, bullet_manager, timer, player_x, player_y):
+    """焚符弹幕：领域边缘喷发弹墙 / 双向公转环。"""
+    nuke = boss.necron_nuclear
+    cx, cy = nuke["cx"], nuke["cy"]
+    spin = nuke["spin"]
+    field_r = nuke["radius"]
+
+    # 领域边缘向外喷发弹墙（主压制源，数量/密度逐轮减半，约为旧版总弹幕的 1/4）：
+    # 从当前领域边界朝向玩家的宽弧面持续射出，弧面缓慢摆动形成可穿越的空隙
+    if timer % _NUKE_EDGE_BURST_INTERVAL == 0:
+        base = math.atan2(player_y - cy, player_x - cx)
+        edge = max(55.0, field_r + 8)
+        for i in range(_NUKE_EDGE_BURST_COUNT):
+            frac = i / max(1, _NUKE_EDGE_BURST_COUNT - 1)
+            a = (base - _NUKE_EDGE_BURST_ARC / 2
+                 + _NUKE_EDGE_BURST_ARC * frac
+                 + math.sin(timer * 0.05) * 0.28)
+            speed = 1.05 + (i % 3) * 0.2
+            b = create_bullet_angle(cx + math.cos(a) * edge, cy + math.sin(a) * edge,
+                                    a, speed, Bullet.TYPE_RICE,
+                                    radius=2.5, color=(255, 160, 60), lifetime=600)
+            # 轻微转向仅用于保持弹墙的摆动空隙，弧度足够小以保证弹墙贯穿全屏
+            b.turn_rate = 0.0014 * spin * (1 if i % 2 == 0 else -1)
+            _add(bullet_manager, b)
+
+    # 旋转华丽环：黄色圆弹公转环反向旋转并逐渐外扩，形成环绕 Necron 的华丽旋涡
+    if timer % 46 == 0:
+        for i in range(14):
+            a = timer * 0.021 * spin + i * math.tau / 14
+            b = create_bullet_angle(cx, cy, a, 0.0, Bullet.TYPE_CIRCLE,
+                                    radius=2.4, color=(160, 160, 60), lifetime=340)
+            b.orbit_center = (cx, cy)
+            b.orbit_radius = 88.0
+            b.orbit_angle = a
+            b.orbit_speed = 0.052 * spin
+            b.orbit_grow = 0.85
+            b.orbit_break = 230.0
+            b.orbit_break_speed = 1.55
+            _add(bullet_manager, b)
+
+    # 反向公转环：橙焰大玉与翠绿刀环对旋，双环交错更显华丽
+    if timer % 60 == 0:
+        for i in range(10):
+            a = -timer * 0.017 * spin + i * math.tau / 10
+            b = create_bullet_angle(cx, cy, a, 0.0, Bullet.TYPE_BIG,
+                                    radius=3.2, color=(255, 120, 40), lifetime=260)
+            b.orbit_center = (cx, cy)
+            b.orbit_radius = 150.0
+            b.orbit_angle = a
+            b.orbit_speed = -0.06 * spin
+            b.orbit_grow = 0.6
+            b.orbit_break = 300.0
+            b.orbit_break_speed = 1.7
+            _add(bullet_manager, b)
+
+
+def spell_necron_nuclear_frenzy(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
+    """焚符「Nuclear Frenzy」：Necron 停留在场地中央积蓄核能。
+
+    以 Necron 为中心出现一个不断扩大的爆炸领域：领域扩张速度与近窗命中弹量
+    成反比——命中越多膨胀越慢（最低 0.1 px/帧），命中稀疏或停火时明显加速
+    （最高 1/3 px/帧），把玩家逐步压向场地边缘。追踪弹与主弹同等计入命中量，
+    但整体压制能力已下调，使各输出档位的最终扩张速度与旧版大体一致。领域半径
+    无最大封顶且只增不减。威胁主要来自 Necron 从领域边缘向领域外喷发的弹墙：
+    玩家必须在领域外的狭窄躲避带内穿越不断扫过的弹墙，尽快击破 Necron。
+    领域内伴随双向公转环等旋转华丽弹幕。
+    """
+    if getattr(boss, "necron_nuclear", None) is None:
+        _necron_nuclear_init(boss)
+    nuke = boss.necron_nuclear
+
+    # Necron 停留在场地中央，仅保留轻微悬浮
+    center_x = cfg.BATTLE_AREA_WIDTH / 2
+    hover_y = _NUKE_CY + math.sin(timer * 0.02) * 5
+    boss.move_to(center_x, hover_y)
+    nuke["cx"] = boss.x
+    nuke["cy"] = boss.y
+
+    # 领域半径动力学：扩张速度与近窗命中弹量成反比——命中越多膨胀越慢，
+    # 近窗 0 命中最快（_NUKE_MAX_GROW），命中量达到 _NUKE_HIT_FULL 时最慢。
+    # 半径无最大封顶，只增不减，扩张后不会回缩。
+    nuke["hit_window"].pop(0)
+    nuke["hit_window"].append(nuke["hits_this_frame"])
+    nuke["hit_total"] = sum(nuke["hit_window"])
+    nuke["hits_this_frame"] = 0
+    frac = min(1.0, nuke["hit_total"] / _NUKE_HIT_FULL)
+    nuke["growth"] = _NUKE_MAX_GROW - (_NUKE_MAX_GROW - _NUKE_MIN_GROW) * frac
+    nuke["radius"] = max(_NUKE_MIN_R, nuke["radius"] + nuke["growth"])
+
+    # 旋转方向每 5 秒反转一次，保持弹幕走势不单调
+    nuke["spin"] = 1.0 if (timer // 300) % 2 == 0 else -1.0
+
+    _necron_nuclear_bullets(boss, bullet_manager, timer, player_x, player_y)
+
+
+_NUKE_SUN_BASE_CACHE = None
+
+
+def _get_necron_sun_base():
+    """生成清晰的高分辨率太阳渐变贴图（白热核心 + 红色边缘 + 轻微辉光）并缓存。
+
+    直接用 1024×1024 程序化径向渐变，避免小尺寸大玉贴图被大幅度放大后变糊。"""
+    global _NUKE_SUN_BASE_CACHE
+    if _NUKE_SUN_BASE_CACHE is not None:
+        return _NUKE_SUN_BASE_CACHE
+    import numpy as np
+    size = 1024
+    x = np.arange(size)
+    y = np.arange(size)
+    xx, yy = np.meshgrid(x, y)
+    cx = cy = (size - 1) / 2.0
+    dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+    f = dist / (size / 2.0)          # 0 中心，1 圆边缘
+    fx = np.clip(f, 0.0, 1.0)
+    # 颜色渐变：中央超大范围白色，红色仅在边缘一圈
+    stops = np.array([0.0, 0.85, 0.95, 1.0])
+    r_ch = np.interp(fx, stops, [255, 255, 255, 255])
+    g_ch = np.interp(fx, stops, [255, 255, 80, 40])
+    b_ch = np.interp(fx, stops, [255, 255, 80, 40])
+    # 太阳整体 80% 不透明；边缘 alpha 轻微渐隐
+    alpha = np.interp(f, [0.0, 0.96, 1.0], [255, 255, 0])
+    alpha = np.where(f > 1.0, 0, alpha) * 0.80
+    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    a_arr = pygame.surfarray.pixels_alpha(surf)
+    a_arr[:] = alpha.astype(np.uint8)
+    rgb = pygame.surfarray.pixels3d(surf)
+    rgb[:, :, 0] = r_ch.astype(np.uint8)
+    rgb[:, :, 1] = g_ch.astype(np.uint8)
+    rgb[:, :, 2] = b_ch.astype(np.uint8)
+    del a_arr, rgb
+    _NUKE_SUN_BASE_CACHE = surf
+    return surf
 
 
 # ---------------------------------------------------------------------------
@@ -2539,14 +2773,15 @@ class Stage5_WitherLords(Stage):
             hp_bar_inset=16,
             sprite_path=cfg.STAGE5_NECRON_BOSS_SPRITE,
             sprite_scale=2.3)
+        boss.move_speed = 6.0
         boss.move_to(cfg.BATTLE_AREA_WIDTH / 2, 108)
         boss.add_spell_card(SpellCard(
-            "凋符「Necron's Withering」", spell_necron_withering,
-            hp_threshold=0.66, end_hp_threshold=0.33,
+            "焚符「Nuclear Frenzy」", spell_necron_nuclear_frenzy,
+            hp_threshold=1.0, end_hp_threshold=0.5,
             bg_style="necron", direct_next=True))
         boss.add_spell_card(SpellCard(
-            "终符「Necron's Apocalypse」", spell_necron_apocalypse,
-            hp_threshold=0.33, end_hp_threshold=0.0, bg_style="soul"))
+            "终符「Necron's Frenzy」", spell_necron_frenzy,
+            hp_threshold=0.5, end_hp_threshold=0.0, bg_style="soul"))
         return boss
 
     def _build_boss(self, boss_id):
@@ -2717,6 +2952,42 @@ class Stage5_WitherLords(Stage):
         self._draw_frenzy_effects(screen, offset_x, offset_y)
         self._draw_storm_giga(screen, offset_x, offset_y)
 
+    def _draw_necron_nuclear(self, screen, offset_x=0, offset_y=0):
+        """焚符「Nuclear Frenzy」视觉层：半透明的白热太阳（绘制在弹幕上层）。"""
+        boss = self.boss
+        nuke = getattr(boss, "necron_nuclear", None)
+        if nuke is None or not boss.alive:
+            return
+        r = nuke["radius"]
+        if r <= 1:
+            return
+        lx = int(nuke["cx"])
+        ly = int(nuke["cy"])
+        cx = lx + offset_x
+        cy = ly + offset_y
+
+        # 原始尺寸：领域半径 × 放大倍率 + 固定偏移，触及 2/3 后降为 1.2 倍（分段连续）
+        slow_switch_r = _NUKE_SUN_THRESHOLD_Y_FRAC * cfg.BATTLE_AREA_HEIGHT - _NUKE_CY
+        r_sw = (slow_switch_r - _NUKE_SUN_OFFSET) / _NUKE_SUN_GROW_MULT
+        sun_r = _NUKE_SUN_GROW_MULT * float(r) + _NUKE_SUN_OFFSET
+        if sun_r >= slow_switch_r:
+            sun_r = _NUKE_SUN_GROW_MULT_SLOW * (float(r) - r_sw) + slow_switch_r
+        # 进场前 1 秒（60 帧）从 0 线性放大到原始尺寸，之后恢复正常
+        spell = getattr(boss, "current_spell", None)
+        spell_timer = getattr(spell, "timer", 0) or 0
+        sun_r *= min(1.0, spell_timer / _NUKE_SUN_RAMP_FRAMES)
+        diameter = int(round(sun_r * 2))
+        if diameter <= 0:
+            return
+
+        base = _get_necron_sun_base()
+        if base is None:
+            pygame.draw.circle(screen, cfg.COLOR_WHITE, (cx, cy), int(sun_r))
+            pygame.draw.circle(screen, (255, 120, 40), (cx, cy), int(sun_r), 3)
+            return
+        sprite = pygame.transform.smoothscale(base, (diameter, diameter))
+        screen.blit(sprite, (int(cx - diameter / 2), int(cy - diameter / 2)))
+
     def _draw_livid_top_glow(self, screen, offset_x=0, offset_y=0):
         boss = self.boss
         if boss is None or not getattr(boss, "livid_active", False):
@@ -2866,6 +3137,8 @@ class Stage5_WitherLords(Stage):
         self._draw_livid_top_glow(screen, offset_x, offset_y)
         self._draw_frenzy_laser(screen, offset_x, offset_y)
         self._draw_storm_giga_foreground(screen, offset_x, offset_y)
+        # 焚符太阳：绘制在弹幕之上（前景层）
+        self._draw_necron_nuclear(screen, offset_x, offset_y)
         if getattr(boss, "livid_blackout_frames", 0) <= 0:
             return
         overlay = pygame.Surface((cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),

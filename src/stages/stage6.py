@@ -2592,7 +2592,7 @@ class Stage6_FinalApproach(Stage):
                 pygame.draw.line(overlay, (255, 80, 100, alpha),
                                  (cx - int(r) - 8, cy), (cx + int(r) + 8, cy), 1)
                 pygame.draw.line(overlay, (255, 80, 100, alpha),
-                                 (cx, cy - int(r) - 8), (cx, cy + int(r) + 8, cy), 1)
+                                 (cx, cy - int(r) - 8), (cx, cy + int(r) + 8), 1)
 
             # 黑能量入侵：上下边缘压暗（干涉/要塞阶段加深）
             if self.phase in ("interference", "fortress", "final_wave"):

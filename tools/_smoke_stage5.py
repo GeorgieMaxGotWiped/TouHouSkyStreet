@@ -182,7 +182,7 @@ def main():
         stage.on_defeat_dialogue_end()
     assert stage.phase == "cleared", f"cleared, got {stage.phase}"
     assert "Undead Exhibition" in seen[0]
-    assert "Apocalypse" in seen[-1]
+    assert "Frenzy" in seen[-1]
     assert any("Giga Lightning" in n for n in seen), "Storm Phase2 spell present"
     assert any("Terminal Pursuit" in n for n in seen), "Goldor 机械符在符卡序列中"
     assert any("Infinite Rage" in n for n in seen), "Goldor Phase3 符卡在符卡序列中"

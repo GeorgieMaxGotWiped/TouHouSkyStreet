@@ -11,7 +11,7 @@ from src.entities.enemy import EnemyWave, FairyEnemy, FairyVolleyEnemy, SpiritEn
 from src.entities.boss import (
     Boss, SpellCard, spell_immobile_protector_wraith,
     _non_spell_dragon_breath, _non_spell_ender_pearl,
-    spell_fireball_barrage, spell_non_directional_lightning,
+    spell_fireball_barrage, spell_gagouji_cyclone,
     spell_one_with_the_dragons, spell_superiority,
 )
 from src.entities.bullet import Bullet, create_bullet_aimed, create_bullet_angle
@@ -343,9 +343,10 @@ class Stage2_DragonsNest(Stage):
             # 燃符 2688（9984→7296）
             hp_threshold=9984 / DRAGON_MAX_HP, end_hp_threshold=7296 / DRAGON_MAX_HP, bg_style="fire"))
         self.boss.add_spell_card(SpellCard(
-            "闪符「Non-Directional Lightning」", spell_non_directional_lightning,
-            # 闪符 2352（6144→3792），其后的末影珍珠非符 672（3792→3120）
-            hp_threshold=6144 / DRAGON_MAX_HP, end_hp_threshold=3792 / DRAGON_MAX_HP, bg_style="lightning"))
+            "电光「Directional Lightning」", spell_gagouji_cyclone,
+            # 电光 2352（6144→3792）；20 秒未击破自动扣除剩余 HP 并结符
+            hp_threshold=6144 / DRAGON_MAX_HP, end_hp_threshold=3792 / DRAGON_MAX_HP,
+            bg_style="lightning", auto_break_frames=20 * 60))
         self.boss.add_spell_card(SpellCard(
             "龙符「One with the Dragons」", spell_one_with_the_dragons,
             # 龙符 2520（3120→600）

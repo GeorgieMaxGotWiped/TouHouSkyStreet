@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# 难度选择界面：远征出征前选择本局难度（当前仅开放 Normal）
+# 难度选择界面：远征出征前选择本局难度（当前仅开放 Easy）
 
 import math
 import os
@@ -11,8 +11,8 @@ from src.engine.game import GameState
 
 # 难度定义：(ID, 显示名, 是否已开放)
 DIFFICULTIES = [
-    ("EASY", "Easy", False),
-    ("NORMAL", "Normal", True),
+    ("EASY", "Easy", True),
+    ("NORMAL", "Normal", False),
     ("HARD", "Hard", False),
     ("LUNATIC", "Lunatic", False),
 ]
@@ -29,13 +29,13 @@ def _load_background(path, size):
 
 
 class DifficultySelectState(GameState):
-    """出征前的难度选择界面。当前仅有 Normal 开放，其余难度显示为锁定。"""
+    """出征前的难度选择界面。当前仅有 Easy 开放，其余难度显示为锁定。"""
 
     def __init__(self, game):
         super().__init__(game)
         self.background = _load_background(
             cfg.MENU_BACKGROUND, (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
-        # 光标位置：只能落在唯一开放的 NORMAL 上
+        # 光标位置：只能落在唯一开放的 EASY 上
         self.selected = self._available_indexes()[0]
         self._last_mouse_pos = (0, 0)
 
@@ -68,9 +68,9 @@ class DifficultySelectState(GameState):
         """各难度行的可点击区域（与 draw 布局一致）"""
         rects = []
         for i, (_, name, _) in enumerate(DIFFICULTIES):
-            w, h = self.game.font_medium.size(name)
+            w, _h = self.game.font_medium.size(name)
             rects.append(pygame.Rect(480 - w // 2 - 60, 280 + i * 58 - 8,
-                                     w + 120, h + 16))
+                                     w + 120, 58))
         return rects
 
     def update(self, dt):
@@ -138,9 +138,6 @@ class DifficultySelectState(GameState):
                              rect, 1)
 
             if available and is_sel:
-                hl = pygame.Surface(rect.size, pygame.SRCALPHA)
-                hl.fill((255, 255, 80, 22))
-                screen.blit(hl, rect.topleft)
                 pulse = math.sin(pygame.time.get_ticks() * 0.004) * 0.3 + 0.7
                 glow_color = tuple(int(c * pulse) for c in cfg.COLOR_YELLOW)
                 glow = self.game.font_medium.render(name, True, glow_color)
@@ -162,5 +159,5 @@ class DifficultySelectState(GameState):
         screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 620))
 
         summary = self.game.font_small.render(
-            "当前仅有 Normal 难度开放", True, cfg.COLOR_GREEN)
+            "当前仅有 Easy 难度开放", True, cfg.COLOR_GREEN)
         screen.blit(summary, ((cfg.SCREEN_WIDTH - summary.get_width()) // 2, 654))

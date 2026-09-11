@@ -2145,18 +2145,17 @@ def _scarf_phase_name(boss, local):
     return boss.scarf_cycle_order[-1]
 
 
-def _scarf_switch_job(boss, name, bullet_manager):
-    """职业切换逻辑：点亮当前成员并熄灭其他成员。"""
+def _scarf_switch_jobs(boss, names, bullet_manager):
+    """职业切换逻辑：点亮本轮随机激活的两名成员并熄灭其他成员。"""
     if not boss.scarf_squad:
         return
-    target = None
+    active = set(names)
     for member in boss.scarf_squad:
-        member["active"] = (member["name"] == name)
-        if member["name"] == name:
-            target = member
-    boss.scarf_active_squad = name
-    if target is not None:
-        _scarf_burst(bullet_manager, target["x"], target["y"], target["color"], count=8)
+        member["active"] = (member["name"] in active)
+    boss.scarf_active_members = list(names)
+    for member in boss.scarf_squad:
+        if member["name"] in active:
+            _scarf_burst(bullet_manager, member["x"], member["y"], member["color"], count=8)
 
 
 def _scarf_init_squad(boss, bullet_manager):
@@ -2177,6 +2176,7 @@ def _scarf_init_squad(boss, bullet_manager):
             "active": False,
         })
     boss.scarf_active_squad = None
+    boss.scarf_active_members = []
     boss.scarf_cycle_no = -1
     boss.scarf_cycle_order = list(SCARF_SQUAD_ORDER)
     boss.scarf_cycle_starts = {name: 0 for name in SCARF_SQUAD_ORDER}
@@ -2305,11 +2305,23 @@ def _scarf_priest_attack(boss, bullet_manager, phase):
             _scarf_add(bullet_manager, boss, b, empower=False)
 
 
+def _scarf_active_attack(name, boss, bullet_manager, phase, player_x=0, player_y=0):
+    """按职业名调度本轮激活成员的主攻击；两名成员共用同一 phase。"""
+    if name == "warrior":
+        _scarf_warrior_attack(boss, bullet_manager, phase)
+    elif name == "archer":
+        _scarf_archer_attack(boss, bullet_manager, phase, player_x, player_y)
+    elif name == "mage":
+        _scarf_mage_attack(boss, bullet_manager, phase, player_x, player_y)
+    else:
+        _scarf_priest_attack(boss, bullet_manager, phase)
+
+
 def spell_scarf_necrotic_squad(boss, bullet_manager, timer, dt,
                                player_x=0, player_y=0):
     """队符「Necrotic Squad」：四名亡灵固定在场，每轮随机洗牌后轮流主攻。
 
-    每轮四名成员各出场一次；仅一名成员在当前回合主攻。
+    每轮四名成员各出场一次；每回合随机激活两名成员同时主攻。
     Priest 生成多个小强化法阵，下一位成员攻击穿过法阵时会分裂；原弹不加速。
     Archer 使用朝向玩家的高速箭；其余成员保持固定角度/对称/阵列谱。
     """
@@ -2335,20 +2347,16 @@ def spell_scarf_necrotic_squad(boss, bullet_manager, timer, dt,
     local = (timer - 1) % P["cycle_duration"]
     name = _scarf_phase_name(boss, local)
 
-    # 职业切换：进入新职业帧时点亮对应成员。
+    # 职业切换：进入新职业帧时，随机点亮两名小队成员作为本轮主攻者。
     if name != boss.scarf_active_squad:
-        _scarf_switch_job(boss, name, bullet_manager)
+        _scarf_switch_jobs(boss, random.sample(SCARF_SQUAD_ORDER, 2), bullet_manager)
+        boss.scarf_active_squad = name
 
     phase = local - boss.scarf_cycle_starts[name]
 
-    if name == "warrior":
-        _scarf_warrior_attack(boss, bullet_manager, phase)
-    elif name == "archer":
-        _scarf_archer_attack(boss, bullet_manager, phase, player_x, player_y)
-    elif name == "mage":
-        _scarf_mage_attack(boss, bullet_manager, phase, player_x, player_y)
-    else:
-        _scarf_priest_attack(boss, bullet_manager, phase)
+    # 本轮两名激活成员同时主攻，共用同一 phase 保持发射节奏同步。
+    for member in boss.scarf_active_members:
+        _scarf_active_attack(member, boss, bullet_manager, phase, player_x, player_y)
 
     # 强化法阵生命周期推进（下一轮 Priest 会重新生成）。
     _scarf_update_buff_circles(boss)

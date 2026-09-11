@@ -59,6 +59,7 @@ def _empty_effects():
         "spider_artifact": False,         # 蜘蛛护符
         "deathbomb_refund": 0,            # 决死Bomb 2B回1B
         "graze_shield": False,            # 预留
+        "first_hit_invincible": False,    # 每关首次被弹时改为获得3秒无敌
     }
 
 
@@ -93,7 +94,8 @@ def aggregate_effects(inventory, stage_num=1):
         if item is None:
             continue
         _merge(eff, item.effects)
-        prefix_id = inventory.get_item_prefix(item_id)
+        slot = inventory.get_equipped_slot(item_id)
+        prefix_id = inventory.get_equipped_prefix(slot) if slot else None
         if prefix_id and prefix_id in REFORGES:
             _merge(eff, REFORGES[prefix_id].get("effects", {}))
 

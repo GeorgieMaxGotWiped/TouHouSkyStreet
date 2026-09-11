@@ -194,7 +194,8 @@ def _e2e():
     assert orbit, "应生成公转环弹幕"
     print(f"[6] 旋转公转环弹幕 OK orbit={len(orbit)}")
 
-    # 7) 领域外弹幕密度：弹墙数量再次减半后，120 帧喷发量约为初版的 1/4（≈1.05/帧 -> ≥ 110）
+    # 7) 还原旧版最终参数（间隔 18 / 每波 13）后，扣除符卡开场演出约 29 帧，
+    #    120 帧实际喷发约 89 颗（米弹 65 + 刀环 14 + 大玉 10），约为初版 1/4 量级
     stage7 = Stage5_WitherLords()
     stage7.phase = "dialogue"
     boss7 = _build_necron_spell(stage7)
@@ -206,7 +207,7 @@ def _e2e():
         stage7.update(1 / 60, bm7, cfg.BATTLE_AREA_WIDTH / 2,
                       cfg.BATTLE_AREA_HEIGHT - 90)
     bm7.add_enemy_bullet = orig_add
-    assert spawned[0] >= 110, f"领域外弹幕密度约为初版 1/4（120 帧喷发 {spawned[0]}）"
+    assert spawned[0] >= 80, f"领域外弹幕密度约为初版 1/4（120 帧喷发 {spawned[0]}）"
     print(f"[7] 领域外海量弹幕 OK 120 帧喷发 {spawned[0]} 颗")
 
     # 8) 弹墙贯穿全屏：480 帧模拟中边缘米弹应能飞到屏幕底部而不中途消失

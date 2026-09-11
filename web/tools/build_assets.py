@@ -13,39 +13,61 @@ import json
 import os
 import sys
 
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")   # 抠图复用游戏内实现，静音 pygame 提示
+
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 GALLERY_DIR = os.path.join(ROOT, "web", "assets", "gallery")
 IMG_DIR = os.path.join(ROOT, "web", "assets", "img")
 
-# (id, 源文件, 名称, 分类)
+# (id, 源文件, 名称, 分类)：Boss 立绘取自 assets/sprites/bosses/new（游戏内默认套组）
 GALLERY = [
     # —— 玩家 ——
     ("player", "assets/sprites/self/self1.png", "玩家（自机）", "player"),
     # —— Boss / 角色 ——
-    ("arachne", "assets/sprites/bosses/arachne.png", "蛛后 Arachne", "boss"),
-    ("bonzo", "assets/sprites/bosses/bonzo.png", "邦佐 Bonzo", "boss"),
-    ("end_stone_protector", "assets/sprites/bosses/end_stone_protector.png", "末影石守卫", "boss"),
-    ("ender_dragon", "assets/sprites/bosses/ender_dragon.png", "末影龙", "boss"),
-    ("goldor", "assets/sprites/bosses/goldor.png", "戈尔铎 Goldor", "boss"),
-    ("livid", "assets/sprites/bosses/livid.png", "利维德 Livid", "boss"),
-    ("maxor", "assets/sprites/bosses/maxor.png", "马克索 Maxor", "boss"),
-    ("necron", "assets/sprites/bosses/necron.png", "尼可隆 Necron", "boss"),
-    ("professor", "assets/sprites/bosses/professor.png", "教授 Professor", "boss"),
-    ("sadan", "assets/sprites/bosses/sadan.png", "萨丹 Sadan", "boss"),
-    ("scarf", "assets/sprites/bosses/scarf.png", "斯卡夫 Scarf", "boss"),
-    ("storm", "assets/sprites/bosses/storm.png", "风暴 Storm", "boss"),
-    ("thorn", "assets/sprites/bosses/thorn.png", "荆棘 Thorn", "boss"),
-    ("watcher", "assets/sprites/bosses/watcher.png", "守望者 Watcher", "boss"),
-    ("wither_king", "assets/sprites/bosses/wither_king.png", "凋零之王 Wither King", "boss"),
+    ("arachne", "assets/sprites/bosses/new/Arachne.png", "蛛后 Arachne", "boss"),
+    ("bonzo", "assets/sprites/bosses/new/Bonzo.png", "邦佐 Bonzo", "boss"),
+    ("end_stone_protector", "assets/sprites/bosses/new/End_Stone_Protector.png", "末影石守卫", "boss"),
+    ("ender_dragon", "assets/sprites/bosses/new/Ender_Dragon.png", "末影龙", "boss"),
+    ("goldor", "assets/sprites/bosses/new/Goldor.png", "戈尔铎 Goldor", "boss"),
+    ("livid", "assets/sprites/bosses/new/Livid.png", "利维德 Livid", "boss"),
+    ("maxor", "assets/sprites/bosses/new/Maxor.png", "马克索 Maxor", "boss"),
+    ("necron", "assets/sprites/bosses/new/Necron.png", "尼可隆 Necron", "boss"),
+    ("professor", "assets/sprites/bosses/new/The_Professor.png", "教授 Professor", "boss"),
+    ("sadan", "assets/sprites/bosses/new/Sadan.png", "萨丹 Sadan", "boss"),
+    ("scarf", "assets/sprites/bosses/new/Scarf.png", "斯卡夫 Scarf", "boss"),
+    ("storm", "assets/sprites/bosses/new/Storm.png", "风暴 Storm", "boss"),
+    ("thorn", "assets/sprites/bosses/new/Thorn.png", "荆棘 Thorn", "boss"),
+    ("watcher", "assets/sprites/bosses/new/The_Watcher.png", "守望者 Watcher", "boss"),
+    ("wither_king", "assets/sprites/bosses/new/Wither_King.png", "凋零之王 Wither King", "boss"),
 ]
 
 
-def make_webp(src_rel, dst_abs, max_h=800, quality=82):
-    """缩放并转 WebP，返回 (宽, 高)。"""
+def load_portrait(src_rel):
+    """读入立绘：白底贴图先抠成透明（复用游戏内的抠图实现），失败则原样返回"""
     src = os.path.join(ROOT, src_rel)
-    im = Image.open(src).convert("RGB")
+    im = Image.open(src)
+    if im.mode != "RGB":
+        return im.convert("RGBA")
+    try:
+        import numpy as np
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        from src.engine.boss_art import remove_white_background, crop_to_content
+        rgba = remove_white_background(np.asarray(im.convert("RGB")))
+        return Image.fromarray(crop_to_content(rgba), "RGBA")
+    except Exception as e:
+        print("  抠图失败（保留白底）：%s" % e)
+        return im.convert("RGB")
+
+
+def make_webp(src_rel, dst_abs, max_h=800, quality=82, portrait=False):
+    """缩放并转 WebP，返回 (宽, 高)；portrait=True 时先抠掉立绘白底"""
+    if portrait:
+        im = load_portrait(src_rel)
+    else:
+        im = Image.open(os.path.join(ROOT, src_rel)).convert("RGB")
     if im.height > max_h:
         w = int(round(im.width * max_h / im.height))
         im = im.resize((w, max_h), Image.LANCZOS)
@@ -69,7 +91,7 @@ def main():
         if not os.path.exists(os.path.join(ROOT, rel)):
             print("跳过（缺源）：%s" % rel)
             continue
-        size = make_webp(rel, dst)
+        size = make_webp(rel, dst, portrait=True)
         items.append({
             "id": gid,
             "name": name,

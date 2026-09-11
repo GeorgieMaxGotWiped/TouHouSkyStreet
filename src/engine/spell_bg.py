@@ -569,17 +569,20 @@ STYLES = {
             _Layer("icon_pearl", rot_speed=-1.10, scale=0.38, pulse=0.10, freq=0.55, orbit=(150, 0.9)),
         ],
     },
-    "lightning": {  # 闪符「Non-Directional Lightning」：无定向落雷
-        "base": (5, 8, 18),
-        "glow": (12, 22, 46),
-        "ring": (170, 220, 255),
-        "dim": 0.45,
+    "lightning": {  # 电光「Directional Lightning」：金色电光旋风
+        "base": (12, 7, 18),
+        "glow": (40, 24, 10),
+        "ring": (255, 216, 88),
+        "dim": 0.5,
         "layers": [
             _Layer("bg_storm", scroll=(0.0, 0.55), blend="alpha"),
-            _Layer("thread_pale", scroll=(0.0, 0.9), blend="alpha"),
+            _Layer("web_violet", rot_speed=-0.22, scale=2.1, pulse=0.05, freq=0.30),
+            _Layer("thread_gold", scroll=(0.0, 0.7), blend="alpha"),
             _Layer("bolt_pale", rot_speed=0.30, scale=1.9, pulse=0.10, freq=0.60),
-            _Layer("spiral_teal", rot_speed=-0.60, scale=1.55, pulse=0.06, freq=0.35),
-            _Layer("icon_terminator", rot_speed=1.10, scale=0.60, pulse=0.09, freq=0.50),
+            _Layer("spiral_gold", rot_speed=0.45, scale=1.6, pulse=0.06, freq=0.35),
+            _Layer("icon_core", rot_speed=0.70, scale=0.55, pulse=0.07, freq=0.50),
+            _Layer("icon_terminator", rot_speed=-1.00, scale=0.34, pulse=0.08, freq=0.55,
+                   orbit=(150, 0.8)),
         ],
     },
     "dragon": {  # 龙符「One with the Dragons」：万龙共鸣

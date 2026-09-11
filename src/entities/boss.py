@@ -6,6 +6,7 @@ import random
 import os
 import pygame
 from src.engine import settings as cfg
+from src.engine import boss_art
 from src.engine.collision import circle_collision
 from src.engine.fallback_font import FallbackFont
 from src.engine.spell_bg import SpellBackground
@@ -57,11 +58,10 @@ def _get_boss_sprite(path, target_height):
         return _boss_sprite_cache.get(key)
     _boss_sprite_attempted.add(key)
     try:
-        img = pygame.image.load(path)
-        try:
-            img = img.convert_alpha()
-        except Exception:
-            pass
+        # 白底立绘在这一步抠掉背景并按内容裁剪（结果缓存，只处理一次）
+        img = boss_art.load_sprite(path)
+        if img is None:
+            raise ValueError("sprite unavailable")
         w, h = img.get_size()
         if h <= 0:
             raise ValueError("invalid sprite height")
@@ -85,7 +85,9 @@ def _banner_target_height(path):
         return _banner_height_cache.get(key)
     _banner_height_attempted.add(key)
     try:
-        img = pygame.image.load(path)
+        img = boss_art.load_sprite(path)
+        if img is None:
+            raise ValueError("sprite unavailable")
         w, h = img.get_size()
         if h <= 0:
             raise ValueError("invalid sprite height")
@@ -219,7 +221,8 @@ SPELL_BANNER_DROP = 36            # 淡出时向下平移距离（px）
 class SpellCard:
     """符卡（一个攻击阶段）"""
     def __init__(self, name, pattern_func, hp_threshold=None, end_hp_threshold=None,
-                 bg_style=None, direct_next=False, time_spell=False):
+                 bg_style=None, direct_next=False, time_spell=False,
+                 auto_break_frames=None):
         self.name = name
         self.pattern_func = pattern_func
         self.hp_threshold = hp_threshold
@@ -227,6 +230,7 @@ class SpellCard:
         self.bg_style = bg_style   # 符卡背景风格（None 时按名字自动判断）
         self.direct_next = direct_next   # True 时结束后不进入非符，直接开下一张符卡
         self.time_spell = time_spell     # 时符：无 Boss 血量，攻击不会提前结束符卡
+        self.auto_break_frames = auto_break_frames  # 超时自动击破帧数（None=不限时）
         self.timer = 0
         self.active = False
         self.completed = False
@@ -237,11 +241,15 @@ class SpellCard:
         self.completed = False
 
     def update(self, boss, bullet_manager, dt, player_x=0, player_y=0):
-        # 符卡无时间限制：只有血量压到阈值/清空才会结束
+        # 默认符卡无时间限制；允许指定帧数后自动击破
         if not self.active:
             return
         self.timer += 1
         self.pattern_func(boss, bullet_manager, self.timer, dt, player_x, player_y)
+        if (boss.current_spell is self
+                and self.auto_break_frames is not None
+                and self.timer >= self.auto_break_frames):
+            boss._auto_break_spell()
 
     def reset(self):
         self.active = False
@@ -308,7 +316,6 @@ class Boss:
         self.revive_duration = 180         # 复活演出持续帧数（60FPS 下约 3 秒）
         self.revive_timer = 0
         self.revive_skips_non_spell = False  # ????????????????????
-        self.superior_circles = []       # 超符黄金魔法阵（位置/旋转/生命由符卡每帧更新）
         self.protector_barriers = []     # 石符固定石柱结界（位置固定，由符卡维护）
         self.protector_shock = None      # 石符震荡冲击环（绘制用动画状态）
         self.protector_fortress = False  # 石符岩石堡垒轮廓是否绘制
@@ -321,6 +328,7 @@ class Boss:
         self.bonzo_masks = []          # 戏符 Grand Illusion 的小丑面具幻象节点（生命周期由符卡维护）
         self.scarf_squad = []          # 队符「Necrotic Squad」的四名亡灵固定成员（生命周期由符卡维护）
         self.scarf_active_squad = None # 队符当前主攻击职业名（Warrior/Archer/Mage/Priest）
+        self.scarf_active_members = []  # 队符本轮随机激活的两名成员名列表（生命周期由符卡维护）
         self.scarf_buff_circle = None  # 兼容旧单法阵引用（保留但不再由符卡写入）
         self.scarf_buff_circles = []   # 队符中牧师生成的多个紫色强化法阵（生命周期由符卡维护）
         self.sadan_army = []           # 兵符「Terracotta Army」的兵马俑军阵（生命周期由符卡维护）
@@ -338,6 +346,12 @@ class Boss:
         self.kaeman_atomize = None     # 王符「Atomizing Ray」原子化扫射射线状态（None=未展开）
         self.kaeman_slumber = None    # 终仪「The Wither King's Final Slumber」吸收/放出状态（None=未展开）
         self.spell_damage_hook = None  # 符卡伤害回调（焚符火力压制领域），由符卡挂接
+        self.gagouji_spiral_bullets = []  # 电光「Directional Lightning」旋转麟弹
+        self.gagouji_spiral_center = None
+        self.gagouji_spin = 0.0
+        self.gagouji_spiral_pending = []
+        self.gagouji_spiral_complete = False
+        self.gagouji_forming_rings = []
         self.entering = True
         self.entry_timer = 120
         self.invincible = False
@@ -606,7 +620,6 @@ class Boss:
     def _start_spell(self, spell=None):
         self._cancel_screen_bullets()   # 开符：清屏
         self.phantom_dragons = []       # 开符：清空幻影龙
-        self.superior_circles = []      # 开符：清空超符魔法阵
         self.protector_barriers = []    # 开符：清空石符石柱结界
         self.protector_shock = None
         self.protector_fortress = False
@@ -619,6 +632,7 @@ class Boss:
         self.bonzo_masks = []
         self.scarf_squad = []
         self.scarf_active_squad = None
+        self.scarf_active_members = []
         self.scarf_buff_circle = None
         self.scarf_buff_circles = []
         self.sadan_army = []
@@ -640,6 +654,12 @@ class Boss:
         self.kaeman_atomize = None
         self.kaeman_slumber = None
         self.spell_damage_hook = None   # 开符：清空上一符卡的伤害回调
+        self.gagouji_spiral_bullets = []
+        self.gagouji_spiral_center = None
+        self.gagouji_spin = 0.0
+        self.gagouji_spiral_pending = []
+        self.gagouji_spiral_complete = False
+        self.gagouji_forming_rings = []
         if spell is None:
             if self.current_spell_idx >= len(self.spell_cards):
                 return
@@ -666,17 +686,15 @@ class Boss:
                                         self.current_spell.bg_style)
         # 标记 Last Spell 状态（Bomb 禁用 / Miss 强制结束）
         self.last_spell_active = (spell is self.last_spell)
-        # Last Spell 展开：血量已打空，补充黄金领域独立血量并清空旧阵
+        # Last Spell 展开：血量已打空，补充黄金领域独立血量
         if self.last_spell_active:
             if getattr(spell, "time_spell", False):
                 self.hp = 0
             else:
                 self.hp = self.last_spell_hp
-            self.superior_circles = []
     def _clear_spell_effects(self):
-        """Boss 战败时清除符卡视觉残留（黄金魔法阵/幻影龙/石柱等）"""
+        """Boss 战败时清除符卡视觉残留（幻影龙/石柱等）"""
         self.phantom_dragons = []
-        self.superior_circles = []
         self.protector_barriers = []
         self.protector_shock = None
         self.protector_fortress = False
@@ -689,6 +707,7 @@ class Boss:
         self.bonzo_masks = []
         self.scarf_squad = []
         self.scarf_active_squad = None
+        self.scarf_active_members = []
         self.scarf_buff_circle = None
         self.scarf_buff_circles = []
         self.sadan_army = []
@@ -710,6 +729,32 @@ class Boss:
         self.kaeman_atomize = None
         self.kaeman_slumber = None
         self.spell_damage_hook = None   # 战败：清空符卡伤害回调
+        self.gagouji_spiral_bullets = []
+        self.gagouji_spiral_center = None
+        self.gagouji_spin = 0.0
+        self.gagouji_spiral_pending = []
+        self.gagouji_spiral_complete = False
+        self.gagouji_forming_rings = []
+
+    def _auto_break_spell(self):
+        """符卡超时自动击破：扣除本符卡剩余 HP 后按正常流程结符。"""
+        spell = self.current_spell
+        if spell is None:
+            return
+        threshold = spell.end_hp_threshold
+        if threshold is None:
+            return
+        floor = self.max_hp * threshold
+        remaining = max(0.0, self.hp - floor)
+        if remaining <= 0:
+            self._end_spell()
+            return
+        resistance = self.resistance
+        if resistance > 0:
+            self.take_damage(remaining / resistance)
+        else:
+            self.hp = floor
+            self._end_spell()
 
     def _end_spell(self):
         self._cancel_screen_bullets()   # 结符：清屏
@@ -721,6 +766,7 @@ class Boss:
         self.bonzo_masks = []           # 结符：清空戏符面具幻象
         self.scarf_squad = []           # 结符：清空队符小队
         self.scarf_active_squad = None
+        self.scarf_active_members = []
         self.scarf_buff_circle = None   # 结符：清空牧师强化法阵
         self.scarf_buff_circles = []    # 结符：清空多个牧师强化法阵
         self.sadan_army = []            # 结符：清空兵马俑军阵
@@ -741,6 +787,12 @@ class Boss:
         self.kaeman_atomize = None
         self.kaeman_slumber = None
         self.spell_damage_hook = None   # 结符：清空符卡伤害回调
+        self.gagouji_spiral_bullets = []
+        self.gagouji_spiral_center = None
+        self.gagouji_spin = 0.0
+        self.gagouji_spiral_pending = []
+        self.gagouji_spiral_complete = False
+        self.gagouji_forming_rings = []
         self.current_spell_idx += 1
         self.current_spell = None
         restore_sprite = getattr(self, "_spell_sprite_restore", None)
@@ -834,8 +886,6 @@ class Boss:
 
         # 龙符幻影龙：绘制在 Boss 本体之下
         self._draw_phantom_dragons(screen, offset_x, offset_y)
-        # 超符黄金魔法阵：绘制在 Boss 本体之下
-        self._draw_superior_circles(screen, offset_x, offset_y)
         # 石符：石柱结界与堡垒石环（绘制在 Boss 本体之下）
         self._draw_protector_effects(screen, offset_x, offset_y)
         # 展符：亡灵展品（绘制在 Boss 本体之下）
@@ -936,33 +986,6 @@ class Boss:
             y = py + math.sin(ang) * 30
             pygame.draw.circle(screen, _SUPER_GOLD, (int(x), int(y)), 2, 0)
 
-    def _draw_superior_circles(self, screen, offset_x=0, offset_y=0):
-        """超符黄金魔法阵：双环 + 旋转辐条 + 阵眼符文（纯视觉，无判定）"""
-        if not self.superior_circles:
-            return
-        for c in self.superior_circles:
-            fade = min(1.0, c["life"] / 45.0)
-            k = 0.30 + 0.70 * fade
-            gold = tuple(int(ch * k) for ch in _SUPER_GOLD)
-            gold_dim = tuple(int(ch * k * 0.8) for ch in _SUPER_GOLD_DIM)
-            cx = int(c["x"] + offset_x)
-            cy = int(c["y"] + offset_y)
-            r = c["radius"]
-            a = c["angle"]
-            pygame.draw.circle(screen, gold_dim, (cx, cy), r, 2)
-            pygame.draw.circle(screen, gold, (cx, cy), int(r * 0.72), 1)
-            for i in range(8):
-                ang = a + i * math.tau / 8
-                x0 = cx + math.cos(ang) * r * 0.72
-                y0 = cy + math.sin(ang) * r * 0.72
-                x1 = cx + math.cos(ang) * r
-                y1 = cy + math.sin(ang) * r
-                pygame.draw.line(screen, gold_dim, (int(x0), int(y0)), (int(x1), int(y1)), 1)
-            for i in range(4):
-                ang = a + i * math.pi / 2 + math.pi / 4
-                x = cx + math.cos(ang) * r * 0.86
-                y = cy + math.sin(ang) * r * 0.86
-                pygame.draw.circle(screen, gold, (int(x), int(y)), 3, 0)
     def _draw_protector_effects(self, screen, offset_x=0, offset_y=0):
         """石符：固定石柱结界 + 堡垒石环 + 震荡冲击环（纯视觉，无判定）"""
         # 固定石柱结界
@@ -1927,81 +1950,145 @@ def spell_tarantula_tornado(boss, bullet_manager, timer, dt, player_x=0, player_
                 }
                 bullet_manager.add_enemy_bullet(b)
 
+
+# --- 魂符「Dark Queen's Soul」：逐颗成型后依次飞出的扇形弹 ---
+_DQ_SOUL_FAN_PERIOD = 180
+_DQ_SOUL_FAN_COUNT = 11
+_DQ_SOUL_FAN_STEP = 0.14
+_DQ_SOUL_FAN_RADIUS = 44
+_DQ_SOUL_FAN_FORM_INTERVAL = 3
+_DQ_SOUL_FAN_LAUNCH_INTERVAL = 1
+_DQ_SOUL_FAN_SPEED = 3.0
+_DQ_SOUL_FAN_LIFETIME = 420
+_DQ_SOUL_RING_COUNT = 24
+_DQ_SOUL_RING_RADIUS = 48
+
+
+def _make_dark_queen_fan_state(base_angle):
+    """登记一面待成型扇形弹：先逐颗出现，全部成型后按 1 帧间隔依次飞出。"""
+    return {
+        "angles": [
+            base_angle + (i - (_DQ_SOUL_FAN_COUNT - 1) / 2) * _DQ_SOUL_FAN_STEP
+            for i in range(_DQ_SOUL_FAN_COUNT)
+        ],
+        "index": 0,
+        "form_timer": 1,
+        "bullets": [],
+        "launch_index": 0,
+        "launch_timer": 0,
+        "launch_interval": _DQ_SOUL_FAN_LAUNCH_INTERVAL,
+    }
+
+
+def _update_dark_queen_fan(boss, bullet_manager):
+    """推进所有扇形弹：无判定成型，成型完成后逐枚激活并沿扇角飞出。"""
+    states = boss.__dict__.setdefault("_dark_queen_fan_states", [])
+    for state in states[:]:
+        if state["index"] < len(state["angles"]):
+            state["form_timer"] -= 1
+            if state["form_timer"] > 0:
+                continue
+            idx = state["index"]
+            ang = state["angles"][idx]
+            if idx % 2 == 0:
+                ball = create_bullet_angle(
+                    boss.x + math.cos(ang) * _DQ_SOUL_FAN_RADIUS,
+                    boss.y + math.sin(ang) * _DQ_SOUL_FAN_RADIUS,
+                    ang, 0.0,
+                    Bullet.TYPE_RICE, radius=2.4, color=cfg.COLOR_PURPLE)
+            else:
+                ball = create_bullet_angle(
+                    boss.x + math.cos(ang) * _DQ_SOUL_FAN_RADIUS,
+                    boss.y + math.sin(ang) * _DQ_SOUL_FAN_RADIUS,
+                    ang, 0.0,
+                    Bullet.TYPE_RICE, radius=2.4, color=(150, 60, 230))
+                ball.sprite_slot = "g01_00"
+            ball.manager = bullet_manager
+            ball.harmless = True
+            ball.angle = ang
+            ball.lifetime = 9000
+            bullet_manager.add_enemy_bullet(ball)
+            state["bullets"].append(ball)
+            state["index"] += 1
+            state["form_timer"] = _DQ_SOUL_FAN_FORM_INTERVAL
+        elif state["launch_index"] < len(state["angles"]):
+            state["launch_timer"] -= 1
+            if state["launch_timer"] > 0:
+                continue
+            idx = state["launch_index"]
+            ball = state["bullets"][idx]
+            if ball.alive:
+                ang = state["angles"][idx]
+                ball.harmless = False
+                ball.vx = math.cos(ang) * _DQ_SOUL_FAN_SPEED
+                ball.vy = math.sin(ang) * _DQ_SOUL_FAN_SPEED
+                ball.angle = ang
+                ball.base_speed = _DQ_SOUL_FAN_SPEED
+                ball.lifetime = ball.age + _DQ_SOUL_FAN_LIFETIME
+            state["launch_index"] += 1
+            state["launch_timer"] = state["launch_interval"]
+        else:
+            states.remove(state)
+
+
 def spell_dark_queen_soul(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
-    """魂符「Dark Queen's Soul」：追魂（魂环+追魂大玉）→ 魂飞魄散（分裂刀弹雨+飘魂）"""
-    if timer < 360:
-        # 阶段1「追魂」：魂环绕体公转外扩；追魂大玉有限转向追踪并逐渐加速
-        if timer % 80 == 0:
-            for i in range(8):
-                angle = i * math.pi * 2 / 8 + timer * 0.03
-                b = create_bullet_angle(boss.x, boss.y, angle, 0.0,
-                                        Bullet.TYPE_BIG, radius=5,
-                                        color=cfg.COLOR_PURPLE if i % 2 == 0 else cfg.COLOR_RED)
-                b.manager = bullet_manager
-                b.orbit_center = (boss.x, boss.y)
-                b.orbit_radius = 30
-                b.orbit_angle = angle
-                b.orbit_speed = 0.06
-                b.orbit_grow = 0.6
-                b.orbit_break = 150
-                b.orbit_break_speed = 2.0
-                b.lifetime = 700
-                bullet_manager.add_enemy_bullet(b)
-        if timer % 30 == 0:
-            b = create_bullet_aimed(boss.x, boss.y, player_x, player_y, 1.7,
+    """魂符「Dark Queen's Soul」：直接进入魂飞魄散，附加逐颗成型后依次飞出的扇形弹"""
+    fans = boss.__dict__.setdefault("_dark_queen_fan_states", [])
+    if timer == 1:
+        fans.clear()
+    if timer % _DQ_SOUL_FAN_PERIOD == 1:
+        base = math.atan2(player_y - boss.y, player_x - boss.x)
+        fans.append(_make_dark_queen_fan_state(base))
+    _update_dark_queen_fan(boss, bullet_manager)
+
+    # 魂飞魄散：24颗紫色大玉绕Boss一圈生成，急停后分裂出紫色米弹；紫色鳞弹飘魂游荡全场
+    if timer % 80 == 0:
+        for i in range(_DQ_SOUL_RING_COUNT):
+            angle = i * math.tau / _DQ_SOUL_RING_COUNT
+            b = create_bullet_angle(
+                boss.x + math.cos(angle) * _DQ_SOUL_RING_RADIUS,
+                boss.y + math.sin(angle) * _DQ_SOUL_RING_RADIUS,
+                angle, 2.7,
+                Bullet.TYPE_BIG, radius=5, color=(150, 60, 230))
+            b.manager = bullet_manager
+            b.brake = 0.03
+            b.split_spec = {
+                "timer": 90,
+                "aimed": True,
+                "count": 6,
+                "spread": 0.32,
+                "speed": 3.1,
+                "type": Bullet.TYPE_RICE,
+                "radius": 2.3,
+                "color": cfg.COLOR_PURPLE,
+            }
+            bullet_manager.add_enemy_bullet(b)
+    if timer % 9 == 0:
+        angle = random.uniform(0, math.pi * 2)
+        b = create_bullet_angle(boss.x, boss.y, angle, random.uniform(1.3, 2.0),
+                                Bullet.TYPE_RICE, radius=2.2, color=(150, 60, 230))
+        b.sprite_slot = "g01_00"
+        b.manager = bullet_manager
+        b.wobble_amp = 3.0
+        b.wobble_freq = 0.18
+        b.wobble_phase = random.uniform(0, math.pi * 2)
+        b.lifetime = 320
+        bullet_manager.add_enemy_bullet(b)
+    if timer % 120 == 0:
+        for i in range(6):
+            angle = i * math.pi * 2 / 6 + timer * 0.04
+            b = create_bullet_angle(boss.x, boss.y, angle, 0.0,
                                     Bullet.TYPE_BIG, radius=5, color=(150, 60, 230))
             b.manager = bullet_manager
-            b.steer_speed = 0.022
-            b.accel = 0.009
-            b.lifetime = 420
+            b.orbit_center = (boss.x, boss.y)
+            b.orbit_radius = 26
+            b.orbit_angle = angle
+            b.orbit_speed = 0.06
+            b.orbit_grow = 0.55
+            b.orbit_break = 140
+            b.orbit_break_speed = 1.8
+            b.lifetime = 600
             bullet_manager.add_enemy_bullet(b)
-    else:
-        # 阶段2「魂飞魄散」：大玉急停后分裂出追身刀弹；白色飘魂游荡全场
-        if timer % 80 == 0:
-            base = math.atan2(player_y - boss.y, player_x - boss.x)
-            for i in range(6):
-                angle = base + (i - 2.5) * 0.22
-                b = create_bullet_angle(boss.x, boss.y, angle, 2.7,
-                                        Bullet.TYPE_BIG, radius=5, color=(150, 60, 230))
-                b.manager = bullet_manager
-                b.brake = 0.03
-                b.split_spec = {
-                    "timer": 90,
-                    "aimed": True,
-                    "count": 6,
-                    "spread": 0.32,
-                    "speed": 3.1,
-                    "type": Bullet.TYPE_KNIFE,
-                    "radius": 2.5,
-                    "color": cfg.COLOR_WHITE,
-                }
-                bullet_manager.add_enemy_bullet(b)
-        if timer % 9 == 0:
-            angle = random.uniform(0, math.pi * 2)
-            b = create_bullet_angle(boss.x, boss.y, angle, random.uniform(1.3, 2.0),
-                                    Bullet.TYPE_KNIFE, radius=2.0, color=cfg.COLOR_WHITE)
-            b.manager = bullet_manager
-            b.wobble_amp = 3.0
-            b.wobble_freq = 0.18
-            b.wobble_phase = random.uniform(0, math.pi * 2)
-            b.lifetime = 320
-            bullet_manager.add_enemy_bullet(b)
-        if timer % 120 == 0:
-            for i in range(6):
-                angle = i * math.pi * 2 / 6 + timer * 0.04
-                b = create_bullet_angle(boss.x, boss.y, angle, 0.0,
-                                        Bullet.TYPE_BIG, radius=5, color=(150, 60, 230))
-                b.manager = bullet_manager
-                b.orbit_center = (boss.x, boss.y)
-                b.orbit_radius = 26
-                b.orbit_angle = angle
-                b.orbit_speed = 0.06
-                b.orbit_grow = 0.55
-                b.orbit_break = 140
-                b.orbit_break_speed = 1.8
-                b.lifetime = 600
-                bullet_manager.add_enemy_bullet(b)
-
 
 # --- 第2面道中Boss：末地石守护者 ---
 # 石符「Immobile Protector's Wraith」：参考末地素材（末地石 / 末影珍珠 / 召唤之眼 / 紫晶 / 黑曜石柱）
@@ -2187,15 +2274,16 @@ def spell_immobile_protector_wraith(boss, bullet_manager, timer, dt, player_x=0,
         bullet_manager.add_enemy_bullet(b)
 
 # --- 二面关底Boss：末影龙 Ender Dragon ---
-# 燃符「Fireball Barrage」/ 闪符「Non-Directional Lightning」/ 龙符「One with the Dragons」
+# 燃符「Fireball Barrage」/ 电光「Directional Lightning」/ 龙符「One with the Dragons」
 # Last Spell：超符「Superiority」（Bomb 禁用、Miss 强制结束不损残机）
 
 _DRAGON_FIRE = (255, 140, 48)        # 龙息火焰
 _DRAGON_FIRE_HOT = (255, 92, 28)     # 炽热火焰
 _DRAGON_FIRE_PALE = (255, 214, 120)  # 苍白火焰
-_LIGHT_WARN = (150, 200, 255)        # 预警淡蓝
-_LIGHT_BOLT = (214, 238, 255)        # 闪电白
-_LIGHT_CYAN = (140, 206, 255)        # 电弧青
+_LIGHT_GOLD = (255, 214, 84)         # 麟弹螺旋金
+_LIGHT_WARN = (255, 216, 88)         # 关节节点黄
+_LIGHT_NODE_FILL = (255, 250, 210)   # 关节节点白芯
+_LIGHT_CYAN = (140, 206, 255)        # 末影珍珠青（非符 2 使用）
 _DRAGON_PURPLE = (176, 108, 240)     # 龙魂紫
 _DRAGON_DEEP = (128, 64, 200)        # 深紫
 _DRAGON_PALE = (232, 200, 255)       # 龙辉淡紫
@@ -2203,6 +2291,19 @@ _TEAL_DRAGON = (96, 216, 208)        # 末影珍珠青
 _SUPER_GOLD = (255, 220, 120)        # 上位龙金
 _SUPER_GOLD_DIM = (255, 186, 72)     # 暗金
 _SUPER_WHITE = (255, 252, 230)       # 审判白
+_SUPER_SPIRAL_INTERVAL = 6           # 双螺旋每轮发射间隔（帧）
+_SUPER_BIG_INTERVAL = _SUPER_SPIRAL_INTERVAL * 2  # 大玉频率减半（总数量减半）
+_SUPER_SPIRAL_RATE = 0.085           # 发射角每帧旋转量（弧度/帧）
+_SUPER_BIG_SPIRAL_RATE = _SUPER_SPIRAL_RATE * 2  # 大玉发射角旋转量（小弹的 2 倍）
+_SUPER_FAST_ARMS = 8                 # 加速小弹臂数
+_SUPER_BIG_ARMS = 6                  # 减速大玉臂数
+_SUPER_FAST_SPEED = 2.0              # 小弹初速
+_SUPER_FAST_ACCEL = 0.010            # 小弹每帧加速度
+_SUPER_BIG_SPEED = 6.0               # 大玉初速
+_SUPER_BIG_BRAKE = 0.018             # 大玉每帧减速度
+_SUPER_BIG_BRAKE_FLOOR = 1.2         # 大玉减速后的保留速度（确保寿命内可抵达底部）
+_SUPER_BULLET_RADIUS = 2.6           # 小弹半径
+_SUPER_BIG_RADIUS = _SUPER_BULLET_RADIUS * 3.0  # 大玉为小弹的 3 倍（上一版 1.5 倍再翻倍）
 
 
 def _non_spell_dragon_breath(boss, bullet_manager, timer, player_x=0, player_y=0):
@@ -2384,133 +2485,217 @@ def spell_fireball_barrage(boss, bullet_manager, timer, dt, player_x=0, player_y
                 b.lifetime = 460
                 bullet_manager.add_enemy_bullet(b)
 
-def _lightning_wave_positions(rng, count):
-    """伪随机生成一拨雷击点：左右均衡 + 上下拉开，围成面积尽量大"""
-    sides = [0] * (count // 2) + [1] * (count - count // 2)
-    rng.shuffle(sides)
-    # 垂直锚点从底部到顶部均匀铺开，让雷击点围成的多边形尽量外扩
-    anchors = [640.0 - (640.0 - 170.0) * (i / max(1, count - 1)) for i in range(count)]
-    rng.shuffle(anchors)
-    pts = []
-    for side, ay in zip(sides, anchors):
-        if side == 0:
-            x = rng.uniform(70, 200)
-        else:
-            x = rng.uniform(cfg.BATTLE_AREA_WIDTH - 200, cfg.BATTLE_AREA_WIDTH - 70)
-        y = ay + rng.uniform(-25, 25)
-        pts.append((x, y))
-    return pts
+
+def _add_gagouji_scale(bullet_manager, x, y, angle, lifetime=9000):
+    """在 (x, y) 放置一颗沿 angle 方向的金色麟弹。"""
+    bullet = create_bullet_angle(x, y, angle, 0.0,
+                                 Bullet.TYPE_RICE, radius=2.5,
+                                 color=_LIGHT_GOLD)
+    bullet.manager = bullet_manager
+    bullet.sprite_slot = "g01_00"
+    bullet.angle = angle
+    bullet.lifetime = lifetime
+    bullet.ignore_offscreen = True
+    bullet_manager.add_enemy_bullet(bullet)
+    return bullet
 
 
-def _lightning_node_marker(bullet_manager, x, y, lifetime):
-    """雷击点圆形提示：作为电网节点的期间持续显示"""
-    b = create_bullet_angle(x, y, 0, 0, Bullet.TYPE_CIRCLE, radius=6, color=_LIGHT_WARN)
-    b.manager = bullet_manager
-    b.harmless = True
-    b.lifetime = lifetime
-    bullet_manager.add_enemy_bullet(b)
-    b2 = create_bullet_angle(x, y, 0, 0, Bullet.TYPE_CIRCLE, radius=2.5, color=_LIGHT_BOLT)
-    b2.manager = bullet_manager
-    b2.harmless = True
-    b2.lifetime = lifetime
-    bullet_manager.add_enemy_bullet(b2)
+def _gagouji_node(bullet_manager, x, y, lifetime=9000, harmless=True):
+    """独立黄色圆球：不与鳞弹折线共用坐标，也不作拐点。"""
+    node = create_bullet_angle(x, y, 0, 0,
+                               Bullet.TYPE_CIRCLE, radius=3.4,
+                               color=_LIGHT_WARN)
+    node.manager = bullet_manager
+    node.fill_color = _LIGHT_NODE_FILL
+    node.harmless = harmless
+    node.lifetime = lifetime
+    bullet_manager.add_enemy_bullet(node)
 
 
-def _lightning_segment(bullet_manager, x0, y0, x1, y1):
-    """两点之间的电流连接线：一条光束线 + 沿线稀疏圆点（判定节点）"""
+def _gagouji_ring_state(radius, count, start_angle, color):
+    """登记一圈待生成的圆弹：先逐颗出现，整圈完成后才向外发射。"""
+    return {
+        "radius": radius,
+        "count": count,
+        "start_angle": start_angle,
+        "color": color,
+        "angles": [start_angle + i * math.tau / count
+                   for i in range(count)],
+        "index": 0,
+        "bullets": [],
+    }
+
+
+def _update_gagouji_rings(boss, bullet_manager, cx, cy,
+                          speed=1.35, lifetime=420):
+    """逐帧生成圆弹；一圈全部生成后整圈沿半径方向向外发射。"""
+    for state in boss.gagouji_forming_rings[:]:
+        if state["index"] < state["count"]:
+            idx = state["index"]
+            ang = state["angles"][idx]
+            ball = create_bullet_angle(
+                cx + math.cos(ang) * state["radius"],
+                cy + math.sin(ang) * state["radius"],
+                ang, 0.0,
+                Bullet.TYPE_CIRCLE, radius=3.0, color=state["color"])
+            ball.manager = bullet_manager
+            ball.harmless = True
+            ball.lifetime = 9000
+            bullet_manager.add_enemy_bullet(ball)
+            state["bullets"].append(ball)
+            state["index"] += 1
+
+        if state["index"] >= state["count"]:
+            for ball, ang in zip(state["bullets"], state["angles"]):
+                if ball.alive:
+                    ball.harmless = False
+                    ball.vx = math.cos(ang) * speed
+                    ball.vy = math.sin(ang) * speed
+                    ball.angle = ang
+                    ball.lifetime = ball.age + lifetime
+            boss.gagouji_forming_rings.remove(state)
+
+
+def _gagouji_scale_chain(bullet_manager, x0, y0, x1, y1, gap=13.0,
+                         rotate_center=None):
+    """沿一段直链铺麟弹；返回可整体旋转的麟弹列表。"""
     dx = x1 - x0
     dy = y1 - y0
     dist = math.hypot(dx, dy)
-    if dist < 24:
-        return
-    ang = math.atan2(dy, dx)
-    # 光束线：从起点到终点的一条直线（视觉连接）
-    beam = create_bullet_angle(x0, y0, ang, 0.0,
-                               Bullet.TYPE_BEAM, radius=3, color=_LIGHT_CYAN)
-    beam.manager = bullet_manager
-    beam.angle = ang          # 静止弹的 angle 不会由速度初始化，手动指定
-    beam.beam_length = dist
-    beam.sprite_slot = "s12"  # 雷击射线：etama.png 第一行「射线」图案（浅蓝，白芯保留）
-    beam.lifetime = 90    # 电网短暂存续后消散，留出安全间隙
-    bullet_manager.add_enemy_bullet(beam)
-    # 沿线稀疏圆点：判定点 + 网格节点感
-    step = 62
-    n = max(1, int(dist / step))
-    for i in range(1, n):
-        t = i / float(n)
-        b = create_bullet_angle(x0 + dx * t, y0 + dy * t, 0.0, 0.0,
-                                Bullet.TYPE_CIRCLE, radius=2.5,
-                                color=_LIGHT_BOLT)
-        b.manager = bullet_manager
-        b.lifetime = 90
-        bullet_manager.add_enemy_bullet(b)
+    if dist < 2.0:
+        return []
+    angle = math.atan2(dy, dx)
+    steps = max(3, int(dist / gap))
+    bullets = []
+    for i in range(1, steps + 1):
+        t = i / float(steps)
+        b = _add_gagouji_scale(bullet_manager,
+                               x0 + dx * t, y0 + dy * t, angle)
+        if rotate_center is not None:
+            cx, cy = rotate_center
+            b.gagouji_base_angle = math.atan2(b.y - cy, b.x - cx)
+            b.gagouji_radius = math.hypot(b.x - cx, b.y - cy)
+            b.gagouji_sprite_offset = b.angle - b.gagouji_base_angle
+            bullets.append(b)
+    return bullets
 
 
-def spell_non_directional_lightning(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
-    """闪符「Non-Directional Lightning」：预警落雷 + 环形电弧 + 电流网格封锁
+def _gagouji_zigzag_segments(cx, cy, phase):
+    """返回一条规律折角臂的每段端点：固定段长、固定转角、方向一致。"""
+    ring_rx = 96.0
+    ring_ry = 88.0
+    px = cx + math.cos(phase) * ring_rx
+    py = cy + math.sin(phase) * ring_ry
 
-    每 120 帧一轮雷击波次（雷击点数量随轮次递增）：
-      1) 预警：在场地内标定多个雷击预兆点（大圆标记 + 前摇脉冲闪烁）；
-      2) 落雷：预兆点产生双层环形扩散电弧（分裂刀弹更大、更少、更慢）；
-      3) 电网：本波所有雷击点两两相连，覆盖大半场地；落点用完即弃、
-         不再跨波复用，电网随波次消散留出安全间隙。
-    同一轮内「预警标记」与「落雷坐标」由同一随机种子生成，保证预兆与落点一致。
+    side = 1.0
+    bend = 0.70
+    curl = 0.16
+    length = 50.0
+    length_growth = 1.10
+    steps = 8
+    segments = []
+
+    for step in range(steps):
+        turn_sign = side if step % 2 == 0 else -side
+        direction = phase + turn_sign * bend + curl * step
+        nx = px + math.cos(direction) * length
+        ny = py + math.sin(direction) * length
+        segments.append((px, py, nx, ny))
+        px, py = nx, ny
+        length *= length_growth
+    return segments
+
+
+def _gagouji_zigzag_arm(bullet_manager, cx, cy, phase, rotate_center=None):
+    """生成一条规律折角臂：固定段长、固定转角、方向一致。"""
+    bullets = []
+    for x0, y0, x1, y1 in _gagouji_zigzag_segments(cx, cy, phase):
+        bullets.extend(_gagouji_scale_chain(
+            bullet_manager, x0, y0, x1, y1,
+            rotate_center=rotate_center))
+    return bullets
+
+
+def spell_gagouji_cyclone(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
+    """电光「Directional Lightning」：规律麟弹折线 + 独立黄球环。
+
+    十五臂全部由 g01_00 麟弹铺成；中心球环与四圈独立圆弹层只按几何
+    均匀摆放，不参与任何折线坐标。折线每帧生成一节，全部完成后阵列
+    才开始缓慢旋转；圆弹环先逐颗生成，整圈完成后才向外发射。
     """
-    react_t = max(0, timer - 60)   # 开场 60 帧缓冲：符卡开始后先给反应时间再落雷
-    cycle = react_t % 720
-    wave = cycle // 120            # 本轮内波次序号
-    local = cycle % 120
-    wave_no = react_t // 120       # 全局波次（决定雷击密度）
+    cx = cfg.BATTLE_AREA_WIDTH / 2
+    cy = 180.0
+    boss.target_x = cx
+    boss.target_y = 145
 
-    # 末影龙悬浮游走，释放能量
-    boss.target_y = 90 + math.sin(timer * 0.013) * 12
-    if timer % 200 == 0:
-        boss.target_x = random.uniform(100, cfg.BATTLE_AREA_WIDTH - 100)
+    rings = (
+        (88.0, 18, 0.00, _LIGHT_WARN),
+        (126.0, 24, 0.13, _LIGHT_GOLD),
+        (164.0, 30, 0.27, _LIGHT_WARN),
+        (202.0, 36, 0.41, _LIGHT_GOLD),
+    )
 
-    # 本波雷击点（确定性种子：预警与落雷使用同一坐标）
-    strike_count = 2 + min(3, wave_no // 2)   # 电球最多 5 个：2、2、3、3、4、4、5、5、5...
-    rng = random.Random(7000 + wave_no)
-    positions = _lightning_wave_positions(rng, strike_count)
+    if timer == 1:
+        boss.gagouji_spiral_center = (cx, cy)
+        boss.gagouji_spin = 0.0
+        boss.gagouji_spiral_bullets = []
+        boss.gagouji_spiral_pending = []
+        boss.gagouji_spiral_complete = False
+        boss.gagouji_forming_rings = []
 
-    if local == 12:
-        # ---- 预警：标定雷击预兆点（大圆标记 + 前摇闪烁）----
-        for (x, y) in positions:
-            # 圆形提示点：作为网格节点一直显示到本波电网消散
-            _lightning_node_marker(bullet_manager, x, y, 156)
-    elif 16 <= local < 72 and local % 8 == 4:
-        # ---- 前摇闪烁：落雷前反复脉冲提示 ----
-        for (x, y) in positions:
-            p = create_bullet_angle(x, y, 0, 0, Bullet.TYPE_CIRCLE, radius=7.5,
-                                    color=_LIGHT_WARN)
-            p.manager = bullet_manager
-            p.harmless = True
-            p.lifetime = 6
-            bullet_manager.add_enemy_bullet(p)
-    elif local == 72:
-        # ---- 落雷：落点环形扩散电弧 ----
-        for (x, y) in positions:
-            # 落点环形电弧：双层固定扩散
-            for ring_i, (n, spd, col) in enumerate(((5, 1.9, _LIGHT_BOLT), (3, 2.8, _LIGHT_CYAN))):
-                base = rng.uniform(0, math.tau)
-                for i in range(n):
-                    ang = base + i * math.tau / n
-                    b2 = create_bullet_angle(x, y, ang, spd,
-                                             Bullet.TYPE_RICE, radius=2.5, color=col)
-                    b2.manager = bullet_manager
-                    if i % 4 == 0:
-                        # 分裂刀弹：更大、更少、更慢，便于反应
-                        b2.split_spec = {"timer": 130, "base_angle": ang, "count": 2,
-                                         "spread": 0.30, "speed": 1.2,
-                                         "type": Bullet.TYPE_KNIFE, "radius": 3.0,
-                                         "color": _LIGHT_CYAN if ring_i == 0 else _LIGHT_BOLT}
-                    b2.lifetime = 300
-                    bullet_manager.add_enemy_bullet(b2)
-    elif local == 78:
-        # ---- 电网：本波所有雷击点两两相连，落点用完即弃、不再跨波复用 ----
-        for i in range(strike_count):
-            for j in range(i + 1, strike_count):
-                _lightning_segment(bullet_manager, positions[i][0], positions[i][1],
-                                   positions[j][0], positions[j][1])
+        ring_rx = 54.0
+        ring_ry = 50.0
+        for i in range(15):
+            ang = i * math.tau / 15
+            _gagouji_node(bullet_manager,
+                          cx + math.cos(ang) * ring_rx,
+                          cy + math.sin(ang) * ring_ry)
+
+        arm_segments = []
+        for arm in range(15):
+            phase = arm * math.tau / 15
+            arm_segments.append(_gagouji_zigzag_segments(cx, cy, phase))
+        for step in range(len(arm_segments[0])):
+            for segments in arm_segments:
+                boss.gagouji_spiral_pending.append(segments[step])
+
+        for radius, count, offset, color in rings:
+            boss.gagouji_forming_rings.append(
+                _gagouji_ring_state(radius, count, offset, color))
+    elif timer % 75 == 0:
+        ring_idx = (timer // 75 - 1) % len(rings)
+        radius, count, offset, color = rings[ring_idx]
+        boss.gagouji_forming_rings.append(
+            _gagouji_ring_state(
+                radius, count, offset + timer * 0.012, color))
+
+    _update_gagouji_rings(boss, bullet_manager, cx, cy)
+
+    segment_interval = 1  # 原每 3 帧一节，加快 3 倍后每帧生成一节
+    if not boss.gagouji_spiral_complete and timer % segment_interval == 0:
+        if boss.gagouji_spiral_pending:
+            x0, y0, x1, y1 = boss.gagouji_spiral_pending.pop(0)
+            boss.gagouji_spiral_bullets.extend(
+                _gagouji_scale_chain(
+                    bullet_manager, x0, y0, x1, y1,
+                    rotate_center=(cx, cy)))
+        if not boss.gagouji_spiral_pending:
+            boss.gagouji_spiral_complete = True
+
+    if boss.gagouji_spiral_complete:
+        spin = boss.gagouji_spin + 0.012 * 0.25 * (2.0 / 3.0)
+    else:
+        spin = boss.gagouji_spin
+    boss.gagouji_spin = spin
+    center = boss.gagouji_spiral_center or (cx, cy)
+    for bullet in boss.gagouji_spiral_bullets:
+        if not bullet.alive:
+            continue
+        angle = bullet.gagouji_base_angle + spin
+        bullet.x = center[0] + math.cos(angle) * bullet.gagouji_radius
+        bullet.y = center[1] + math.sin(angle) * bullet.gagouji_radius
+        bullet.angle = angle + bullet.gagouji_sprite_offset
+
 
 def _dragon_phantom_trajectories(boss, timer, count):
     """幻影龙固定轨迹：偶数序椭圆环绕本体，奇数序正弦横穿场地"""
@@ -2561,41 +2746,39 @@ def _phantom_wing_spread(bullet_manager, x, y, timer, color):
 
 
 def _phantom_scale_arc(bullet_manager, x, y, timer, color):
-    """鳞片状：多层错位短弧米弹，层层叠叠如龙鳞"""
+    """鳞片状：多层错位米弹，先缓慢外扩到位，再快速喷出，层层叠叠如龙鳞"""
     if timer % 70 == 0:
         for layer in range(2):
-            for i in range(4):
-                ang = timer * 0.045 + layer * 0.55 + i * math.tau / 4 + (layer % 2) * 0.18
-                b = create_bullet_angle(x, y, ang, 1.0 + layer * 0.28,
-                                        Bullet.TYPE_RICE, radius=2.2, color=color)
+            for i in range(8):
+                ang = timer * 0.045 + layer * 0.55 + i * math.tau / 8 + (layer % 2) * 0.18
+                b = create_bullet_angle(x, y, ang, 0.0,
+                                        Bullet.TYPE_RICE, radius=2.2, color=color,
+                                        lifetime=720)
                 b.manager = bullet_manager
-                b.lifetime = 300
+                b.orbit_center = (x, y)
+                b.orbit_radius = 4
+                b.orbit_angle = ang
+                b.orbit_speed = 0.0
+                b.orbit_grow = 0.7
+                b.orbit_break = 36
+                b.orbit_break_speed = 2.6
                 bullet_manager.add_enemy_bullet(b)
-
-
-def _phantom_breath(bullet_manager, x, y, player_x, player_y, timer, color):
-    """交错龙息：窄幅自机狙连喷，与相邻幻影错开时相"""
-    if timer % 55 == 0:
-        base = math.atan2(player_y - y, player_x - x)
-        for k in range(2):
-            b = create_bullet_angle(x, y, base + (k - 0.5) * 0.12, 2.3 + k * 0.12,
-                                    Bullet.TYPE_KNIFE, radius=2.4, color=color)
-            b.manager = bullet_manager
-            b.lifetime = 380
-            bullet_manager.add_enemy_bullet(b)
 
 
 def _dragon_main_ring(bullet_manager, boss, timer, color, speed=1.5, count=14):
     """本体旋转弹环：基角随计时缓慢旋转，逐环封堵"""
     if timer % 165 == 0:
         base = timer * 0.02
-        for i in range(count):
-            ang = base + i * math.tau / count
-            b = create_bullet_angle(boss.x, boss.y, ang, speed,
-                                    Bullet.TYPE_RICE, radius=2.4, color=color)
-            b.manager = bullet_manager
-            b.lifetime = 420
-            bullet_manager.add_enemy_bullet(b)
+        for volley in range(3):
+            base_v = base + volley * 0.08
+            speed_v = speed + volley * 0.05
+            for i in range(count):
+                ang = base_v + i * math.tau / count
+                b = create_bullet_angle(boss.x, boss.y, ang, speed_v,
+                                        Bullet.TYPE_RICE, radius=2.4, color=color)
+                b.manager = bullet_manager
+                b.lifetime = 720
+                bullet_manager.add_enemy_bullet(b)
 
 
 def spell_one_with_the_dragons(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
@@ -2605,8 +2788,8 @@ def spell_one_with_the_dragons(boss, bullet_manager, timer, dt, player_x=0, play
     持续释放龙翼扇形 / 鳞片短弧 / 交错龙息；本体与幻影龙同步以旋转弹环和
     大范围扩散弹封锁玩家空间，营造被龙之力量包围的压迫感。
     """
-    cycle = timer % 720
-    phase = cycle // 240
+    cycle = timer % 480
+    phase = 1 + cycle // 240
     count = min(4, 2 + timer // 340)
     phantoms = _dragon_phantom_trajectories(boss, timer, count)
     boss.phantom_dragons = phantoms
@@ -2623,250 +2806,79 @@ def spell_one_with_the_dragons(boss, bullet_manager, timer, dt, player_x=0, play
             _phantom_wing_spread(bullet_manager, x, y, timer + i * 13, color)
         elif phase == 1:
             _phantom_scale_arc(bullet_manager, x, y, timer + i * 17, color)
-            if (timer // 26 + i) % 2 == 0:
-                _phantom_breath(bullet_manager, x, y, player_x, player_y,
-                                timer + i * 9, _TEAL_DRAGON)
         else:
             _phantom_scale_arc(bullet_manager, x, y, timer + i * 17, color)
-            if (timer // 26 + i) % 2 == 0:
-                _phantom_breath(bullet_manager, x, y, player_x, player_y,
-                                timer + i * 9, _TEAL_DRAGON)
             if (timer + i * 41) % 150 == 0:
                 base = (timer * 0.03) % math.tau
-                for k in range(11):
-                    ang = base + k * math.tau / 11
-                    b = create_bullet_angle(x, y, ang, 1.25,
-                                            Bullet.TYPE_CIRCLE, radius=2.6, color=color)
-                    b.manager = bullet_manager
-                    b.lifetime = 360
-                    bullet_manager.add_enemy_bullet(b)
+                for volley in range(3):
+                    base_v = base + volley * 0.10
+                    speed_v = 1.25 + volley * 0.06
+                    for k in range(11):
+                        ang = base_v + k * math.tau / 11
+                        b = create_bullet_angle(x, y, ang, speed_v,
+                                                Bullet.TYPE_CIRCLE, radius=2.6, color=color)
+                        b.manager = bullet_manager
+                        b.lifetime = 720
+                        bullet_manager.add_enemy_bullet(b)
 
     # 本体攻击：随阶段逐步加密
     if phase == 0:
         _dragon_main_ring(bullet_manager, boss, timer, _DRAGON_DEEP, speed=1.25, count=7)
     elif phase == 1:
         _dragon_main_ring(bullet_manager, boss, timer, _DRAGON_PURPLE, speed=1.4, count=9)
-        if cycle % 105 == 0:
-            b = create_bullet_aimed(boss.x, boss.y, player_x, player_y, 2.0,
-                                    Bullet.TYPE_BIG, radius=4, color=_DRAGON_DEEP)
-            b.manager = bullet_manager
-            b.steer_speed = 0.010
-            b.lifetime = 420
-            bullet_manager.add_enemy_bullet(b)
     else:
         _dragon_main_ring(bullet_manager, boss, timer, _TEAL_DRAGON, speed=1.55, count=11)
         if cycle % 70 == 0:
             base = cycle * 0.05
-            for k in range(7):
-                ang = base + k * math.tau / 7
-                b = create_bullet_angle(boss.x, boss.y, ang, 1.8,
-                                        Bullet.TYPE_ARROW, radius=2.8,
-                                        color=_DRAGON_DEEP if k % 2 == 0 else _DRAGON_PALE)
-                b.manager = bullet_manager
-                b.lifetime = 400
-                bullet_manager.add_enemy_bullet(b)
+            for volley in range(3):
+                base_v = base + volley * 0.09
+                speed_v = 1.8 + volley * 0.05
+                for k in range(7):
+                    ang = base_v + k * math.tau / 7
+                    b = create_bullet_angle(boss.x, boss.y, ang, speed_v,
+                                            Bullet.TYPE_ARROW, radius=2.8,
+                                            color=_DRAGON_DEEP if k % 2 == 0 else _DRAGON_PALE)
+                    b.manager = bullet_manager
+                    b.lifetime = 720
+                    bullet_manager.add_enemy_bullet(b)
 
-
-
-def _superior_core_rings(bullet_manager, boss, timer, phase, wave, cycle_dir):
-    """金色龙之核心：环状固定弹——鳞片弹绕核心旋转，随推进换向/变速"""
-    if timer % 52 == 0:
-        n = min(16, 10 + wave)
-        ring_r = 44 + (timer // 44) % 3 * 15
-        base = timer * 0.018
-        rot_dir = 1.0 if cycle_dir == 0 else -1.0
-        # phase 2：旋转方向每隔几环反转，排列错位
-        if phase == 2 and (timer // 132) % 2 == 1:
-            rot_dir = -rot_dir
-        for i in range(n):
-            ang = base + i * math.tau / n + (0.5 if phase == 2 and i % 2 else 0.0)
-            b = create_bullet_angle(boss.x, boss.y, ang, 0.0,
-                                    Bullet.TYPE_RICE, radius=2.6,
-                                    color=_SUPER_GOLD if i % 2 == 0 else _SUPER_GOLD_DIM)
-            b.manager = bullet_manager
-            b.orbit_center = (boss.x, boss.y)
-            b.orbit_radius = ring_r
-            b.orbit_angle = ang
-            b.orbit_speed = 0.012 * rot_dir
-            b.lifetime = 460
-            bullet_manager.add_enemy_bullet(b)
-
-
-def _superior_sym_expand(bullet_manager, boss, timer, phase, wave, cycle_dir):
-    """对称展开弹：从核心对称外扩的鳞片环，挣脱后沿切线直飞"""
-    if timer % 150 == 0:
-        n = 8 if phase == 0 else 12
-        base = timer * 0.028 * (1.0 if cycle_dir == 0 else -1.0)
-        for i in range(n):
-            ang = base + i * math.tau / n
-            b = create_bullet_angle(boss.x, boss.y, ang, 0.0,
-                                    Bullet.TYPE_KNIFE, radius=2.8,
-                                    color=_SUPER_WHITE if i % 2 == 0 else _SUPER_GOLD)
-            b.manager = bullet_manager
-            b.orbit_center = (boss.x, boss.y)
-            b.orbit_radius = 22
-            b.orbit_angle = ang
-            b.orbit_grow = 0.95
-            b.orbit_break = 130
-            b.orbit_break_speed = 2.1 + min(1.2, wave * 0.06)
-            b.lifetime = 460
-            bullet_manager.add_enemy_bullet(b)
-
-
-def _superior_spawn_circles(boss, timer):
-    """周期性生成巨大的黄金魔法阵（登记到 boss.superior_circles，由绘制/喷射驱动）"""
-    if timer < 240:
-        return
-    period = 300 if timer < 480 else 230
-    if timer % period != 0:
-        return
-    anchors = [
-        (150, 140),
-        (cfg.BATTLE_AREA_WIDTH - 150, 140),
-        (150, cfg.BATTLE_AREA_HEIGHT - 160),
-        (cfg.BATTLE_AREA_WIDTH - 150, cfg.BATTLE_AREA_HEIGHT - 160),
-    ]
-    available = [p for p in anchors
-                 if all(math.hypot(p[0] - c["x"], p[1] - c["y"]) > 260
-                        for c in boss.superior_circles)]
-    count = 1 if timer < 480 else 2
-    for _ in range(count):
-        if not available:
-            break
-        x, y = available.pop(random.randrange(len(available)))
-        boss.superior_circles.append({
-            "x": x, "y": y,
-            "radius": 88 if timer >= 480 else 76,
-            "angle": random.uniform(0.0, math.tau),
-            "rot": 0.020 if len(boss.superior_circles) % 2 == 0 else -0.020,
-            "life": period,
-            "max_life": period,
-        })
-
-
-def _superior_circle_spray(bullet_manager, boss, timer, phase):
-    """黄金魔法阵：绕阵缘旋转并向外喷射排列整齐的金色鳞片弹"""
-    for c in boss.superior_circles[:]:
-        c["life"] -= 1
-        c["angle"] += c["rot"]
-        if c["life"] <= 0:
-            boss.superior_circles.remove(c)
-            continue
-        if c["max_life"] - c["life"] < 30:
-            continue   # 成形期
-        if timer % 30 == 0:
-            for i in range(8):
-                ang = c["angle"] + i * math.tau / 10
-                x = c["x"] + math.cos(ang) * c["radius"]
-                y = c["y"] + math.sin(ang) * c["radius"]
-                b = create_bullet_angle(x, y, ang, 2.3,
-                                        Bullet.TYPE_RICE, radius=2.4,
-                                        color=_SUPER_GOLD if i % 2 == 0 else _SUPER_GOLD_DIM)
-                b.manager = bullet_manager
-                b.lifetime = 240
-                bullet_manager.add_enemy_bullet(b)
-
-
-def _superior_wing_beams(bullet_manager, boss, timer, phase):
-    """龙翼形光束：左右双翼 + 顶角龙角成对展开，将弹幕空间切割成多个区域并缓慢扫掠"""
-    if phase == 0:
-        return
-    period = 150 if phase == 1 else 112
-    if timer % period != 0:
-        return
-    rot = timer * 0.012
-    cx, cy = boss.x, boss.y
-    beams = []
-    # 左右双翼：从核心两侧展开的 V 形光束
-    for side in (-1.0, 1.0):
-        base = math.pi / 2 + side * 0.52 + rot * 0.25 * side
-        for k in (-1.0, 1.0):
-            a = base + k * 0.30
-            beams.append((cx + side * 42, cy, a, 780))
-    # 顶角：向上展开的两条「龙角」光束
-    for k in (-1.0, 1.0):
-        a = -math.pi / 2 + k * 0.55 + rot * 0.3
-        beams.append((cx, cy, a, 620))
-    for bx, by, a, ln in beams:
-        b = create_bullet_angle(bx, by, a, 0.0, Bullet.TYPE_BEAM, radius=3,
-                                color=_SUPER_GOLD)
-        b.manager = bullet_manager
-        b.angle = a
-        b.beam_length = ln
-        b.lifetime = period - 18
-        # 沿光束垂直方向缓慢平移，像龙翼展开扫过战场
-        b.vx = math.cos(a + math.pi / 2) * 0.45
-        b.vy = math.sin(a + math.pi / 2) * 0.45
-        bullet_manager.add_enemy_bullet(b)
-
-
-def _superior_scale_storm(bullet_manager, boss, timer, phase, wave):
-    """黄金龙鳞风暴（终幕）：全场高密度对称鳞片弹，旋转方向与排列不断变化"""
-    if phase < 2:
-        return
-    if timer % 42 == 0:
-        n = 18 + wave % 3 * 2
-        dir_sign = 1.0 if (timer // 36) % 2 == 0 else -1.0
-        base = timer * 0.05 * dir_sign
-        for i in range(n):
-            ang = base + i * math.tau / n
-            b = create_bullet_angle(boss.x, boss.y, ang, 0.0,
-                                    Bullet.TYPE_RICE, radius=2.4,
-                                    color=_SUPER_GOLD if i % 3 else _SUPER_WHITE)
-            b.manager = bullet_manager
-            b.orbit_center = (boss.x, boss.y)
-            b.orbit_radius = 16
-            b.orbit_angle = ang
-            b.orbit_speed = 0.055 * dir_sign
-            b.orbit_grow = 1.25
-            b.orbit_break = 190
-            b.orbit_break_speed = 2.5
-            b.lifetime = 480
-            bullet_manager.add_enemy_bullet(b)
-    # 左右对称的快速鳞片墙：从两侧相向扫过
-    if timer % 60 == 0:
-        for side in (-1.0, 1.0):
-            x0 = cfg.BATTLE_AREA_WIDTH + 40 if side > 0 else -40
-            y0 = random.uniform(60, cfg.BATTLE_AREA_HEIGHT - 60)
-            b = create_bullet_angle(x0, y0, math.pi if side > 0 else 0.0, 0.0,
-                                    Bullet.TYPE_BEAM, radius=3, color=_SUPER_GOLD_DIM)
-            b.manager = bullet_manager
-            b.angle = math.pi if side > 0 else 0.0
-            b.beam_length = 560
-            b.vx = -side * 0.9
-            b.lifetime = 300
-            bullet_manager.add_enemy_bullet(b)
 
 
 def spell_superiority(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
-    """超符「Superiority」(Last Spell)：黄金领域·龙鳞风暴
+    """超符「Superiority」(Last Spell)：正反双螺旋
 
-    末影龙展开黄金领域，将自身化为金色龙之核心：持续释放以龙鳞为形态的
-    环状固定弹；场地周期性生成巨大的黄金魔法阵，沿固定方向旋转并向外喷射
-    排列整齐的金色鳞片弹；龙翼形光束从不同方向展开，将弹幕空间切割成多个
-    区域。随符卡推进，黄金鳞片阵列不断改变旋转方向与排列方式，最终形成
-    覆盖全场的黄金龙鳞风暴。
+    末影龙固定在战场顶部中央不动，以持续旋转的发射角迅速打出两组直线弹幕：
+    正向八臂小弹沿固定方向飞行并逐步加速；反向三臂大玉沿相反方向旋转发射，
+    每两轮发射一次，数量减半；六臂大玉同样保持直线并逐步减速，尺寸为小弹的 3 倍。
     """
-    phase = 0 if timer < 240 else (1 if timer < 480 else 2)
-    wave = timer // 240
-    cycle_dir = (timer // 360) % 2   # 每 6 秒反转一次主导旋转方向
+    # 固定在战场顶部中央，不移动
+    boss.move_to(cfg.BATTLE_AREA_WIDTH / 2, 112)
 
-    # 金色龙之核心：居中悬浮，仅轻微游走
-    boss.target_y = 118 + math.sin(timer * 0.010) * 6
-    if timer % 260 == 0:
-        boss.target_x = random.uniform(cfg.BATTLE_AREA_WIDTH * 0.40,
-                                       cfg.BATTLE_AREA_WIDTH * 0.60)
+    if timer % _SUPER_SPIRAL_INTERVAL == 0:
+        # 正向螺旋：小弹直线加速
+        base = timer * _SUPER_SPIRAL_RATE
+        for arm in range(_SUPER_FAST_ARMS):
+            angle = base + arm * math.tau / _SUPER_FAST_ARMS
+            b = create_bullet_angle(
+                boss.x, boss.y, angle, _SUPER_FAST_SPEED,
+                Bullet.TYPE_CIRCLE, radius=_SUPER_BULLET_RADIUS,
+                color=_SUPER_GOLD if arm % 2 == 0 else _SUPER_GOLD_DIM,
+                lifetime=420)
+            b.manager = bullet_manager
+            b.accel = _SUPER_FAST_ACCEL
+            bullet_manager.add_enemy_bullet(b)
 
-    # 环状固定弹 + 对称展开弹（核心）
-    _superior_core_rings(bullet_manager, boss, timer, phase, wave, cycle_dir)
-    _superior_sym_expand(bullet_manager, boss, timer, phase, wave, cycle_dir)
-
-    # 黄金魔法阵：生成 + 旋转 + 喷射鳞片弹
-    _superior_spawn_circles(boss, timer)
-    _superior_circle_spray(bullet_manager, boss, timer, phase)
-
-    # 龙翼形光束：区域封锁
-    _superior_wing_beams(bullet_manager, boss, timer, phase)
-
-    # 终幕：黄金龙鳞风暴
-    _superior_scale_storm(bullet_manager, boss, timer, phase, wave)
+    if timer % _SUPER_BIG_INTERVAL == 0:
+        # 反向螺旋：大玉直线减速，频率减半
+        reverse_base = -timer * _SUPER_BIG_SPIRAL_RATE + math.pi / 4
+        for arm in range(_SUPER_BIG_ARMS):
+            angle = reverse_base + arm * math.tau / _SUPER_BIG_ARMS
+            b = create_bullet_angle(
+                boss.x, boss.y, angle, _SUPER_BIG_SPEED,
+                Bullet.TYPE_BIG, radius=_SUPER_BIG_RADIUS,
+                color=_SUPER_WHITE,
+                lifetime=420)
+            b.manager = bullet_manager
+            b.brake = _SUPER_BIG_BRAKE
+            b.brake_floor = _SUPER_BIG_BRAKE_FLOOR
+            bullet_manager.add_enemy_bullet(b)
