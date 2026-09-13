@@ -557,15 +557,17 @@ class PracticeSelectState(GameState):
 # ---------------------------------------------------------------------------
 
 def launch_practice(game, entry, card_index):
-    """从练习选择进入单符卡练习。"""
-    from src.ui.menu import PlayingState
-    stage, boss = build_practice_boss(entry, card_index)
-    practice_stage = PracticeStage(stage, boss)
+    """从练习选择进入单符卡练习（先经载入界面预载该 Boss 的贴图）。"""
+    from src.ui.loading import start_stage
     info = {
         "entry": entry,
         "card_index": card_index,
         "card_name": entry["cards"][card_index]["name"],
         "last": entry["cards"][card_index]["last"],
     }
-    game.switch_state(PlayingState(game, practice_stage, skip_title=True,
-                                   practice_info=info))
+
+    def build():
+        stage, boss = build_practice_boss(entry, card_index)
+        return PracticeStage(stage, boss)
+
+    start_stage(game, build, setup=None, skip_title=True, practice_info=info)

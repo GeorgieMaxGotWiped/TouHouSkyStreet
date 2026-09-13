@@ -27,6 +27,23 @@ GAME_SPEED_MIN = 0.25
 GAME_SPEED_MAX = 2.0
 GAME_SPEED_STEP = 0.25
 
+# --- 显示：输出分辨率 / 缩放模式（实现见 src/engine/display.py）---
+# 选项均为内部逻辑分辨率 960x720 的整数倍：窗口模式下窗口取该尺寸，
+# 全屏（无边框）时窗口为显示器原生尺寸，由缩放模式决定画面铺多大。
+RESOLUTIONS = ((960, 720), (1920, 1440), (2880, 2160), (3840, 2880))
+RESOLUTION_LABELS = ("1x", "2x", "3x", "4x")
+DEFAULT_RESOLUTION_INDEX = 1
+# integer=整数倍（保持 4:3，可能留较大黑边）/ fill=等比填充（黑边最小，允许小数倍）
+SCALE_MODES = ("integer", "fill")
+SCALE_MODE_LABELS = {"integer": "整数倍", "fill": "填充"}
+DEFAULT_SCALE_MODE = "fill"
+DEFAULT_FULLSCREEN = False
+# 渲染倍率：分辨率无关的图层（伪3D 地面）按此倍率原生绘制，其余图层仍是
+# 1x 画布放大。需要 GPU 呈现可用；不可用时自动退回 1x。
+RENDER_SCALES = (1, 2, 3)
+RENDER_SCALE_LABELS = ("1x", "2x", "3x")
+DEFAULT_RENDER_SCALE_INDEX = 2
+
 if getattr(sys, 'frozen', False):
     CONFIG_DIR = os.path.dirname(sys.executable)
 else:
@@ -43,6 +60,10 @@ def load_user_config():
         "sfx_volume": DEFAULT_SFX_VOLUME,
         "game_speed": DEFAULT_GAME_SPEED,
         "boss_art": BOSS_ART_DEFAULT,
+        "resolution_index": DEFAULT_RESOLUTION_INDEX,
+        "scale_mode": DEFAULT_SCALE_MODE,
+        "fullscreen": DEFAULT_FULLSCREEN,
+        "render_scale_index": DEFAULT_RENDER_SCALE_INDEX,
     }
     try:
         if os.path.exists(CONFIG_PATH):
@@ -57,6 +78,16 @@ def load_user_config():
                                                                float(data["game_speed"])))
             if data.get("boss_art") in BOSS_ART_SETS:
                 config["boss_art"] = data["boss_art"]
+            index = data.get("resolution_index")
+            if isinstance(index, int) and 0 <= index < len(RESOLUTIONS):
+                config["resolution_index"] = index
+            if data.get("scale_mode") in SCALE_MODES:
+                config["scale_mode"] = data["scale_mode"]
+            if isinstance(data.get("fullscreen"), bool):
+                config["fullscreen"] = data["fullscreen"]
+            scale_index = data.get("render_scale_index")
+            if isinstance(scale_index, int) and 0 <= scale_index < len(RENDER_SCALES):
+                config["render_scale_index"] = scale_index
     except Exception as e:
         print(f"[Config] Failed to load {CONFIG_PATH}: {e}")
     return config
@@ -207,6 +238,33 @@ STAGE_BOSS_ART = {
         "goldor", "necron"),
     6: ("wither_king",),
 }
+
+# 各面会用到的符卡背景风格：关卡载入界面据此预热（开符那一帧原本要现算 12~100ms）
+STAGE_SPELL_BG = {
+    # 第 1 面两个 Boss 的符卡都没写死 bg_style（按符卡名推断）：
+    #   道中 罠符「Luxurious Spool」-> spool
+    #   关底 丝符「Soul String」/ 蛛符「Tarantula's Tornado」/ 魂符「Dark Queen's Soul」
+    #        -> thread / tornado / soul
+    # 漏了这张表的话，第 1 面（含 D+1 这类直接进道中 Boss 的隐藏快捷键：载入时
+    # 关底 Boss 还没生成）就等于一条都不预热，开符那帧要现算 12.4+5.4+5.6+5.6ms。
+    1: ("spool", "thread", "tornado", "soul"),
+    2: ("fire", "lightning", "stone", "dragon", "superiority"),
+    3: ("watcher", "bonzo", "undead"),
+    4: ("scarf", "sadan", "stone"),
+    5: ("watcher", "professor", "thorn", "livid", "maxor", "storm", "stone",
+        "goldor", "necron", "soul"),
+    6: ("kaeman_dominion", "kaeman_relics", "kaeman_withered_dragon",
+        "kaeman_slash", "kaeman_atomize", "kaeman_slumber"),
+}
+
+
+def stage_spell_bg_styles(stage_num):
+    """本关要预热的符卡背景风格（第 1 面没有显式 bg_style，按符卡名推断）"""
+    try:
+        return tuple(STAGE_SPELL_BG.get(int(stage_num), ()))
+    except (TypeError, ValueError):
+        return ()
+
 
 _boss_art_set = BOSS_ART_DEFAULT
 

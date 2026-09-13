@@ -48,7 +48,7 @@
 
 - Boss 立绘按套组存放在 `assets/sprites/bosses/<套组>/`：`new`（默认，新版立绘）、`another`（另一版立绘），`legacy` 为缺图时的兜底
 - 主菜单「设置 → Boss 立绘」可在两套之间切换（方向键 / 点击分段按钮），选择保存到 `config.json` 的 `boss_art`
-- `new` 套组为白底 PNG，载入时自动抠成透明背景并按内容裁剪（`src/engine/boss_art.py`），游戏内展示大小与旧立绘保持一致
+- 立绘统一为透明背景 PNG：`src/engine/boss_art.py` 只做载入与缓存（同一张图每个进程解码一次，关卡载入时后台预热）；白底或边缘带白框的图请先用离线脚本处理成透明 PNG 再放入
 
 ## 练习模式
 
@@ -66,7 +66,7 @@
 | 路径 | 说明 |
 | --- | --- |
 | `main.py` | 游戏入口 |
-| `src/` | 源码：`engine`（引擎/设置/字体/伪3D/符卡背景）、`entities`（玩家/敌人/Boss/子弹）、`stages`（关卡 1-6）、`systems`（物品/掉落/效果/仓库/C技能）、`ui`（菜单/HUD/对话/过场/Boss奖励/难度/SkyBlock风格UI/仓库） |
+| `src/` | 源码：`engine`（引擎/设置/字体/绘制与呈现/伪3D/符卡背景）、`entities`（玩家/敌人/Boss/子弹）、`stages`（关卡 1-6）、`systems`（物品/掉落/效果/仓库/C技能）、`ui`（菜单/HUD/对话/过场/Boss奖励/难度/SkyBlock风格UI/仓库） |
 | `assets/` | 资源：`backgrounds`（背景）、`sprites`（精灵/立绘套组）、`fonts`（字体）、`sounds`（音乐/音效/SE）、`gui`（Minecraft 风格 GUI 贴图）、`titles`（标题图） |
 | `tools/` | 开发辅助脚本；`archive/` 存放已使用完毕的一次性补丁脚本 |
 | `backup/` | 旧版源码备份 |

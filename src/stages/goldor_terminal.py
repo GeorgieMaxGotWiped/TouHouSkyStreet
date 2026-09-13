@@ -12,6 +12,7 @@ import random
 import pygame
 
 from src.engine import settings as cfg
+from src.engine import hires
 from src.entities.bullet import Bullet, create_bullet_angle
 
 # ---------------------------------------------------------------------------
@@ -1109,7 +1110,7 @@ def _gt_draw_foreground(screen, boss, ox, oy):
         hint_font = _get_font(14)
         ht = hint_font.render("接近终端自动破解：←→↑↓ 移动　Z 选择　ESC 放弃",
                               True, (205, 214, 235))
-        hl = pygame.Surface((ht.get_width() + 16, ht.get_height() + 6), pygame.SRCALPHA)
+        hl = hires.ui_panel(screen, (ht.get_width() + 16, ht.get_height() + 6))
         hl.fill((10, 12, 26, 170))
         screen.blit(hl, (ox + (cfg.BATTLE_AREA_WIDTH - hl.get_width()) // 2,
                          oy + cfg.BATTLE_AREA_HEIGHT - 30))
@@ -1121,7 +1122,7 @@ def _gt_draw_foreground(screen, boss, ox, oy):
         text, frames = state["banner"]
         font = _get_font(22)
         t = font.render(text, True, (255, 235, 140))
-        layer = pygame.Surface((t.get_width() + 24, t.get_height() + 12), pygame.SRCALPHA)
+        layer = hires.ui_panel(screen, (t.get_width() + 24, t.get_height() + 12))
         layer.fill((10, 12, 26, 210))
         screen.blit(layer, (ox + (cfg.BATTLE_AREA_WIDTH - layer.get_width()) // 2, oy + 120))
         screen.blit(t, (ox + (cfg.BATTLE_AREA_WIDTH - t.get_width()) // 2, oy + 126))

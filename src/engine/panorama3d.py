@@ -34,6 +34,17 @@ DEFAULT_FOV = 60.0           # 默认水平视场角（度）：越大看到的�
 DEFAULT_PROJECTION = "cylinder"  # "cylinder"=射线-圆柱求交（内视）/ "banner"=外贴圆柱
 DEFAULT_SPEED = 24.0         # 默认环绕速度（度/秒）
 CACHE_STEP = 1.0             # 静止缓存角度步长（度）：仅在 speed==0 时生效
+# 全景贴图缓存：加载 + 首尾接缝修复 + 垂直预缩放的成品（列竖条是它的零拷贝视图）。
+# 开符时重建一次要 30~35ms（主要是 PNG 解码），按纹理参数缓存后只付一次。
+_TEXTURE_CACHE_MAX = 8
+_texture_cache = {}
+# 地面层缓存：地面贴图的环绕接缝修复 + 逐列行映射表（每开一次符卡要重算约 9ms）。
+# 只缓存只读的静态数据，每帧被写入的 _floor_surf 仍按实例新建。
+_FLOOR_CACHE_MAX = 4
+_floor_cache = {}
+# 墙体贴图交界线检测缓存：按贴图路径缓存。每次开符都要重新解码贴图 + 逐行
+# 亮度扫描（约 5ms），而结果只取决于贴图本身。
+_junction_cache = {}
 CACHE_MAX = 4                # 帧缓存最多保留桶数（超出后清空重建）
 SEAM_BAND = 12               # 首尾接缝修复带宽度（px）；0 = 不修复
 X_UPSCALE = 1                # 水平超采样倍数（默认 1：不改动图片宽度）
@@ -46,6 +57,13 @@ FLOOR_SEAM_BAND = 10         # 地面贴图水平/垂直环绕接缝修复带宽
 def _smoothstep(u):
     u = max(0.0, min(1.0, u))
     return u * u * (3.0 - 2.0 * u)
+
+
+def _remember_floor(key, data):
+    """写入地面层缓存，超出上限丢掉最早的一条"""
+    _floor_cache[key] = data
+    while len(_floor_cache) > _FLOOR_CACHE_MAX:
+        _floor_cache.pop(next(iter(_floor_cache)))
 
 
 class CylinderPanorama:
@@ -96,7 +114,13 @@ class CylinderPanorama:
     # --- 初始化 ---
 
     def _build_texture(self, texture_path, v_top, v_bottom, x_upscale, seam_band):
-        """加载全景图 -> 首尾接缝修复 -> 垂直预缩放 -> 切成预缩放列缓存。"""
+        """加载全景图 -> 首尾接缝修复 -> 垂直预缩放 -> 切成预缩放列缓存（成品缓存）"""
+        key = (texture_path, int(self.h), round(float(v_top), 4),
+               round(float(v_bottom), 4), int(x_upscale), int(seam_band))
+        cached = _texture_cache.get(key)
+        if cached is not None:
+            self.tex_w, self._col_surfs = cached
+            return
         img = pygame.image.load(texture_path)
         try:
             img = img.convert()
@@ -130,6 +154,9 @@ class CylinderPanorama:
         self.tex_w = tw
         # 预缩放列缓存：每个源列一张 1px 宽的竖条（subsurface 视图，零拷贝）
         self._col_surfs = [img.subsurface((c, 0, 1, self.h)) for c in range(tw)]
+        _texture_cache[key] = (self.tex_w, self._col_surfs)
+        while len(_texture_cache) > _TEXTURE_CACHE_MAX:
+            _texture_cache.pop(next(iter(_texture_cache)))
 
     def _build_lookup(self):
         """预计算每屏幕列的投影参数（不随 yaw 变化），运行时只加 yaw 偏移。"""
@@ -164,21 +191,44 @@ class CylinderPanorama:
         self._col_base = (ang / math.tau * self.tex_w).astype(np.float64)
         self._col_int = np.empty(self.w, dtype=np.int32)
 
+    def _apply_floor_cache(self, cached):
+        """把缓存好的地面层静态数据装回实例（工作表面仍按实例新建）"""
+        if cached["src"] is None:
+            self._floor_src = None
+            return
+        self._floor_src = cached["src"]
+        self._floor_step = cached["step"]
+        self._floor_ns = cached["ns"]
+        self._floor_gx = cached["gx"]
+        self._floor_r0 = cached["r0"]
+        self._floor_r1 = cached["r1"]
+        self._floor_fr = cached["fr"]
+        self._floor_y0 = cached["y0"]
+        self._floor_len = cached["len"]
+        self.floor_y0 = cached["center_y0"]
+        self.floor_h = cached["center_h"]
+        self._floor_surf = pygame.surfarray.make_surface(
+            np.zeros((self.w, cached["max_h"], 3), dtype=np.uint8))
+
     def _detect_junction_v(self):
         """自动检测墙体贴图灰/黄交界：取下 60% 内行亮度跳变最大处。"""
+        cached = _junction_cache.get(self.texture_path)
+        if cached is not None:
+            return cached
+        value = 0.80
         try:
             img = pygame.image.load(self.texture_path).convert()
+            w, h = img.get_size()
+            arr = pygame.surfarray.array3d(img)
+            rows = arr.mean(axis=(0, 2)).astype(np.float64)
+            lo = int(h * 0.4)
+            d = np.diff(rows[lo:])
+            if len(d) > 0:
+                value = (lo + int(np.argmax(d)) + 0.5) / h
         except Exception:
-            return 0.80
-        w, h = img.get_size()
-        arr = pygame.surfarray.array3d(img)
-        rows = arr.mean(axis=(0, 2)).astype(np.float64)
-        lo = int(h * 0.4)
-        d = np.diff(rows[lo:])
-        if len(d) == 0:
-            return 0.80
-        i = lo + int(np.argmax(d))
-        return (i + 0.5) / h
+            value = 0.80
+        _junction_cache[self.texture_path] = value
+        return value
 
     def _build_floor(self, floor_path, junction_v, depth_repeat):
         """构建水平地面层：与墙体同曲率、紧密贴合、同步旋转。
@@ -195,6 +245,14 @@ class CylinderPanorama:
         jv = float(junction_v)
         if depth_repeat is None:
             depth_repeat = FLOOR_DEPTH_REPEAT
+        # 静态部分按「贴图 + 交接线 + 参数」缓存：同一张地面第二次开符直接装回来
+        floor_key = (floor_path, round(jv, 4), round(float(depth_repeat), 4), int(self.w),
+                     int(self.h), int(self.tex_w), int(self.col_step), self.projection,
+                     round(float(self.wall_h or 0.0), 6), round(float(self.fov), 4))
+        cached_floor = _floor_cache.get(floor_key)
+        if cached_floor is not None:
+            self._apply_floor_cache(cached_floor)
+            return
         cy = (self.h - 1) / 2.0
 
         img = pygame.image.load(floor_path)
@@ -229,6 +287,7 @@ class CylinderPanorama:
         max_h = int(floor_h_arr.max())
         if max_h < 2:
             self._floor_src = None
+            _remember_floor(floor_key, {"src": None})
             return
 
         # K 使交界圆处 v=1；cos 已由 _build_lookup 按列保存。
@@ -268,6 +327,13 @@ class CylinderPanorama:
         # 复用的地面帧表面：每帧用 numpy 写入像素后逐组 blit（不逐帧分配）
         self._floor_surf = pygame.surfarray.make_surface(
             np.zeros((self.w, max_h, 3), dtype=np.uint8))
+        # 只缓存只读的静态数据 + 参数（工作表面 _floor_surf 每次新建）
+        _remember_floor(floor_key, {
+            "src": self._floor_src, "step": step, "ns": ns, "gx": self._floor_gx,
+            "r0": r0m, "r1": r1m, "fr": frm, "y0": self._floor_y0,
+            "len": self._floor_len, "max_h": max_h,
+            "center_y0": self.floor_y0, "center_h": self.floor_h,
+        })
 
     # --- 速度控制 ---
 

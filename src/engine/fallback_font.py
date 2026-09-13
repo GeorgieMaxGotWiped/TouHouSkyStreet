@@ -1,13 +1,36 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # 字体回退：主字体缺失的字形（如中文字符）自动改用备用字体渲染
+#
+# 同时负责「高分辨率文字」：按「逻辑字号 x 渲染倍率」渲染，真实像素是逻辑尺寸的
+# 倍率倍，但度量接口（get_width / get_size / size / get_height ...）一律回报逻辑
+# 尺寸 —— 既有的居中 / 右对齐 / 底板尺寸 / 换行计算因此都不用改。
+# 渲染结果按 (文本, 颜色, 底背) 缓存（见 settings 的渲染倍率设置与 hires.version）。
 
 import struct
 
 import pygame
 
+from src.engine import hires
+
+# 文字缓存条数上限：HUD 数字每帧都在变，不设上限会一直涨
+_TEXT_CACHE_LIMIT = 400
+# 主/备字体选择缓存的条数上限（键是整段文本）
+_PICK_CACHE_LIMIT = 1024
+# 字体支持的码点集合：与字号无关，按文件路径缓存一次
+_COVERED_CACHE = {}
+
 
 def _covered_codepoints(font_path):
     """解析 TrueType/OpenType 字体的 cmap 表，返回该字体实际支持的码点集合"""
+    cached = _COVERED_CACHE.get(font_path)
+    if cached is not None:
+        return cached
+    covered = _parse_covered_codepoints(font_path)
+    _COVERED_CACHE[font_path] = covered
+    return covered
+
+
+def _parse_covered_codepoints(font_path):
     try:
         with open(font_path, "rb") as f:
             data = f.read()
@@ -97,13 +120,116 @@ def _cmap_format12(data, sub):
 
 
 class FallbackFont:
-    """优先使用主字体；字符串含主字体不支持的字符时整体改用备用字体"""
+    """优先使用主字体；字符串含主字体不支持的字符时整体改用备用字体渲染
+
+    按 hires.scale() 渲染高分辨率文字；倍率变化时自动重建字体与缓存。
+    """
 
     def __init__(self, primary_path, fallback_path, size):
-        self.primary = pygame.font.Font(primary_path, size)
-        self.fallback = pygame.font.Font(fallback_path, size)
+        self.primary_path = primary_path
+        self.fallback_path = fallback_path
+        self.logical_size = int(size)
         self._covered = _covered_codepoints(primary_path)
+        self._scale = 0
+        self._bold = False
+        self._italic = False
+        self._underline = False
+        self._build(1)
+
+    # --- 倍率 ---
+
+    def _build(self, factor):
+        factor = max(1, int(factor))
+        self._scale = factor
+        size = self.logical_size * factor
+        self.primary = pygame.font.Font(self.primary_path, size)
+        self.fallback = pygame.font.Font(self.fallback_path, size)
+        for font in (self.primary, self.fallback):
+            if self._bold:
+                font.set_bold(True)
+            if self._italic:
+                font.set_italic(True)
+            if self._underline:
+                font.set_underline(True)
         self._pick_cache = {}
+        self._text_cache = {}
+        self._cache_order = []
+
+    def sync(self):
+        """跟随全局渲染倍率（倍率没变就什么都不做）"""
+        factor = hires.scale()
+        if factor != self._scale:
+            self._build(factor)
+        return self._scale
+
+    @property
+    def render_scale(self):
+        return self._scale
+
+    def _to_logical(self, size):
+        if self._scale <= 1:
+            return size
+        return (int(round(size[0] / float(self._scale))),
+                int(round(size[1] / float(self._scale))))
+
+    def _to_logical_scalar(self, value):
+        """单个度量值（高 / 行高 / 上伸 / 下伸）按倍率折算回逻辑尺寸"""
+        if self._scale <= 1:
+            return int(value)
+        return int(round(value / float(self._scale)))
+
+    # --- 渲染 ---
+
+    def render(self, text, antialias, color, background=None):
+        self.sync()
+        key = (text, antialias, tuple(color),
+               tuple(background) if background is not None else None)
+        cached = self._text_cache.get(key)
+        if cached is not None:
+            return cached
+        font = self._pick(text)
+        if background is None:
+            raw = font.render(text, antialias, color)
+        else:
+            raw = font.render(text, antialias, color, background)
+        if self._scale > 1:
+            surf = hires.HiresSurface(pygame.Surface.get_size(raw), self._scale,
+                                      owner=self, key=key)
+            pygame.Surface.blit(surf, raw, (0, 0))
+        else:
+            surf = raw
+        if len(self._cache_order) >= _TEXT_CACHE_LIMIT:
+            old = self._cache_order.pop(0)
+            self._text_cache.pop(old, None)
+        self._text_cache[key] = surf
+        self._cache_order.append(key)
+        return surf
+
+    def size(self, text):
+        self.sync()
+        return self._to_logical(self._pick(text).size(text))
+
+    def metrics(self, text):
+        self.sync()
+        return self._pick(text).metrics(text)
+
+    def get_height(self):
+        self.sync()
+        return self._to_logical_scalar(self.primary.get_height())
+
+    def get_linesize(self):
+        self.sync()
+        return self._to_logical_scalar(self.primary.get_linesize())
+
+    def get_ascent(self):
+        self.sync()
+        return self._to_logical_scalar(self.primary.get_ascent())
+
+    def get_descent(self):
+        self.sync()
+        return self._to_logical_scalar(self.primary.get_descent())
+
+    # --- 主 / 备字体选择 ---
 
     def _pick(self, text):
         picked = self._pick_cache.get(text)
@@ -113,41 +239,27 @@ class FallbackFont:
                 if ord(ch) not in self._covered:
                     picked = self.fallback
                     break
+            if len(self._pick_cache) >= _PICK_CACHE_LIMIT:
+                self._pick_cache.clear()
             self._pick_cache[text] = picked
         return picked
 
-    def render(self, text, antialias, color, background=None):
-        font = self._pick(text)
-        if background is None:
-            return font.render(text, antialias, color)
-        return font.render(text, antialias, color, background)
-
-    def size(self, text):
-        return self._pick(text).size(text)
-
-    def metrics(self, text):
-        return self._pick(text).metrics(text)
-
-    def get_height(self):
-        return self.primary.get_height()
-
-    def get_linesize(self):
-        return self.primary.get_linesize()
-
-    def get_ascent(self):
-        return self.primary.get_ascent()
-
-    def get_descent(self):
-        return self.primary.get_descent()
+    # --- 样式（改动会作废已渲染的文字缓存）---
 
     def set_bold(self, value=True):
-        self.primary.set_bold(value)
-        self.fallback.set_bold(value)
+        if bool(value) == self._bold:
+            return
+        self._bold = bool(value)
+        self._build(self._scale)
 
     def set_italic(self, value=True):
-        self.primary.set_italic(value)
-        self.fallback.set_italic(value)
+        if bool(value) == self._italic:
+            return
+        self._italic = bool(value)
+        self._build(self._scale)
 
     def set_underline(self, value=True):
-        self.primary.set_underline(value)
-        self.fallback.set_underline(value)
+        if bool(value) == self._underline:
+            return
+        self._underline = bool(value)
+        self._build(self._scale)

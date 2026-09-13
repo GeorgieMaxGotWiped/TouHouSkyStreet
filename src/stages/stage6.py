@@ -16,7 +16,8 @@ import random
 import pygame
 
 from src.engine import settings as cfg
-from src.engine.pseudo3d import Pseudo3DFloor
+from src.engine import hires
+from src.engine.pseudo3d import Pseudo3DFloor, register_gpu_floor
 from src.entities.boss import Boss, SpellCard, _get_font
 from src.entities.bullet import Bullet, create_bullet_aimed, create_bullet_angle
 from src.entities.enemy import Enemy, EnemyWave
@@ -2521,24 +2522,32 @@ class Stage6_FinalApproach(Stage):
     # 绘制
     # ------------------------------------------------------------------
     def draw(self, screen, offset_x=0, offset_y=0):
-        pygame.draw.rect(screen, self.bg_color,
-                         (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH,
-                          cfg.BATTLE_AREA_HEIGHT))
         hide_floor = any(
             b is not None and b.spell_bg is not None and not b.spell_bg.done
             and b.spell_bg.is_opaque
             for b in (self.mid_boss, self.boss))
-        if self.background and not hide_floor:
-            self.background.draw(screen, offset_x, offset_y)
-            if self.background_darkness:
-                dark = self._dark_cache.get(self.background_darkness)
-                if dark is None:
-                    dark = pygame.Surface(
-                        (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
-                        pygame.SRCALPHA)
-                    dark.fill((0, 0, 0, self.background_darkness))
-                    self._dark_cache[self.background_darkness] = dark
-                screen.blit(dark, (offset_x, offset_y))
+        floor = self.background
+        if floor is not None and floor.gpu_active and not hide_floor:
+            # 地面改由显卡原生绘制：战斗区在 CPU 帧上抠空（见 Stage.draw）
+            screen.fill((0, 0, 0, 0),
+                        (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH,
+                         cfg.BATTLE_AREA_HEIGHT))
+            register_gpu_floor(floor)
+        else:
+            pygame.draw.rect(screen, self.bg_color,
+                             (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH,
+                              cfg.BATTLE_AREA_HEIGHT))
+            if floor is not None and not hide_floor:
+                floor.draw(screen, offset_x, offset_y)
+        if floor is not None and not hide_floor and self.background_darkness:
+            dark = self._dark_cache.get(self.background_darkness)
+            if dark is None:
+                dark = pygame.Surface(
+                    (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
+                    pygame.SRCALPHA)
+                dark.fill((0, 0, 0, self.background_darkness))
+                self._dark_cache[self.background_darkness] = dark
+            screen.blit(dark, (offset_x, offset_y))
 
         for boss_ref in (self.mid_boss, self.boss):
             if boss_ref is not None and boss_ref.spell_bg is not None \
@@ -2756,8 +2765,7 @@ class Stage6_FinalApproach(Stage):
         text.set_alpha(fade)
         x = offset_x + (cfg.BATTLE_AREA_WIDTH - text.get_width()) // 2
         y = offset_y + 96
-        band = pygame.Surface((text.get_width() + 44, text.get_height() + 16),
-                              pygame.SRCALPHA)
+        band = hires.ui_panel(screen, (text.get_width() + 44, text.get_height() + 16))
         band.fill((0, 0, 0, 150))
         screen.blit(band, (x - 22, y - 8))
         screen.blit(text, (x, y))

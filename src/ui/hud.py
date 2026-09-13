@@ -3,6 +3,7 @@
 
 import pygame
 from src.engine import settings as cfg
+from src.engine import hires
 
 class HUD:
     """右侧信息面板"""
@@ -16,9 +17,8 @@ class HUD:
         # 面板布局
         self.panel_x = cfg.PANEL_LEFT
         self.panel_w = cfg.PANEL_WIDTH
-        # 面板背景：半透明，露出战斗区外的 bg_0.png 背景，同时保证文字可读
-        self.panel_bg = pygame.Surface((self.panel_w, cfg.SCREEN_HEIGHT), pygame.SRCALPHA)
-        self.panel_bg.fill((*cfg.COLOR_PANEL_BG, 128))
+        # 面板背景：半透明，露出战斗区外的 bg_0.png 背景，同时保证文字可读。
+        # 画在文字同一张高分辨率图层上（否则锐利的字会贴在放大发虚的面板边上）
 
     def _draw_icon_row(self, screen, icon, count, color, y, max_width):
         """?????????????????????????? 12 ??????"""
@@ -34,10 +34,20 @@ class HUD:
             screen.blit(surf, (x, y))
             x += icon_w
 
+    def _draw_panel_bg(self, screen):
+        """面板底板：一块半透明纯色。
+
+        直接在高分辨率图层上填这块区域，而不是贴一张预先填好的大图：3x 下这张图
+        有 2.2M 像素，半透明贴图要逐像素混合（3.4ms），而填充是逐行写入（0.4ms）。
+        仍旧画在高分辨率图层上，所以面板边缘不会像 1x 放大那样发虚。
+        """
+        hires.ui_rect(screen, (*cfg.COLOR_PANEL_BG, 128),
+                      (self.panel_x, 0, self.panel_w, cfg.SCREEN_HEIGHT))
+
     def draw(self, screen, player, score, lives, bombs, power, graze, stage_name="", stage_timer=0, boss=None):
         """绘制右侧信息面板"""
         # 面板背景（半透明，露出战斗区外的 bg_0.png）
-        screen.blit(self.panel_bg, (self.panel_x, 0))
+        self._draw_panel_bg(screen)
 
         cx = self.panel_x + self.panel_w // 2
         y = 24
@@ -53,7 +63,7 @@ class HUD:
             y += 22
 
         # 分隔线
-        pygame.draw.line(screen, cfg.COLOR_DARK_GRAY, (self.panel_x + 20, y), (self.panel_x + self.panel_w - 20, y))
+        hires.ui_line(screen, cfg.COLOR_DARK_GRAY, (self.panel_x + 20, y), (self.panel_x + self.panel_w - 20, y))
         y += 16
 
         # --- Score ---
@@ -65,7 +75,7 @@ class HUD:
         y += 44
 
         # 分隔线
-        pygame.draw.line(screen, cfg.COLOR_DARK_GRAY, (self.panel_x + 20, y), (self.panel_x + self.panel_w - 20, y))
+        hires.ui_line(screen, cfg.COLOR_DARK_GRAY, (self.panel_x + 20, y), (self.panel_x + self.panel_w - 20, y))
         y += 16
 
         # --- 残机 ---
@@ -95,9 +105,9 @@ class HUD:
         bar_h = 6
         bar_x = self.panel_x + 24
         ratio = min(1.0, power / 400)
-        pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, (bar_x, y, bar_w, bar_h))
-        pygame.draw.rect(screen, cfg.COLOR_BLUE, (bar_x, y, int(bar_w * ratio), bar_h))
-        pygame.draw.rect(screen, cfg.COLOR_GRAY, (bar_x, y, bar_w, bar_h), 1)
+        hires.ui_rect(screen, cfg.COLOR_DARK_GRAY, (bar_x, y, bar_w, bar_h))
+        hires.ui_rect(screen, cfg.COLOR_BLUE, (bar_x, y, int(bar_w * ratio), bar_h))
+        hires.ui_rect(screen, cfg.COLOR_GRAY, (bar_x, y, bar_w, bar_h), 1)
         y += 22
 
         # --- Graze ---
@@ -108,7 +118,7 @@ class HUD:
         y += 34
 
         # 分隔线
-        pygame.draw.line(screen, cfg.COLOR_DARK_GRAY, (self.panel_x + 20, y), (self.panel_x + self.panel_w - 20, y))
+        hires.ui_line(screen, cfg.COLOR_DARK_GRAY, (self.panel_x + 20, y), (self.panel_x + self.panel_w - 20, y))
         y += 16
 
         # --- Skyblock 技能 ---
@@ -148,8 +158,8 @@ class HUD:
 
         screen.blit(label, (left, bar_y - 10))
         line_left = left + label.get_width() + 10
-        pygame.draw.line(screen, cfg.COLOR_DARK_GRAY,
-                         (line_left, bar_y), (right, bar_y), 2)
+        hires.ui_line(screen, cfg.COLOR_DARK_GRAY,
+                      (line_left, bar_y), (right, bar_y), 2)
 
         if boss is None or not getattr(boss, "alive", False):
             return
@@ -158,8 +168,8 @@ class HUD:
         mx = int(cfg.BATTLE_OFFSET_X + boss.x)
         mx = max(line_left, min(mx, right))
 
-        pygame.draw.line(screen, cfg.COLOR_RED, (mx, bar_y - 4), (mx, bar_y + 4), 2)
-        pygame.draw.polygon(screen, cfg.COLOR_RED, [
+        hires.ui_line(screen, cfg.COLOR_RED, (mx, bar_y - 4), (mx, bar_y + 4), 2)
+        hires.ui_polygon(screen, cfg.COLOR_RED, [
             (mx, bar_y - 9),
             (mx - 4, bar_y - 3),
             (mx + 4, bar_y - 3),
@@ -167,10 +177,7 @@ class HUD:
 
     def draw_game_over(self, screen, score):
         """游戏结束画面（全屏）"""
-        overlay = pygame.Surface((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
-        overlay.set_alpha(180)
-        overlay.fill((0, 0, 0))
-        screen.blit(overlay, (0, 0))
+        screen.blit(hires.ui_overlay(screen, (0, 0, 0), 180), (0, 0))
 
         go_text = self.font_huge.render("GAME OVER", True, cfg.COLOR_RED)
         screen.blit(go_text, (cfg.SCREEN_WIDTH // 2 - go_text.get_width() // 2, 200))
@@ -186,10 +193,7 @@ class HUD:
 
     def draw_stage_clear(self, screen, score, stage_name):
         """关卡通关（全屏）"""
-        overlay = pygame.Surface((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
-        overlay.set_alpha(160)
-        overlay.fill((0, 0, 0))
-        screen.blit(overlay, (0, 0))
+        screen.blit(hires.ui_overlay(screen, (0, 0, 0), 160), (0, 0))
 
         clear_text = self.font_huge.render("STAGE CLEAR!", True, cfg.COLOR_YELLOW)
         screen.blit(clear_text, (cfg.SCREEN_WIDTH // 2 - clear_text.get_width() // 2, 200))
@@ -205,10 +209,7 @@ class HUD:
 
     def draw_pause(self, screen):
         """暂停画面（全屏）"""
-        overlay = pygame.Surface((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
-        overlay.set_alpha(160)
-        overlay.fill((0, 0, 0))
-        screen.blit(overlay, (0, 0))
+        screen.blit(hires.ui_overlay(screen, (0, 0, 0), 160), (0, 0))
 
         pause_text = self.font_huge.render("PAUSED", True, cfg.COLOR_WHITE)
         screen.blit(pause_text, (cfg.SCREEN_WIDTH // 2 - pause_text.get_width() // 2, 280))
@@ -227,7 +228,7 @@ class HUD:
         x = self.panel_x + 16
         y = cfg.SCREEN_HEIGHT - 170 - (timer * 2 if timer < 30 else 0)
 
-        popup = pygame.Surface((width, height))
+        popup = hires.ui_panel(screen, (width, height))
         popup.set_alpha(min(200, alpha))
         popup.fill((24, 28, 48))
         screen.blit(popup, (x, y))

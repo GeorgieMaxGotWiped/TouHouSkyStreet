@@ -18,6 +18,7 @@ from src.systems.item_system import (
 )
 from src.systems.item_effects import aggregate_effects
 from src.systems.item_icons import draw_item_icon
+from src.engine import hires
 from src.ui import skyblock_ui as sui
 
 
@@ -176,14 +177,14 @@ class IntermissionState(GameState):
     def _continue_next_stage(self):
         self._save_inventory()
         from src.stages import get_next_stage_class
-        from src.ui.menu import MenuState, PlayingState
+        from src.ui.loading import start_stage
+        from src.ui.menu import MenuState
         next_cls = get_next_stage_class(self.stage_num)
         if next_cls is None:
             self.game.switch_state(MenuState(self.game))
             return
-        stage = next_cls()
-        stage.setup_waves()
-        self.game.switch_state(PlayingState(self.game, stage))
+        # 下一面经载入界面入场（构建关卡 + 预热贴图）
+        start_stage(self.game, next_cls)
 
     def _extract(self):
         """撤离：将本局全部物资（物品/金币/重铸前缀）存入本地仓库并结束远征。"""
@@ -1001,9 +1002,9 @@ class IntermissionState(GameState):
                             hover=self.game.mouse_hover(rect))
 
         # 页签下方的分隔线
-        pygame.draw.line(screen, sui.SLOT_DARK,
+        hires.ui_line(screen, sui.SLOT_DARK,
                          (36, _DIVIDER_Y), (cfg.SCREEN_WIDTH - 36, _DIVIDER_Y), 2)
-        pygame.draw.line(screen, sui.SLOT_LIGHT,
+        hires.ui_line(screen, sui.SLOT_LIGHT,
                          (36, _DIVIDER_Y + 1), (cfg.SCREEN_WIDTH - 36, _DIVIDER_Y + 1), 1)
 
         # 深灰分区（内容层底板）：主内容区 + 底部操作区
@@ -1249,7 +1250,7 @@ class IntermissionState(GameState):
             sui.draw_count_badge(screen, rect, entry["count"], self.game.font_small)
         if entry.get("equipped"):
             # 已装备角标：底边小绿条
-            pygame.draw.line(screen, cfg.COLOR_GREEN,
+            hires.ui_line(screen, cfg.COLOR_GREEN,
                              (rect.x + 6, rect.bottom - 4),
                              (rect.right - 6, rect.bottom - 4), 3)
 
@@ -1325,7 +1326,7 @@ class IntermissionState(GameState):
         if self.selected < len(EQUIPMENT_SLOTS):
             selected_item = self.inventory.get_equipped_item(EQUIPMENT_SLOTS[self.selected])
         divider_y = panel.y + panel.height - 58
-        pygame.draw.line(screen, sui.SLOT_DARK, (panel.x + 14, divider_y),
+        hires.ui_line(screen, sui.SLOT_DARK, (panel.x + 14, divider_y),
                          (panel.right - 14, divider_y), 2)
         self._draw_text(screen, "装备详情", panel.x + 16, divider_y + 8,
                         sui.PANEL_TEXT, self.game.font_medium)

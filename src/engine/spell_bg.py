@@ -3,6 +3,7 @@
 # 2D 贴图（web.png / 程序化图案）+ 简单数学动画（旋转/缩放/正弦扭曲/流动）+ 混合特效（叠加/暗角）
 # 亮度刻意压低，避免影响读谱。
 
+import gc
 import math
 import os
 import random
@@ -448,8 +449,19 @@ def _get_pattern(key):
 # --- 静态辅助贴图（暗角 / 中心微光 / 开符光环） ---
 
 
+# 暗角 / 中心微光 缓存：这两个是纯静态贴图，但每开一张符卡都会重建一次
+# （暗角 7.5ms + 微光 5.0ms），正好压在「开符那一帧」上造成掉帧。按参数缓存后，
+# 同尺寸 / 同颜色的组合整个进程只算一次。
+_vignette_cache = {}
+_glow_cache = {}
+
+
 def _make_vignette(w, h, strength=0.42):
-    """径向暗角：四周乘到 (1-strength)，中心不变"""
+    """径向暗角：四周乘到 (1-strength)，中心不变（按参数缓存）"""
+    key = (int(w), int(h), round(float(strength), 4))
+    cached = _vignette_cache.get(key)
+    if cached is not None:
+        return cached
     x = np.arange(w, dtype=np.float32)[:, None]
     y = np.arange(h, dtype=np.float32)[None, :]
     d = np.sqrt(((x - w / 2.0) / (w * 0.62)) ** 2 + ((y - h / 2.0) / (h * 0.62)) ** 2)
@@ -458,11 +470,16 @@ def _make_vignette(w, h, strength=0.42):
     arr = np.repeat((val * 255.0).astype(np.uint8)[..., None], 3, axis=2)
     surf = pygame.Surface((w, h))
     pygame.surfarray.blit_array(surf, arr)
+    _vignette_cache[key] = surf
     return surf
 
 
 def _make_glow(w, h, cx, cy, radius, color):
-    """中心径向微光（叠加用，颜色已压暗）"""
+    """中心径向微光（叠加用，颜色已压暗；按参数缓存）"""
+    key = (int(w), int(h), float(cx), float(cy), float(radius), tuple(color))
+    cached = _glow_cache.get(key)
+    if cached is not None:
+        return cached
     x = np.arange(w, dtype=np.float32)[:, None]
     y = np.arange(h, dtype=np.float32)[None, :]
     d = np.sqrt(((x - cx) / radius) ** 2 + ((y - cy) / radius) ** 2)
@@ -472,6 +489,27 @@ def _make_glow(w, h, cx, cy, radius, color):
         arr[:, :, c_i] = np.clip(color[c_i] * d, 0, 255).astype(np.uint8)
     surf = pygame.Surface((w, h))
     pygame.surfarray.blit_array(surf, arr)
+    _glow_cache[key] = surf
+    return surf
+
+
+# 整幅背景贴图缓存：开一次符卡就重新读盘 + 解码一次（storm / goldor / maxor 的
+# 源图 2700~2834 宽，实测 67~85ms 全花在解码上），按路径缓存后只付一次。
+_image_cache = {}
+
+
+def _get_image_layer(path):
+    """取（并缓存）铺满战斗区域的整幅背景贴图；失败返回 None"""
+    key = (path, AREA_W, AREA_H)
+    if key in _image_cache:
+        return _image_cache[key]
+    try:
+        img = pygame.image.load(path).convert()
+    except Exception:
+        _image_cache[key] = None
+        return None
+    surf = _scale_cover(img, AREA_W, AREA_H)
+    _image_cache[key] = surf
     return surf
 
 
@@ -937,12 +975,14 @@ class SpellBackground:
             if not path or not os.path.exists(path):
                 self.images.append(None)
                 continue
-            try:
-                img = pygame.image.load(path).convert()
-            except Exception:
-                self.images.append(None)
-                continue
-            self.images.append(_scale_cover(img, AREA_W, AREA_H))
+            self.images.append(_get_image_layer(path))
+        # 图层图案在这里一次性解析：SkyBlock 物品图标那几张要走 PNG 解码 + 抠底 +
+        # 缩放（约 10ms/张），原本等到开符后第一次绘制才加载，正好卡在开符后的
+        # 头几帧上。载入界面的预热会构造一次本对象，等于把这些都提前做掉。
+        for layer in self.layers:
+            if layer.pattern:
+                _get_pattern(layer.pattern)
+
         self.base_color = conf["base"]
         self.glow = _make_glow(AREA_W, AREA_H, *EFFECT_CENTER, AREA_H * 0.62, conf["glow"])
         self.vignette = _make_vignette(AREA_W, AREA_H)
@@ -1117,3 +1157,36 @@ class SpellBackground:
 
         canvas.set_alpha(alpha)
         screen.blit(canvas, (offset_x, offset_y))
+
+
+# --- 预热：把「开符那一帧」要现算的东西提前到关卡载入界面 ---
+
+_heated_entries = set()
+
+
+def preheat(entries):
+    """按 [(符卡名, bg_style)] 预热符卡背景的静态资源。
+
+    只把静态部分算进缓存（图案 / 暗角 / 微光 / 整幅贴图 / 全景贴图），
+    不保留 SpellBackground 实例本身（它带每帧动画状态）。返回预热条数。
+    """
+    done = 0
+    for name, style in entries or ():
+        style = style or detect_style(name or "")
+        if not style or style in _heated_entries:
+            continue
+        if style not in STYLES:
+            continue
+        try:
+            SpellBackground(name or "", style)
+        except Exception as exc:
+            print(f"[SpellBG] preheat {style} failed: {exc}")
+            continue
+        _heated_entries.add(style)
+        done += 1
+    if done:
+        # 预热会丢掉大量临时对象（列缓存 / 映射表等）；这里立刻收一次，
+        # 否则这笔回收（以及紧随其后的分代 GC 扫描，实测约 8ms）会落到
+        # 之后某一帧——常常正好是开符那一帧。
+        gc.collect()
+    return done

@@ -6,6 +6,7 @@ import os
 import pygame
 
 from src.engine import settings as cfg
+from src.engine import hires
 from src.engine.collision import point_segment_distance
 from src.entities.boss import Boss
 
@@ -405,7 +406,9 @@ class PlayerSpellCard:
         cy = offset_y + cfg.BATTLE_AREA_HEIGHT // 2 + int(t * 24)
 
         if self.portrait is not None:
-            portrait = _with_alpha(self.portrait, alpha)
+            # 同 Boss 横幅：逐帧 copy+fill 太贵，改用表面级 alpha
+            self.portrait.set_alpha(alpha)
+            portrait = self.portrait
             screen.blit(portrait, (cx - portrait.get_width() // 2,
                                    cy - portrait.get_height() // 2))
 
@@ -414,11 +417,12 @@ class PlayerSpellCard:
         text = font.render(self.name, True, cfg.COLOR_WHITE)
         text = _with_alpha(text, alpha)
         pad_x, pad_y = 18, 8
-        box = pygame.Surface((text.get_width() + pad_x * 2,
-                              text.get_height() + pad_y * 2), pygame.SRCALPHA)
+        box_w = text.get_width() + pad_x * 2
+        box_h = text.get_height() + pad_y * 2
+        box = hires.ui_panel(screen, (box_w, box_h))
         box.fill((10, 14, 26, int(alpha * 0.62)))
-        pygame.draw.rect(box, (255, 255, 255, int(alpha * 0.85)),
-                         box.get_rect(), 2, border_radius=6)
+        hires.ui_rect(box, (255, 255, 255, int(alpha * 0.85)),
+                      (0, 0, box_w, box_h), 2, radius=6)
         box.blit(text, (pad_x, pad_y))
         screen.blit(box, (cx - box.get_width() // 2,
                           cy + 165 - box.get_height() // 2))

@@ -11,9 +11,6 @@
 """
 import json
 import os
-import sys
-
-os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")   # 抠图复用游戏内实现，静音 pygame 提示
 
 from PIL import Image
 
@@ -45,21 +42,8 @@ GALLERY = [
 
 
 def load_portrait(src_rel):
-    """读入立绘：白底贴图先抠成透明（复用游戏内的抠图实现），失败则原样返回"""
-    src = os.path.join(ROOT, src_rel)
-    im = Image.open(src)
-    if im.mode != "RGB":
-        return im.convert("RGBA")
-    try:
-        import numpy as np
-        if ROOT not in sys.path:
-            sys.path.insert(0, ROOT)
-        from src.engine.boss_art import remove_white_background, crop_to_content
-        rgba = remove_white_background(np.asarray(im.convert("RGB")))
-        return Image.fromarray(crop_to_content(rgba), "RGBA")
-    except Exception as e:
-        print("  抠图失败（保留白底）：%s" % e)
-        return im.convert("RGB")
+    """读入立绘：统一转 RGBA（立绘本身即透明背景 PNG，无需再抠图）"""
+    return Image.open(os.path.join(ROOT, src_rel)).convert("RGBA")
 
 
 def make_webp(src_rel, dst_abs, max_h=800, quality=82, portrait=False):

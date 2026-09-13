@@ -6,6 +6,7 @@ import re
 import pygame
 from src.engine import settings as cfg
 from src.engine import boss_art
+from src.engine import hires
 
 # 对话说话名只显示英文：去掉中文前缀（如「魔法使 Mage」→「Mage」）
 _CJK_LEAD = re.compile(r"^[\u4e00-\u9fff\uff00-\uffef\u3000-\u303f]+\s*")
@@ -28,6 +29,138 @@ DIALOGUE_PORTRAIT_RETREAT = 30
 DIALOGUE_PORTRAIT_SIDE_SHIFT = 60
 
 
+# 立绘缓存：key = (贴图路径, 角色缩放) -> (Surface, 内容框)。
+# 放在模块级是为了跨对话框复用：同一张立绘在整局里只做一次抠图 / 遮罩 / 缩放。
+# 遮罩要扫整张立绘，是这里最贵的一步，所以两个用途（立绘高度、内容框）共用一次结果。
+_PORTRAIT_CACHE = {}
+# 立绘合成图缓存（立绘 + 柔化投影烘成一张）：key 与立绘缓存一致
+_PORTRAIT_COMPOSITE_CACHE = {}
+# 缓存条数上限：一张 3x 立绘加投影可达数 MB，跨关卡一直累积会白占内存
+_PORTRAIT_CACHE_LIMIT = 8
+# 缓存键的先进先出顺序（超上限时丢最旧的）
+_PORTRAIT_ORDER = []
+
+
+def _remember_portrait(key, value):
+    """写入立绘缓存，超过上限就丢掉最旧的一条（连同它的投影）"""
+    if key not in _PORTRAIT_CACHE and len(_PORTRAIT_ORDER) >= _PORTRAIT_CACHE_LIMIT:
+        old = _PORTRAIT_ORDER.pop(0)
+        _PORTRAIT_CACHE.pop(old, None)
+        _PORTRAIT_COMPOSITE_CACHE.pop(old, None)
+    _PORTRAIT_CACHE[key] = value
+    if key in _PORTRAIT_ORDER:
+        _PORTRAIT_ORDER.remove(key)
+    _PORTRAIT_ORDER.append(key)
+
+
+def _portrait_target_height(h, content_top):
+    """立绘目标高度：贴图内头顶（首个不透明像素行）对齐战斗框上1/3线；
+    draw 中按 py = box_top - ph/2 放置，使立绘下半正好被对话框遮挡。"""
+    box_top = cfg.BATTLE_OFFSET_Y + cfg.BATTLE_AREA_HEIGHT - DIALOGUE_BOX_HEIGHT - 12
+    denom = 0.5 - content_top / h
+    if denom <= 0:
+        return h
+    return max(1, int(round((box_top - DIALOGUE_PORTRAIT_TOP_TARGET) / denom)))
+
+
+def _union_content_rect(rects, w, h):
+    """遮罩矩形并成一个内容框；没有内容时退回整张图"""
+    if not rects:
+        return pygame.Rect(0, 0, w, h)
+    rect = rects[0]
+    for r in rects[1:]:
+        rect = rect.union(r)
+    return rect
+
+
+def get_portrait(path, scale):
+    """取（并缓存）立绘贴图与内容框；失败返回 (None, (0, 0, 0))，不重复重试。
+
+    立绘按基准缩放等比缩小（自机/boss 左右站位更清晰），内容框为
+    (内容左, 内容右, 内容顶)（逻辑像素，即排版坐标）。
+
+    贴图本身按渲染倍率放大像素（文字/立绘的高分辨率图层用），内容框仍是逻辑
+    尺寸，所以 draw 里的站位计算一行都不用改。
+    """
+    factor = hires.scale()
+    key = (path, scale, factor)
+    cached = _PORTRAIT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    sprite = None
+    box = (0, 0, 0)
+    try:
+        # 白底立绘（如新版 Boss 立绘）在这里抠掉背景并按内容裁剪
+        img = boss_art.load_sprite(path)
+        if img is None:
+            raise ValueError("portrait unavailable")
+        w, h = img.get_size()
+        if h <= 0:
+            raise ValueError("invalid portrait height")
+        try:
+            rects = pygame.mask.from_surface(img).get_bounding_rects()
+        except Exception:
+            rects = []
+        content_top = min(r.top for r in rects) if rects else 0
+        ph = _portrait_target_height(h, content_top)
+        ph = max(1, int(round(ph * scale * DIALOGUE_PORTRAIT_BASE_SCALE)))
+        sprite = hires.scaled_image(img, (max(1, int(round(w * ph / h))), ph), factor)
+        cr = _union_content_rect(rects, w, h)
+        kx = ph / float(h)
+        box = (max(0, int(round(cr.left * kx))),
+               max(0, int(round((cr.left + cr.width) * kx))),
+               max(0, int(round(cr.top * kx))))
+    except Exception as e:
+        print(f"[Dialogue] Failed to load portrait {path}: {e}")
+    _remember_portrait(key, (sprite, box))
+    return sprite, box
+
+
+def get_portrait_composite(key, sprite):
+    """取（并缓存）「柔化投影 + 立绘」烘在一起的合成图，以及它的左上角偏移。
+
+    投影是纯黑剪影，所以「先贴投影、再贴立绘」与「贴一张合成图」结果一致
+    （逐像素对比最大只差 1/255 的取整），但每帧少贴一半像素：3x 立绘有
+    1.3M 像素，两张一起贴是对话帧里最贵的一笔（实测约 6ms/帧，合成后约 3ms）。
+    """
+    entry = _PORTRAIT_COMPOSITE_CACHE.get(key)
+    if entry is None:
+        shadow = _build_shadow(sprite)
+        sx, sy = DIALOGUE_PORTRAIT_SHADOW_OFFSET
+        ox, oy = max(0, -sx), max(0, -sy)          # 投影往左上偏时的补边
+        w, h = pygame.Surface.get_size(sprite)
+        canvas = hires.HiresSurface((w + abs(sx), h + abs(sy)),
+                                    getattr(sprite, "hi_scale", 1))
+        canvas.blit(shadow, (sx + ox, sy + oy))
+        canvas.blit(sprite, (ox, oy))
+        entry = (canvas, ox, oy)
+        _PORTRAIT_COMPOSITE_CACHE[key] = entry
+    return entry
+
+
+def _build_shadow(sprite):
+    """根据立绘透明通道生成柔化投影（黑色 + 降采样模糊），
+    并把基准不透明度烘焙进 alpha 通道，便于后续整体淡入。
+
+    模糊始终按「真实像素」做，最后再恢复倍率标记，否则投影会被当 1x 贴出去。
+    """
+    shadow = sprite.copy()
+    shadow.fill((0, 0, 0, 255), special_flags=pygame.BLEND_RGBA_MULT)
+    factor = getattr(shadow, "hi_scale", 1)
+    w, h = pygame.Surface.get_size(shadow)
+    small = pygame.transform.smoothscale(
+        shadow, (max(1, w // 6), max(1, h // 6)))
+    if factor > 1:
+        blurred = hires.HiresSurface((w, h), factor)
+        pygame.transform.smoothscale(small, (w, h), blurred)
+        shadow = blurred
+    else:
+        shadow = pygame.transform.smoothscale(small, (w, h))
+    shadow.fill((255, 255, 255, DIALOGUE_PORTRAIT_SHADOW_ALPHA),
+                special_flags=pygame.BLEND_RGBA_MULT)
+    return shadow
+
+
 class DialogueBox:
     """底部对话框（逐条推进）"""
     def __init__(self, game, lines, portraits=None, portrait_sides=None,
@@ -43,54 +176,9 @@ class DialogueBox:
         self.index = 0
         self.finished = False
         self.wait_frames = 20       # 换行后输入缓冲，防止误跳过
-        self._portrait_cache = {}   # 贴图路径 -> Surface
-        self._portrait_attempted = set()
-        self._portrait_shadow_cache = {}   # id(立绘Surface) -> 柔化投影
-        self._portrait_content_boxes = {}   # 立绘键 -> (内容左,内容右,内容顶) 像素(缩放后)
+        # 立绘与投影缓存在模块级（见文件顶部 _PORTRAIT_CACHE），跨对话框复用
         self._portrait_states = {}   # 角色名 -> [当前透明度, 当前后退像素]（平滑过渡用）
         self.boss_card = self._find_boss_card()   # 本段对话涉及的 BOSS 英文名，无则 None
-
-    def _get_portrait(self, path, name):
-        """加载并缓存立绘：按基准缩放等比缩小（自机/boss 左右站位更清晰），
-        并记录内容顶部偏移，draw 中据此让头顶对齐战斗框上1/3线。
-        name 对应的角色可通过 portrait_scales 额外放大。"""
-        scale = self.portrait_scales.get(name, 1.0)
-        key = (path, scale)
-        if key in self._portrait_attempted:
-            return self._portrait_cache.get(key)
-        self._portrait_attempted.add(key)
-        try:
-            # 白底立绘（如新版 Boss 立绘）在这里抠掉背景并按内容裁剪
-            img = boss_art.load_sprite(path)
-            if img is None:
-                raise ValueError("portrait unavailable")
-            w, h = img.get_size()
-            if h <= 0:
-                raise ValueError("invalid portrait height")
-            ph = self._portrait_height(img, h)
-            ph = max(1, int(round(ph * scale * DIALOGUE_PORTRAIT_BASE_SCALE)))
-            new_w = max(1, round(w * ph / h))
-            sprite = pygame.transform.smoothscale(img, (new_w, ph))
-            self._portrait_cache[key] = sprite
-            try:
-                rects = pygame.mask.from_surface(img).get_bounding_rects()
-                if rects:
-                    cr = rects[0]
-                    for r in rects[1:]:
-                        cr = cr.union(r)
-                else:
-                    cr = pygame.Rect(0, 0, w, h)
-            except Exception:
-                cr = pygame.Rect(0, 0, w, h)
-            kx = ph / h
-            self._portrait_content_boxes[key] = (
-                max(0, int(round(cr.left * kx))),
-                max(0, int(round((cr.left + cr.width) * kx))),
-                max(0, int(round(cr.top * kx))),
-            )
-        except Exception as e:
-            print(f"[Dialogue] Failed to load portrait {path}: {e}")
-        return self._portrait_cache.get(key)
 
     @staticmethod
     def _display_name(name):
@@ -106,78 +194,51 @@ class DialogueBox:
         return None
 
     @staticmethod
-    def _portrait_height(img, h):
-        """计算立绘目标高度：贴图内头顶（首个不透明像素行）对齐战斗框上1/3线；
-        draw 中按 py = box_top - ph/2 放置，使立绘下半正好被对话框遮挡。"""
-        box_top = cfg.BATTLE_OFFSET_Y + cfg.BATTLE_AREA_HEIGHT - DIALOGUE_BOX_HEIGHT - 12
-        try:
-            rects = pygame.mask.from_surface(img).get_bounding_rects()
-            content_top = min(r.top for r in rects) if rects else 0
-        except Exception:
-            content_top = 0
-        ratio = content_top / h
-        denom = 0.5 - ratio
-        if denom <= 0:
-            return h
-        return max(1, int(round((box_top - DIALOGUE_PORTRAIT_TOP_TARGET) / denom)))
+    def _blit_alpha(screen, surf, alpha, pos):
+        """按整体不透明度 alpha(0-255) 贴一张立绘。
 
-    def _with_alpha(self, surf, alpha):
-        """返回带整体透明度 alpha(0-255) 的表面副本（不修改原表面）"""
+        这里刻意不用「复制一份再 BLEND_RGBA_MULT」的写法：3x 立绘有 5MB 像素，
+        复制 + 逐像素乘法实测约 8ms/张，而对话淡入时每帧都要做，直接把帧率打穿。
+        改成临时改表面 alpha（贴完还原）后，缩放倍数交给混合沿用，结果一致
+        （逐像素对比最大只差 1/255），开销几乎为零。
+        """
         if alpha >= 255:
-            return surf
-        result = surf.copy()
-        result.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
-        return result
+            screen.blit(surf, pos)
+            return
+        old = surf.get_alpha()
+        surf.set_alpha(alpha)
+        try:
+            screen.blit(surf, pos)
+        finally:
+            surf.set_alpha(old)
 
     def _draw_portrait(self, screen, name, portrait_path, alpha, retreat):
         """绘制单个立绘：alpha 为整体不透明度(0-255)，retreat 为向自己一侧后退像素。"""
-        sprite = self._get_portrait(portrait_path, name)
+        key = (portrait_path, self.portrait_scales.get(name, 1.0))
+        sprite, (box_l, box_r, content_top) = get_portrait(*key)
         if sprite is None:
             return
-        key = (portrait_path, self.portrait_scales.get(name, 1.0))
-        shadow = self._portrait_shadow_cache.get(id(sprite))
-        if shadow is None:
-            shadow = self._make_shadow(sprite)
-            self._portrait_shadow_cache[id(sprite)] = shadow
-        if alpha < 255:
-            shadow = self._with_alpha(shadow, alpha)
-            sprite = self._with_alpha(sprite, alpha)
-        pw, ph = sprite.get_size()
+        composite, ox, oy = get_portrait_composite(key, sprite)
         # 侧位规则：显式配置优先；未配置时自机靠左，其余靠右
         side = self.portrait_sides.get(name)
         if side is None:
             side = "left" if portrait_path == cfg.SELF_SPRITE else "right"
         box_w = cfg.BATTLE_AREA_WIDTH - 24
         x = cfg.BATTLE_OFFSET_X + 12
-        box_l, box_r, _ctop = self._portrait_content_boxes.get(key, (0, pw, 0))
         if side == "left":
             px = x - box_l - retreat
         else:
             px = x + box_w - box_r + self.portrait_offsets.get(name, 0) + retreat
         # 头顶对齐战斗框上1/3线，立绘下半被对话框遮挡（半身效果）
-        py = (DIALOGUE_PORTRAIT_TOP_TARGET - _ctop
+        py = (DIALOGUE_PORTRAIT_TOP_TARGET - content_top
               - self.portrait_vertical_offsets.get(name, 0))
         # 超出战斗框的部分裁剪掉，不显示
         old_clip = screen.get_clip()
         screen.set_clip((cfg.BATTLE_OFFSET_X, cfg.BATTLE_OFFSET_Y,
                          cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
-        sx, sy = DIALOGUE_PORTRAIT_SHADOW_OFFSET
-        screen.blit(shadow, (px + sx, py + sy))
-        screen.blit(sprite, (px, py))
+        # 投影与立绘已经烘在同一张图上（见 get_portrait_composite），一次贴完
+        self._blit_alpha(screen, composite, alpha, (px - ox, py - oy))
         screen.set_clip(old_clip)
-
-    def _make_shadow(self, sprite):
-        """根据立绘透明通道生成柔化投影（黑色 + 降采样模糊），
-        并把基准不透明度烘焙进 alpha 通道，便于后续整体淡入。"""
-        shadow = sprite.copy()
-        shadow.fill((0, 0, 0, 255), special_flags=pygame.BLEND_RGBA_MULT)
-        w, h = shadow.get_size()
-        small = pygame.transform.smoothscale(
-            shadow, (max(1, w // 6), max(1, h // 6)))
-        shadow = pygame.transform.smoothscale(small, (w, h))
-        shadow.fill((255, 255, 255, DIALOGUE_PORTRAIT_SHADOW_ALPHA),
-                    special_flags=pygame.BLEND_RGBA_MULT)
-        return shadow
 
     def update(self, dt):
         if self.finished:
@@ -239,10 +300,17 @@ class DialogueBox:
             self._draw_portrait(screen, name, speaker_path,
                                 int(round(alpha)), int(round(retreat)))
 
-        box = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
-        box.fill((10, 10, 28, 235))
-        screen.blit(box, (x, y))
-        pygame.draw.rect(screen, cfg.COLOR_GRAY, (x, y, box_w, box_h), 2)
+        # 对话框底与边框走文字同一张高分辨率图层，否则锐利的字会贴在发虚的框上
+        if hasattr(screen, "new_panel"):
+            box = screen.new_panel((box_w, box_h))
+            box.fill((10, 10, 28, 235))
+            screen.blit(box, (x, y))
+            screen.hi_rect(cfg.COLOR_GRAY, (x, y, box_w, box_h), 2)
+        else:
+            box = pygame.Surface((box_w, box_h), pygame.SRCALPHA)
+            box.fill((10, 10, 28, 235))
+            screen.blit(box, (x, y))
+            pygame.draw.rect(screen, cfg.COLOR_GRAY, (x, y, box_w, box_h), 2)
 
         # 角色名（只显示英文名）
         name_text = self.game.font_medium.render(self._display_name(name), True, cfg.COLOR_YELLOW)

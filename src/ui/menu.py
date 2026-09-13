@@ -6,23 +6,43 @@ import random
 import pygame
 from src.engine import settings as cfg
 from src.engine import boss_art
+from src.engine import hires
 from src.engine.collision import circle_collision, point_segment_distance
 from src.engine.game import GameState
 from src.entities.player_spell import PlayerSpellCard
 from src.systems.item_system import BOSS_REWARD_POOLS, C_SKILLS
 from src.systems.item_effects import aggregate_effects
+from src.ui.loading import start_stage
 
 WITHER_BOSS_NAMES = {"Maxor", "Storm", "Goldor", "Necron", "Kaeman"}
 
 DEATHBOMB_WINDOW_FRAMES = 24
 
 
-def load_background(path, size):
-    """加载背景图并缩放到指定尺寸，失败返回 None"""
+# 背景图缓存：同一张图在不同渲染倍率下各备一份
+_bg_cache = {}
+
+
+def load_background(path, size, factor=None):
+    """加载背景图并缩放到「逻辑尺寸 x 倍率」，失败返回 None。
+
+    factor 就是渲染倍率：>1 时直接从原图缩放到高分辨率表面上，显卡可以按原始
+    像素呈现，不再经历「先缩到 960x720、再被整幅放大」的二次损失。
+    缺省取当前高分辨率图层倍率；传 1 则与旧版行为完全一致。
+    """
+    factor = hires.scale() if factor is None else max(1, int(factor))
+    key = (path, int(size[0]), int(size[1]), factor)
+    cached = _bg_cache.get(key)
+    if cached is not None:
+        return cached
     try:
         if os.path.exists(path):
             img = pygame.image.load(path)
-            return pygame.transform.smoothscale(img, size)
+            surf = hires.scaled_image(img, size, factor)
+            if len(_bg_cache) > 8:
+                _bg_cache.clear()
+            _bg_cache[key] = surf
+            return surf
     except Exception as e:
         print(f"[Background] Failed to load {path}: {e}")
     return None
@@ -35,9 +55,10 @@ class MenuState(GameState):
         self.options = ["Start Game", "Practice", "Settings", "Storage", "Quit"]
         self.selected = 0
         self._last_mouse_pos = (0, 0)
-        # 背景图
+        # 背景图（按当前渲染倍率准备：有显卡时就是原生像素）
         self.background = load_background(cfg.MENU_BACKGROUND,
-                                          (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
+                                          (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
+                                          game.screen.bake_factor())
 
     def enter(self, game):
         self.selected = 0
@@ -164,12 +185,13 @@ class MenuState(GameState):
         self.game.global_data["power"] = 400
         self.game.global_data["graze"] = 0
 
-        stage = stage_cls()
         # 不调用 setup_waves：直接跳过道中前半段小怪，只保留道中Boss战与其后的推进。
-        stage.setup_mid_boss()
-        stage.phase = "mid_boss"
-        stage.timer = 0
-        self.game.switch_state(PlayingState(self.game, stage))
+
+        def prepare(stage):
+            stage.phase = "mid_boss"
+            stage.timer = 0
+
+        start_stage(self.game, stage_cls, setup="mid_boss", after=prepare)
 
     def _debug_start_stage2(self):
         """隐藏调试：直接进入二面，power 设为 300"""
@@ -179,9 +201,7 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 300
         self.game.global_data["graze"] = 0
-        stage = Stage2_DragonsNest()
-        stage.setup_waves()
-        self.game.switch_state(PlayingState(self.game, stage))
+        start_stage(self.game, Stage2_DragonsNest)
 
     def _debug_start_stage3(self):
         """隐藏调试：直接进入三面，power 设为 300"""
@@ -191,9 +211,7 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 300
         self.game.global_data["graze"] = 0
-        stage = Stage3_CatacombsF1()
-        stage.setup_waves()
-        self.game.switch_state(PlayingState(self.game, stage))
+        start_stage(self.game, Stage3_CatacombsF1)
 
     def _debug_stage3_boss_dialogue(self):
         """隐藏调试：直接进入三面关底Boss战前对话，power 满（400）"""
@@ -203,10 +221,9 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 400
         self.game.global_data["graze"] = 0
-        stage = Stage3_CatacombsF1()
         # 直接进入关底对话：Boss 入场但不攻击、不显示血条，跳过小怪与道中Boss
-        stage._start_dialogue()
-        self.game.switch_state(PlayingState(self.game, stage, skip_title=True))
+        start_stage(self.game, Stage3_CatacombsF1, setup=None,
+                    after=lambda stage: stage._start_dialogue(), skip_title=True)
 
     def _debug_start_stage4(self):
         """隐藏调试：直接进入四面，power 设为 300"""
@@ -216,9 +233,7 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 400
         self.game.global_data["graze"] = 0
-        stage = Stage4_Catacombs()
-        stage.setup_waves()
-        self.game.switch_state(PlayingState(self.game, stage))
+        start_stage(self.game, Stage4_Catacombs)
 
     def _debug_stage4_boss_dialogue(self):
         """隐藏调试：直接进入四面关底Boss战前对话，power 满（400）"""
@@ -228,9 +243,8 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 400
         self.game.global_data["graze"] = 0
-        stage = Stage4_Catacombs()
-        stage._start_dialogue()
-        self.game.switch_state(PlayingState(self.game, stage, skip_title=True))
+        start_stage(self.game, Stage4_Catacombs, setup=None,
+                    after=lambda stage: stage._start_dialogue(), skip_title=True)
 
     def _debug_start_stage5(self):
         """隐藏调试：直接进入五面 BOSS RUSH，power 设为满值（400）。"""
@@ -240,9 +254,7 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 400
         self.game.global_data["graze"] = 0
-        stage = Stage5_WitherLords()
-        stage.setup_waves()
-        self.game.switch_state(PlayingState(self.game, stage))
+        start_stage(self.game, Stage5_WitherLords)
 
     def _debug_stage5_maxor_dialogue(self):
         """隐藏调试：直接进入五面 Maxor 战前对话，power 满（400）。"""
@@ -252,9 +264,8 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 400
         self.game.global_data["graze"] = 0
-        stage = Stage5_WitherLords()
-        stage._start_maxor_dialogue()
-        self.game.switch_state(PlayingState(self.game, stage, skip_title=True))
+        start_stage(self.game, Stage5_WitherLords, setup=None,
+                    after=lambda stage: stage._start_maxor_dialogue(), skip_title=True)
 
     def _debug_start_stage6(self):
         """隐藏调试：直接进入六面最终进军，power 设为满值（400）。"""
@@ -264,9 +275,7 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 400
         self.game.global_data["graze"] = 0
-        stage = Stage6_FinalApproach()
-        stage.setup_waves()
-        self.game.switch_state(PlayingState(self.game, stage))
+        start_stage(self.game, Stage6_FinalApproach)
 
     def _debug_stage6_boss_dialogue(self):
         """隐藏调试：直接进入六面 Kaeman（The Wither King）战前对话，power 满（400）。"""
@@ -276,10 +285,9 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 400
         self.game.global_data["graze"] = 0
-        stage = Stage6_FinalApproach()
         # 直接进入关底对话：Kaeman 入场但不攻击、不显示血条，跳过进军全流程
-        stage._start_final_dialogue()
-        self.game.switch_state(PlayingState(self.game, stage, skip_title=True))
+        start_stage(self.game, Stage6_FinalApproach, setup=None,
+                    after=lambda stage: stage._start_final_dialogue(), skip_title=True)
 
     def _debug_stage2_boss_dialogue(self):
         """隐藏调试：直接进入二面关底Boss战前对话，power 满（400）"""
@@ -289,10 +297,9 @@ class MenuState(GameState):
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
         self.game.global_data["power"] = 400
         self.game.global_data["graze"] = 0
-        stage = Stage2_DragonsNest()
         # 直接进入关底对话：Boss 入场但不攻击、不显示血条，跳过小怪与道中Boss
-        stage._start_dialogue()
-        self.game.switch_state(PlayingState(self.game, stage, skip_title=True))
+        start_stage(self.game, Stage2_DragonsNest, setup=None,
+                    after=lambda stage: stage._start_dialogue(), skip_title=True)
 
     def _select(self):
         if self.options[self.selected] == "Start Game":
@@ -313,9 +320,9 @@ class MenuState(GameState):
 
     def draw(self, screen):
         if self.background:
-            screen.blit(self.background, (0, 0))
+            screen.blit_gpu(self.background, (0, 0))
         else:
-            screen.fill((4, 4, 16))
+            screen.fill_gpu((4, 4, 16))
 
         # 菜单选项（首项定位于离左上角 x560 y380）
         start_x = 560
@@ -356,15 +363,25 @@ class MenuState(GameState):
 
 
 class SettingsState(GameState):
-    """设置界面：音乐/音效音量、游戏速度与 Boss 立绘套组"""
+    """设置界面：音量 / 游戏速度 / Boss 立绘 / 显示（分辨率・缩放模式・全屏）"""
 
-    ROW_Y = (190, 250, 310, 370)   # 各行文字基线（与 _settings_row_rects 对应）
+    # 各行文字基线（与 _settings_row_rects 对应）
+    # 0=音乐音量 1=音效音量 2=游戏速度 3=Boss立绘 4=分辨率 5=缩放模式
+    # 6=渲染倍率 7=窗口模式
+    ROW_Y = (165, 215, 265, 315, 365, 415, 465, 515)
+    ROW_COUNT = 8              # 可调节行数；索引 8 为「返回」
+    # 分段选择行：Boss立绘 / 分辨率 / 缩放模式 / 渲染倍率 / 窗口模式
+    CHOICE_ROWS = (3, 4, 5, 6, 7)
+    STATUS_Y = 550             # 当前输出尺寸提示行
+    HINT_Y = 574               # 操作提示行
+    BACK_Y = 606               # 「返回」行
 
     def __init__(self, game):
         super().__init__(game)
         self.background = load_background(cfg.MENU_BACKGROUND,
-                                          (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
-        self.selected = 0          # 0=音乐音量，1=音效音量，2=游戏速度，3=Boss立绘，4=返回
+                                          (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
+                                          game.screen.bake_factor())
+        self.selected = 0          # 0=音乐 1=音效 2=速度 3=Boss立绘 4=分辨率 5=缩放 6=窗口 7=返回
         self.volume_step = 0.1     # 每次按键调节的音量幅度
         self._repeat_timer = 0     # 按住方向键时连续调节的间隔计时
         self._last_mouse_pos = (0, 0)
@@ -386,11 +403,11 @@ class SettingsState(GameState):
             return
 
         if keys.get(pygame.K_UP, False) or keys.get(pygame.K_w, False):
-            self.selected = (self.selected - 1) % 5
+            self.selected = (self.selected - 1) % (self.ROW_COUNT + 1)
             self._repeat_timer = 0
             self.game.play_sfx("cursor")
         if keys.get(pygame.K_DOWN, False) or keys.get(pygame.K_s, False):
-            self.selected = (self.selected + 1) % 5
+            self.selected = (self.selected + 1) % (self.ROW_COUNT + 1)
             self._repeat_timer = 0
             self.game.play_sfx("cursor")
 
@@ -406,11 +423,13 @@ class SettingsState(GameState):
                     self._repeat_timer = 5
             else:
                 self._repeat_timer = 0
-        elif self.selected == 3:
-            # Boss 立绘行：左/右方向键切换套组
+        elif self.selected in self.CHOICE_ROWS:
+            # Boss 立绘 / 分辨率 / 缩放模式 / 渲染倍率 / 窗口模式：左、右切换
             if any(keys.get(k, False) for k in (pygame.K_LEFT, pygame.K_a,
                                                 pygame.K_RIGHT, pygame.K_d)):
-                self._change_setting(1)
+                left = (keys.get(pygame.K_LEFT, False)
+                        or keys.get(pygame.K_a, False))
+                self._change_setting(-1 if left else 1)
         else:
             # 返回行：确认返回主菜单
             if (keys.get(pygame.K_RETURN, False) or keys.get(pygame.K_z, False)
@@ -428,8 +447,8 @@ class SettingsState(GameState):
                 if rect.collidepoint(mp):
                     self.selected = i
                     self._repeat_timer = 0
-                    if i == 3:
-                        self._select_boss_art_from_click(mp)
+                    if i in self.CHOICE_ROWS:
+                        self._select_choice_from_click(i, mp)
                         return
                     bar = pygame.Rect(430, rect.y + 14, 180, 12)
                     if bar.collidepoint(mp):
@@ -460,24 +479,73 @@ class SettingsState(GameState):
         back = self.game.font_medium.render("返回", True, cfg.COLOR_WHITE)
         bw, bh = back.get_size()
         back_x = (cfg.SCREEN_WIDTH - bw) // 2
-        return pygame.Rect(back_x - 28, 476, bw + 56, bh + 8)
+        return pygame.Rect(back_x - 28, self.BACK_Y, bw + 56, bh + 8)
 
-    def _boss_art_segments(self, row=3):
-        """Boss 立绘行的分段按钮区域：[(套组名, 矩形), ...]"""
+    # --- 分段选择行（Boss 立绘 / 分辨率 / 缩放模式 / 渲染倍率 / 窗口模式）---
+
+    def _choice_options(self, row):
+        """分段选择行的 (取值列表, 显示文本列表)"""
+        if row == 3:
+            return (list(cfg.BOSS_ART_SETS),
+                    [cfg.BOSS_ART_LABELS.get(name, name) for name in cfg.BOSS_ART_SETS])
+        if row == 4:
+            return list(range(len(cfg.RESOLUTIONS))), list(cfg.RESOLUTION_LABELS)
+        if row == 5:
+            return (list(cfg.SCALE_MODES),
+                    [cfg.SCALE_MODE_LABELS[mode] for mode in cfg.SCALE_MODES])
+        if row == 6:
+            return list(range(len(cfg.RENDER_SCALES))), list(cfg.RENDER_SCALE_LABELS)
+        return [False, True], ["窗口", "全屏"]
+
+    def _choice_current(self, row):
+        """该行当前取值"""
+        if row == 3:
+            return self.game.boss_art
+        if row == 4:
+            return self.game.resolution_index
+        if row == 5:
+            return self.game.scale_mode
+        if row == 6:
+            return self.game.render_scale_index
+        return bool(self.game.fullscreen)
+
+    def _apply_choice(self, row, value):
+        """把分段选择行的新取值下发给游戏"""
+        if row == 3:
+            self.game.set_boss_art(value)
+        elif row == 4:
+            self.game.set_resolution(value)
+        elif row == 5:
+            self.game.set_scale_mode(value)
+        elif row == 6:
+            self.game.set_render_scale(value)
+        else:
+            self.game.set_fullscreen(value)
+
+    def _choice_segments(self, row):
+        """分段按钮区域：[(取值, 显示文本, 矩形), ...]（与绘制布局一致）"""
+        values, labels = self._choice_options(row)
+        seg_w = 180 // len(values)
         y = self.ROW_Y[row]
-        seg_w = 180 // len(cfg.BOSS_ART_SETS)
-        return [(name, pygame.Rect(430 + i * seg_w, y - 4, seg_w, 30))
-                for i, name in enumerate(cfg.BOSS_ART_SETS)]
+        return [(values[i], labels[i], pygame.Rect(430 + i * seg_w, y - 4, seg_w, 30))
+                for i in range(len(values))]
 
-    def _select_boss_art_from_click(self, pos):
-        """点击 Boss 立绘行：点中某一段直接选中该套组，否则在套组间循环"""
-        for name, rect in self._boss_art_segments():
+    def _select_choice_from_click(self, row, pos):
+        """点击分段选择行：点中某一段直接选中该值，否则在选项之间循环"""
+        for value, _label, rect in self._choice_segments(row):
             if rect.collidepoint(pos):
-                if name != self.game.boss_art:
-                    self.game.set_boss_art(name)
+                if value != self._choice_current(row):
+                    self._apply_choice(row, value)
                     self.game.play_sfx("cursor")
                 return
         self._change_setting(1)
+
+    def _choice_value_text(self, row):
+        """行右侧显示的实际值（分辨率行直接显示像素尺寸）"""
+        if row == 4:
+            width, height = cfg.RESOLUTIONS[self.game.resolution_index]
+            return f"{width}×{height}"
+        return ""
 
     def _settings_set_value_from_bar(self, bar):
         """点击调节条直接设置音量/游戏速度"""
@@ -509,13 +577,21 @@ class SettingsState(GameState):
             step = cfg.GAME_SPEED_STEP if delta > 0 else -cfg.GAME_SPEED_STEP
             self.game.adjust_game_speed(step)
             self.game.play_sfx("cursor")
-        else:
+        elif self.selected == 3:
             # Boss 立绘行：在套组之间循环切换
             sets = cfg.BOSS_ART_SETS
             current = self.game.boss_art if self.game.boss_art in sets else sets[0]
             step = 1 if delta >= 0 else -1
             self.game.set_boss_art(sets[(sets.index(current) + step) % len(sets)])
             self.game.play_sfx("ok")
+        elif self.selected in self.CHOICE_ROWS:
+            # 分辨率 / 缩放模式 / 窗口模式：在选项之间循环切换
+            values, _labels = self._choice_options(self.selected)
+            current = self._choice_current(self.selected)
+            index = values.index(current) if current in values else 0
+            step = 1 if delta >= 0 else -1
+            self._apply_choice(self.selected, values[(index + step) % len(values)])
+            self.game.play_sfx("cursor")
 
     def _draw_volume_row(self, screen, label, volume, selected, y):
         color = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
@@ -549,31 +625,36 @@ class SettingsState(GameState):
                              (bar_x, bar_y, fill_w, bar_h))
         pygame.draw.rect(screen, color, (bar_x, bar_y, bar_w, bar_h), 1)
 
-    def _draw_boss_art_row(self, screen, selected, y):
-        """Boss 立绘套组行：分段按钮显示当前套组"""
+    def _draw_choice_row(self, screen, label, row, selected):
+        """分段选择行：左侧名称，右侧分段按钮显示当前选项"""
         color = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
-        label = self.game.font_medium.render("Boss 立绘", True, color)
-        screen.blit(label, (300, y))
-        for name, rect in self._boss_art_segments():
-            active = (name == self.game.boss_art)
+        y = self.ROW_Y[row]
+        screen.blit(self.game.font_medium.render(label, True, color), (300, y))
+        value_text = self._choice_value_text(row)
+        if value_text:
+            screen.blit(self.game.font_medium.render(value_text, True, color), (640, y))
+        current = self._choice_current(row)
+        for value, text, rect in self._choice_segments(row):
+            active = (value == current)
             pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, rect)
             if active:
-                pygame.draw.rect(screen, cfg.COLOR_GREEN if selected else cfg.COLOR_GRAY, rect)
+                pygame.draw.rect(screen, cfg.COLOR_GREEN if selected else cfg.COLOR_GRAY,
+                                 rect)
             pygame.draw.rect(screen, cfg.COLOR_YELLOW if active else cfg.COLOR_GRAY, rect, 1)
-            text = self.game.font_small.render(cfg.BOSS_ART_LABELS.get(name, name), True,
-                                               cfg.COLOR_BLACK if active else color)
-            screen.blit(text, (rect.x + (rect.width - text.get_width()) // 2,
-                               rect.y + (rect.height - text.get_height()) // 2))
+            text_surf = self.game.font_small.render(text, True,
+                                                    cfg.COLOR_BLACK if active else color)
+            screen.blit(text_surf, (rect.x + (rect.width - text_surf.get_width()) // 2,
+                                    rect.y + (rect.height - text_surf.get_height()) // 2))
 
     def draw(self, screen):
         if self.background:
-            screen.blit(self.background, (0, 0))
+            screen.blit_gpu(self.background, (0, 0))
         else:
-            screen.fill((4, 4, 16))
+            screen.fill_gpu((4, 4, 16))
 
         # 标题
         title = self.game.font_large.render("设置", True, cfg.COLOR_YELLOW)
-        screen.blit(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 110))
+        screen.blit(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 72))
 
         # 调节行
         self._draw_volume_row(screen, "音乐音量", self.game.music_volume,
@@ -581,21 +662,35 @@ class SettingsState(GameState):
         self._draw_volume_row(screen, "音效音量", self.game.sfx_volume,
                               self.selected == 1, self.ROW_Y[1])
         self._draw_speed_row(screen, self.selected == 2, self.ROW_Y[2])
-        self._draw_boss_art_row(screen, self.selected == 3, self.ROW_Y[3])
+        self._draw_choice_row(screen, "Boss 立绘", 3, self.selected == 3)
+        self._draw_choice_row(screen, "输出分辨率", 4, self.selected == 4)
+        self._draw_choice_row(screen, "缩放模式", 5, self.selected == 5)
+        self._draw_choice_row(screen, "渲染倍率", 6, self.selected == 6)
+        self._draw_choice_row(screen, "窗口模式", 7, self.selected == 7)
 
+        # 当前生效的输出尺寸（内部逻辑分辨率始终为 960x720）
+        status = self.game.font_small.render(self.game.display_status_text(), True,
+                                             cfg.COLOR_GRAY)
         # 操作提示
-        hint = self.game.font_small.render("< / > 调节数值 / 切换立绘  F8/F9: 游戏速度  Esc 返回",
-                                           True, cfg.COLOR_GRAY)
-        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 428))
+        hint = self.game.font_small.render("< / > 调节数值 / 切换选项  F8/F9: 游戏速度  "
+                                           "F11: 全屏  Esc 返回", True, cfg.COLOR_GRAY)
+        # 两行文字衬一层半透明底，避免落在明亮背景上看不清
+        band_w = max(status.get_width(), hint.get_width()) + 32
+        band_h = self.HINT_Y - self.STATUS_Y + hint.get_height() + 16
+        band = hires.ui_panel(screen, (band_w, band_h))
+        band.fill((0, 0, 0, 150))
+        screen.blit(band, ((cfg.SCREEN_WIDTH - band_w) // 2, self.STATUS_Y - 8))
+        screen.blit(status, ((cfg.SCREEN_WIDTH - status.get_width()) // 2, self.STATUS_Y))
+        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, self.HINT_Y))
 
         # 返回行
-        back_color = cfg.COLOR_YELLOW if self.selected == 4 else cfg.COLOR_WHITE
+        back_color = cfg.COLOR_YELLOW if self.selected == self.ROW_COUNT else cfg.COLOR_WHITE
         back = self.game.font_medium.render("返回", True, back_color)
         back_x = (cfg.SCREEN_WIDTH - back.get_width()) // 2
-        if self.selected == 4:
+        if self.selected == self.ROW_COUNT:
             ind = self.game.font_medium.render("> ", True, cfg.COLOR_YELLOW)
-            screen.blit(ind, (back_x - 26, 480))
-        screen.blit(back, (back_x, 480))
+            screen.blit(ind, (back_x - 26, self.BACK_Y))
+        screen.blit(back, (back_x, self.BACK_Y))
 
 
 class PlayingState(GameState):
@@ -628,7 +723,8 @@ class PlayingState(GameState):
         self.offset_y = cfg.BATTLE_OFFSET_Y
         # 战斗区以外的界面背景（周围与右侧面板）使用 bg_0.png
         self.background = load_background(cfg.MENU_BACKGROUND,
-                                          (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
+                                          (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
+                                          factor=1)
 
         # 分数与资源（从全局数据继承）
         self.score = self.game.global_data.get("score", 0)
@@ -778,7 +874,7 @@ class PlayingState(GameState):
         right = cfg.BATTLE_OFFSET_X + cfg.BATTLE_AREA_WIDTH - 12  # 战斗区右上角（右对齐）
         y = cfg.BATTLE_OFFSET_Y + 12
 
-        band = pygame.Surface((text.get_width() + 32, text.get_height() + 12), pygame.SRCALPHA)
+        band = hires.ui_panel(screen, (text.get_width() + 32, text.get_height() + 12))
         band.fill((0, 0, 0, int(alpha * 0.5)))
         screen.blit(band, (right - band.get_width(), y - 6))
         screen.blit(text, (right - text.get_width(), y))
@@ -1039,9 +1135,7 @@ class PlayingState(GameState):
                                self.offset_y + cfg.BATTLE_AREA_HEIGHT - 20))
             return
         # 击破结算
-        overlay = pygame.Surface((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
-                                 pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 160))
+        overlay = hires.ui_overlay(screen, (0, 0, 0), 160)
         screen.blit(overlay, (0, 0))
         title = self.game.font_large.render("符卡击破！", True, cfg.COLOR_GREEN)
         card_name = self.practice_info["card_name"]
@@ -2677,13 +2771,13 @@ class PlayingState(GameState):
         y = self.offset_y + 10
         text = self.game.font_small.render(
             f"C：{info['name']}（本面{remain}/{info['per_stage']}）", True, cfg.COLOR_YELLOW)
-        band = pygame.Surface((text.get_width() + 12, text.get_height() + 6), pygame.SRCALPHA)
+        band = hires.ui_panel(screen, (text.get_width() + 12, text.get_height() + 6))
         band.fill((0, 0, 0, 120))
         screen.blit(band, (x - 6, y - 3))
         screen.blit(text, (x, y))
         if self.c_skill_message:
             msg = self.game.font_small.render(self.c_skill_message, True, cfg.COLOR_GREEN)
-            band2 = pygame.Surface((msg.get_width() + 12, msg.get_height() + 6), pygame.SRCALPHA)
+            band2 = hires.ui_panel(screen, (msg.get_width() + 12, msg.get_height() + 6))
             band2.fill((0, 0, 0, 120))
             screen.blit(band2, (x - 6, y + text.get_height() + 2))
             screen.blit(msg, (x, y + text.get_height() + 5))

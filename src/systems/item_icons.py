@@ -3,6 +3,7 @@
 
 import os
 import pygame
+from src.engine import hires
 from src.engine import settings as cfg
 
 _icon_cache = {}
@@ -14,9 +15,15 @@ def get_item_icon_path(item_id):
     return os.path.join(cfg.ITEMS_DIR, f"{item_id}.png")
 
 
-def get_item_icon(item_id, size=32):
-    """加载物品图标并等比缩放到边长不超过 size 的方形区域；失败返回 None"""
-    key = (item_id, size)
+def get_item_icon(item_id, size=32, factor=1):
+    """加载物品图标并等比缩放到边长不超过 size 的方形区域；失败返回 None。
+
+    factor 为渲染倍率：>1 时直接缩放到高分辨率表面，图标保持原始像素，
+    不再经历「先缩到逻辑尺寸、再被整幅放大」的二次损失。
+    返回表面的度量接口仍按逻辑尺寸上报，调用方的居中计算不用改。
+    """
+    factor = max(1, int(factor))
+    key = (item_id, size, factor)
     if key in _attempted:
         return _icon_cache.get(key)
     _attempted.add(key)
@@ -30,7 +37,7 @@ def get_item_icon(item_id, size=32):
             scale = size / max(w, h)
             new_w = max(1, int(round(w * scale)))
             new_h = max(1, int(round(h * scale)))
-            _icon_cache[key] = pygame.transform.smoothscale(img, (new_w, new_h))
+            _icon_cache[key] = hires.scaled_image(img, (new_w, new_h), factor)
     except Exception as e:
         print(f"[ItemIcon] Failed to load {path}: {e}")
     return _icon_cache.get(key)
@@ -42,8 +49,14 @@ def draw_item_icon(screen, item_id, x, y, size=32, padding=0):
     inner = size - 2 * padding
     if inner <= 0:
         return
-    icon = get_item_icon(item_id, inner)
+    factor = screen.bake_factor() if hasattr(screen, "bake_factor") else 1
+    icon = get_item_icon(item_id, inner, factor)
     if icon is None:
         return
-    screen.blit(icon, (x + (size - icon.get_width()) // 2,
-                       y + (size - icon.get_height()) // 2))
+    dest = (x + (size - icon.get_width()) // 2,
+            y + (size - icon.get_height()) // 2)
+    blit_gpu = getattr(screen, "blit_gpu", None)
+    if blit_gpu is None:
+        screen.blit(icon, dest)
+    else:
+        blit_gpu(icon, dest)

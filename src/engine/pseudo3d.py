@@ -25,19 +25,56 @@ FAR_DROP_GAIN = 1.5       # far-opening drop gain during view rise (0 = fixed, h
 SEAM_BAND = 16            # 接缝修复带宽（px）：在内容接缝处做窄带融合，保留细节
 
 
+# --- 本帧由显卡原生绘制的地面 ---
+# 关卡绘制时登记（战斗区在 CPU 帧上抠空），呈现层绘制完当帧后取用并清空。
+_gpu_floor_this_frame = None
+
+
+def register_gpu_floor(floor):
+    """登记本帧的地面改由显卡原生绘制"""
+    global _gpu_floor_this_frame
+    _gpu_floor_this_frame = floor
+
+
+def take_gpu_floor():
+    """取用并清空本帧登记的 GPU 地面（无则返回 None）"""
+    global _gpu_floor_this_frame
+    floor = _gpu_floor_this_frame
+    _gpu_floor_this_frame = None
+    return floor
+
+
 class Pseudo3DFloor:
     """透视地面+洞壁渲染器，只负责战斗区域。"""
+
+    # 引擎写入：新建地面默认采用的输出倍率（GPU 呈现时 = 设置的渲染倍率）
+    default_scale = 1
+    # 引擎写入：GPU 呈现可用（True 时地面改由显卡原生绘制，见 draw_gpu）
+    gpu_active = False
 
     def __init__(self, texture_path, area_width, area_height, bg_color=(8, 12, 32),
                  horizon_ratio=HORIZON_RATIO, scroll_speed=SCROLL_SPEED,
                  wall_texture_path=None, floor_stretch=1.0, wall_stretch=1.0,
                  tunnel_width=TUNNEL_WIDTH, far_opening=FAR_OPENING,
-                 far_drop_gain=FAR_DROP_GAIN, wall_align_to_floor=False):
-        self.area_w = int(area_width)
-        self.area_h = int(area_height)
+                 far_drop_gain=FAR_DROP_GAIN, wall_align_to_floor=False,
+                 scale=None):
+        # scale = 输出像素相对「逻辑分辨率」的倍率。area_width/height 是逻辑尺寸，
+        # 几何与贴图采样按逻辑尺寸计算，只有像素位置乘 scale（见 set_scale）。
+        # 缺省取引擎写入的 default_scale：GPU 呈现时等于渲染倍率设置，否则 1。
+        if scale is None:
+            scale = Pseudo3DFloor.default_scale
+        self.logical_w = int(area_width)
+        self.logical_h = int(area_height)
+        self.horizon_ratio = float(horizon_ratio)
+        self.scale = max(1, int(scale))
+        self.area_w = self.logical_w * self.scale
+        self.area_h = self.logical_h * self.scale
         self.bg_color = bg_color
         self.scroll_speed = float(scroll_speed)
-        self.horizon = int(self.area_h * horizon_ratio)
+        # 视角高度：Boss开战等场景可让地平线上移，俯瞰战场。
+        # view_rise / _base_horizon_L 一律用逻辑单位，输出像素量 = 逻辑量 * scale
+        self._base_horizon_L = int(self.logical_h * horizon_ratio)
+        self.horizon = self._base_horizon_L * self.scale
         self.cx = self.area_w / 2.0
         self.d_max = max(1, self.area_h - self.horizon)
         self.d_wall = self.d_max / tunnel_width   # 洞壁最近点对应的行距（越小通道越宽）
@@ -80,7 +117,6 @@ class Pseudo3DFloor:
         # 换行，换行瞬间对双方都无缝。
         self._scroll_period = math.lcm(self.tile_h, self.wall_w)
 
-        # 视角高度：Boss开战等场景可让地平线上移，俯瞰战场
         self._base_horizon = self.horizon
         self.view_rise = 0.0
         self.view_rise_from = 0.0
@@ -91,22 +127,54 @@ class Pseudo3DFloor:
         self.far_opening = far_opening
         self.far_drop_gain = far_drop_gain
 
+        # 缩放目标面缓存：按尺寸复用同一张面。每帧的洞壁列/地面行条带
+        # 尺寸固定，复用目标面既省下每帧上千张小 Surface 的分配，
+        # 也大幅减少垃圾回收压力造成的掉帧毛刺
+        self._wall_dst = {}
+        self._row_dst = {}
+
+        # wants_gpu_draw 由关卡绘制时写入：本帧确实要画地面
+        # （Boss 符卡背景完全遮住时会跳过）。gpu_active 见类级开关。
+        self.wants_gpu_draw = False
+        self._geom_ver = 0          # 几何版本号，几何重建时自增
+
+        # 几何待重建标记：地平线变了只置标记，等本帧确实要画地面时才重建
+        # （符卡背景不透明时会完全遮住地面，此时关卡根本不画地面）
+        self._geom_dirty = False
         self._rebuild_geometry()
 
     def _rebuild_geometry(self):
-        """按当前地平线重建地面/洞壁几何与雾（视角抬升时随地平线更新）"""
-        self.d_max = max(1, self.area_h - self.horizon)
-        self.d_wall = self.d_max / self.tunnel_width   # 洞壁最近点对应的行距（越小通道越宽）
+        """按当前地平线重建地面/洞壁几何与雾（视角抬升时随地平线更新）。
+
+        几何与贴图采样一律在「逻辑分辨率」（area / scale）下计算，只有屏幕
+        像素位置乘回 scale。这样同一相对屏幕位置对应的贴图坐标不随输出倍率
+        变化：放大只是采样更细，构图与贴图密度保持不变。
+
+        原实现把 K_floor = PERSPECTIVE*d_max² 直接建立在输出像素之上，而
+        q = |x-cx|/cx 是归一化的，于是放大 F 倍会让贴图坐标同步推进 F 倍
+        —— 洞壁重复周期数从 1x 的约 10 个变成 3x 的约 37 个，条纹明显变密。
+        """
+        F = float(self.scale)
+        W_L = self.area_w / F
+        H_L = self.area_h / F
+        horizon_L = self.horizon / F
+        cx_L = W_L / 2.0
         cx = int(self.cx)
-        d_far = min(self.far_opening, self.d_wall - 1)
+        d_max = max(1.0, H_L - horizon_L)
+        d_wall = d_max / self.tunnel_width   # 洞壁最近点对应的行距（越小通道越宽）
+        d_far = min(self.far_opening, d_wall - 1)
         # View rise: far opening (end rectangle) drops with camera height,
         # keeping at least a strip of floor at the bottom (cap d_max - d_far - 2)
         drop = int(round(self.view_rise * self.far_drop_gain))
-        drop = max(0, min(drop, int(self.d_max - d_far - 2)))
+        drop = max(0, min(drop, int(d_max - d_far - 2)))
         self._exit_drop = drop
-        exit_bottom = self.horizon + d_far + drop
-        self.w_far = max(1, int(round(cx * d_far / self.d_wall)))   # 尽头开口半宽（px）
-        self._k_floor = PERSPECTIVE * self.d_max * self.d_max
+        exit_bottom_L = horizon_L + d_far + drop
+        self.d_max = d_max
+        self.d_wall = d_wall
+        self.w_far = max(1, int(round(cx_L * d_far / d_wall)))   # 尽头开口半宽（逻辑 px）
+        self._k_floor = PERSPECTIVE * d_max * d_max
+        self._geom_ver += 1
+        self._geom_dirty = False
 
         # 地面：每行预计算 深度 d、绘制半宽、贴图采样子段、透视采样系数 K_f/d
         # - 未满宽区域（d <= d_wall）取整张贴图行
@@ -115,52 +183,75 @@ class Pseudo3DFloor:
         self.rows = []
         k_floor = self._k_floor
         half_tile = self.tile_w / 2.0
-        for y in range(exit_bottom + 1, self.area_h):
-            d = y - self.horizon - drop
-            hw_virtual = cx * d / self.d_wall      # 未钳制的虚拟半宽（透视继续）
-            half_w = max(1, min(cx, int(round(hw_virtual))))
+        for y in range(int(math.floor(exit_bottom_L * F)) + 1, self.area_h):
+            d = y / F - horizon_L - drop
+            if d <= 0:
+                continue
+            hw_virtual = cx_L * d / d_wall      # 未钳制的虚拟半宽（透视继续）
+            half_w = max(1.0, min(cx_L, round(hw_virtual)))
             half_extent = min(half_tile, half_w * half_tile / max(hw_virtual, 1e-9))
             sub_x = max(0, int(round(half_tile - half_extent)))
             sub_w = max(1, min(self.tile_w, int(round(half_extent * 2))))
             if sub_x + sub_w > self.tile_w:
                 sub_x = self.tile_w - sub_w
-            self.rows.append((y, d, half_w, k_floor / d, sub_x, sub_w))
+            self.rows.append((y, d, int(round(half_w * F)), k_floor / d, sub_x, sub_w))
 
         # 洞壁：每列预计算 列高度 H（该列洞壁延伸到地面线）、透视采样系数 K_w/q
         # q = |x - cx| / cx（0=正前方 1=屏幕边缘），K_w = K_f / d_wall
         # 中央开口宽度内不画洞壁（|x - cx| <= w_far 为远景开口）
         self.walls = []
-        k_wall = k_floor / self.d_wall
+        k_wall = k_floor / d_wall
         for x in range(self.area_w):
-            q = abs(x - cx) / cx
-            if q <= 0 or abs(x - cx) <= self.w_far:
+            q = abs(x / F - cx_L) / cx_L
+            if q <= 0 or abs(x / F - cx_L) <= self.w_far:
                 continue
-            height = min(self.area_h, int(round(self.horizon + self.d_wall * q + drop)))
-            self.walls.append((x, height, k_wall / q))
+            height = min(H_L, horizon_L + d_wall * q + drop)
+            self.walls.append((x, int(round(height * F)), k_wall / q))
 
-        # 洞壁压暗：整个区域压暗，再擦除地面梯形和尽头开口
-        self.wall_dark = pygame.Surface((self.area_w, self.area_h), pygame.SRCALPHA)
+        # 左右镜像列合并：同一 |x-cx| 的两列，高度与采样系数完全相同，
+        # 每帧只需缩放一次，再分别 blit 到左右两侧（省掉一半缩放与取列）
+        self._wall_groups = []
+        by_dist = {}
+        for x, height, k_over_q in self.walls:
+            entry = by_dist.get(abs(x - cx))
+            if entry is None:
+                entry = by_dist[abs(x - cx)] = ([], height, k_over_q)
+            entry[0].append(x)
+        self._wall_groups.extend(by_dist.values())
+
+        # 洞壁压暗与距离雾都按「逻辑分辨率」构建：CPU 的实体层就是这个尺寸，
+        # 每帧随实体层一起合成，既省内存也避免视角抬升时反复上传大贴图。
+        # 输入为输出像素行/列，这里折回逻辑像素。
+        self.overlay_w = int(round(W_L))
+        self.overlay_h = int(round(H_L))
+        cx_L_int = int(round(cx_L))
+
+        self.wall_dark = pygame.Surface((self.overlay_w, self.overlay_h), pygame.SRCALPHA)
         self.wall_dark.fill((0, 0, 0, WALL_DARK_ALPHA))
         self.wall_dark.fill((0, 0, 0, 0),
-                            (cx - self.w_far, 0, self.w_far * 2, exit_bottom + 1))
+                            (cx_L_int - self.w_far, 0, self.w_far * 2,
+                             int(round(exit_bottom_L)) + 1))
         for y, d, half_w, _, _, _ in self.rows:
+            hw = int(round(half_w / F))
             self.wall_dark.fill((0, 0, 0, 0),
-                                (cx - half_w, y, half_w * 2, 1))
+                                (cx_L_int - hw, int(round(y / F)), hw * 2, 1))
 
         # 距离雾：洞壁按列（固定深度）、地面按行
         # 以洞壁最近点（行距 d_wall）为雾的零点；FOG_FULL 之后完全遮断
-        self.fog = pygame.Surface((self.area_w, self.area_h), pygame.SRCALPHA)
+        self.fog = pygame.Surface((self.overlay_w, self.overlay_h), pygame.SRCALPHA)
         for x, height, _ in self.walls:
-            q = abs(x - cx) / cx
+            q = abs(x / F - cx_L) / cx_L
             alpha = self._fog_alpha(1.0 - q)
             if alpha > 0:
-                self.fog.fill((*self.bg_color, alpha), (x, 0, 1, height))
+                self.fog.fill((*self.bg_color, alpha),
+                              (int(round(x / F)), 0, 1, max(1, int(round(height / F)))))
         for y, d, half_w, _, _, _ in self.rows:
-            t = max(0.0, 1.0 - d / self.d_wall)
+            t = max(0.0, 1.0 - d / d_wall)
             alpha = self._fog_alpha(t)
             if alpha > 0:
+                hw = int(round(half_w / F))
                 self.fog.fill((*self.bg_color, alpha),
-                              (cx - half_w, y, half_w * 2, 1))
+                              (cx_L_int - hw, int(round(y / F)), hw * 2, 1))
 
     @staticmethod
     def _make_tileable(surface, axis, band=SEAM_BAND):
@@ -305,25 +396,129 @@ class Pseudo3DFloor:
             if self.view_rise_t >= self.view_rise_dur:
                 self.view_rise = self.view_rise_target
                 self.view_rise_dur = 0.0
-            new_horizon = int(round(self._base_horizon - self.view_rise))
+            new_horizon = int(round((self._base_horizon_L - self.view_rise)
+                                    * self.scale))
             if new_horizon != self.horizon:
                 self.horizon = new_horizon
-                self._rebuild_geometry()
+            # 视角高度一变就要重建：几何里的远端下落量（drop）直接由 view_rise
+            # 决定，只盯着地平线整数变化会漏掉「地平线没跨过整像素但视角在动」
+            # 的那些帧，地面远端会滞后一两像素
+            self._geom_dirty = True
+
+    def ensure_geometry(self):
+        """本帧真要画地面时才重建几何（重建与否由调用方决定）。
+
+        视角抬升动画期间地平线每帧都在变，重建一次要按行/逐列重建表格并
+        分配两张逻辑尺寸的压暗/雾面（约 6ms）。符卡背景不透明时会把地面
+        完全遮住，关卡那一段根本不画地面——这段时间的重建纯粹是白烧。
+        """
+        if self._geom_dirty:
+            self._rebuild_geometry()
+
+    def set_scale(self, factor):
+        """切换输出倍率：只改像素尺寸，几何与贴图采样仍是逻辑单位。
+
+        几何本身与倍率无关，所以 1x 与 3x 的构图、贴图密度完全一致，放大只是
+        采样更细。贴图与倍率无关，已上传的 GPU 纹理无需重传。
+        """
+        factor = max(1, int(factor))
+        if factor == self.scale:
+            return
+        self.scale = factor
+        self.area_w = self.logical_w * factor
+        self.area_h = self.logical_h * factor
+        self.cx = self.area_w / 2.0
+        self.horizon = self._base_horizon_L * factor
+        # 缩放目标面按尺寸缓存，倍率变了尺寸也变，整批作废
+        self._wall_dst = {}
+        self._row_dst = {}
+        self._rebuild_geometry()
+
+    def draw_gpu(self, renderer, dst_rect, tex_floor, tex_wall):
+        """在 GPU 上原生绘制地面与洞壁（每条贴图条带提交一个四边形）。
+
+        与 draw() 等价，只是把「每行/每列一次缩放 + blit」换成显卡的纹理四边形：
+        CPU 只负责取列/取行与坐标计算，拉伸采样交给显卡，倍率提高后不再有
+        CPU 侧的像素代价。压暗层与距离雾仍留在 CPU 侧（见 _rebuild_geometry）。
+        """
+        self.ensure_geometry()
+        # 先用背景色铺满战斗区：CPU 路径下这里是那层 pygame.draw.rect 的底色，
+        # 几何没覆盖到的像素（如视角抬升后的边角）不会露出呈现层的清屏色
+        renderer.draw_color = (*self.bg_color, 255)
+        renderer.fill_rect(dst_rect)
+        k = dst_rect[2] / float(self.area_w)
+        ox, oy = dst_rect[0], dst_rect[1]
+        scroll = self.scroll
+        cx = self.cx
+        tile_h = self.tile_h
+        wall_w = self.wall_w
+        wall_h = self.wall_h
+        draw_wall = tex_wall.draw
+        draw_floor = tex_floor.draw
+        if k == 1.0:
+            # 常用情形（输出恰好是渲染倍率的整数倍）：坐标已是像素，省掉浮点运算
+            for xs, height, k_wall_over_q in self._wall_groups:
+                v = int((k_wall_over_q + scroll) % wall_w)
+                for x in xs:
+                    draw_wall(srcrect=(v, 0, 1, wall_h),
+                              dstrect=(ox + x, oy, 1, height))
+            for y, d, half_w, k_over_d, sub_x, sub_w in self.rows:
+                v = int((k_over_d + scroll) % tile_h)
+                draw_floor(srcrect=(sub_x, v, sub_w, 1),
+                           dstrect=(ox + cx - half_w, oy + y, half_w * 2, 1))
+            return
+        for xs, height, k_wall_over_q in self._wall_groups:
+            v = int((k_wall_over_q + scroll) % wall_w)
+            h = max(1, int(round(height * k)))
+            for x in xs:
+                x0 = int(x * k)
+                draw_wall(srcrect=(v, 0, 1, wall_h),
+                          dstrect=(ox + x0, oy, max(1, int((x + 1) * k) - x0), h))
+        for y, d, half_w, k_over_d, sub_x, sub_w in self.rows:
+            v = int((k_over_d + scroll) % tile_h)
+            y0 = int(y * k)
+            draw_floor(srcrect=(sub_x, v, sub_w, 1),
+                       dstrect=(ox + int((cx - half_w) * k), oy + y0,
+                                max(1, int(half_w * 2 * k)),
+                                max(1, int((y + 1) * k) - y0)))
 
     def draw(self, screen, offset_x=0, offset_y=0):
+        """绘制战斗区背景：洞壁 → 地面 → 压暗层 → 距离雾。
+
+        洞壁与地面都是「每列/每行取贴图一条、拉伸后贴一次」，每帧近千次
+        缩放与 blit，是全局最大的绘制开销。这里做两件事：
+        - 左右镜像的洞壁列共用一次缩放结果（两列高度、采样系数完全相同）
+        - 缩放写入按尺寸复用的目标面，避免每帧新建大量小 Surface
+        """
+        self.ensure_geometry()
         scroll = self.scroll
         cx = int(self.cx)
+        blit = screen.blit
+        scale = pygame.transform.scale
+        wall_tile = self.wall_tile
+        wall_w = self.wall_w
+        wall_h = self.wall_h
+        wall_dst = self._wall_dst
         # 洞壁（逐列：竖纹理，向两侧掠过）
-        for x, height, k_wall_over_q in self.walls:
-            v = int((k_wall_over_q + scroll) % self.wall_w)
-            col = self.wall_tile.subsurface((v, 0, 1, self.wall_h))
-            wall_col = pygame.transform.scale(col, (1, height))
-            screen.blit(wall_col, (offset_x + x, offset_y))
+        for xs, height, k_wall_over_q in self._wall_groups:
+            v = int((k_wall_over_q + scroll) % wall_w)
+            target = wall_dst.get(height)
+            if target is None:
+                target = wall_dst[height] = pygame.Surface((1, height))
+            scale(wall_tile.subsurface((v, 0, 1, wall_h)), (1, height), target)
+            for x in xs:
+                blit(target, (offset_x + x, offset_y))
         # 地面（逐行：横纹理，向镜头拉近；底部随靠近放大并向两侧展开）
+        tile = self.tile
+        tile_h = self.tile_h
+        row_dst = self._row_dst
         for y, d, half_w, k_over_d, sub_x, sub_w in self.rows:
-            v = int((k_over_d + scroll) % self.tile_h)
-            row = self.tile.subsurface((sub_x, v, sub_w, 1))
-            strip = pygame.transform.scale(row, (half_w * 2, 1))
-            screen.blit(strip, (offset_x + cx - half_w, offset_y + y))
-        screen.blit(self.wall_dark, (offset_x, offset_y))
-        screen.blit(self.fog, (offset_x, offset_y))
+            v = int((k_over_d + scroll) % tile_h)
+            width = half_w * 2
+            target = row_dst.get(width)
+            if target is None:
+                target = row_dst[width] = pygame.Surface((width, 1))
+            scale(tile.subsurface((sub_x, v, sub_w, 1)), (width, 1), target)
+            blit(target, (offset_x + cx - half_w, offset_y + y))
+        blit(self.wall_dark, (offset_x, offset_y))
+        blit(self.fog, (offset_x, offset_y))

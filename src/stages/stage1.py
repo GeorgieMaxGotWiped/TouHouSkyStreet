@@ -3,7 +3,7 @@
 import pygame
 import random
 from src.engine import settings as cfg
-from src.engine.pseudo3d import Pseudo3DFloor
+from src.engine.pseudo3d import Pseudo3DFloor, register_gpu_floor
 from src.entities.enemy import EnemyManager, EnemyWave, FairyEnemy, SpiritEnemy, GuardEnemy
 from src.entities.boss import Boss, SpellCard
 from src.entities.boss import (
@@ -213,21 +213,39 @@ class Stage:
         """子类可覆写：关底Boss开战时触发（如背景视角变化）"""
         pass
 
+    def iter_floors(self):
+        """本关用到的伪3D 地面渲染器（引擎据此统一设置渲染倍率）"""
+        floors = []
+        for name in ("background", "background_fortress"):
+            floor = getattr(self, name, None)
+            if floor is not None:
+                floors.append(floor)
+        return floors
+
     def draw(self, screen, offset_x=0, offset_y=0):
-        # 背景（仅战斗区域）
-        pygame.draw.rect(screen, self.bg_color,
-                         (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
         # 符卡背景已完全覆盖时跳过伪3D背景绘制（省性能）
         hide_floor = any(
             b is not None and b.spell_bg is not None and not b.spell_bg.done and b.spell_bg.is_opaque
             for b in (self.mid_boss, self.boss))
-        if self.background and not hide_floor:
-            self.background.draw(screen, offset_x, offset_y)
-            if self.background_darkness:
-                dark = pygame.Surface(
-                    (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), pygame.SRCALPHA)
-                dark.fill((0, 0, 0, self.background_darkness))
-                screen.blit(dark, (offset_x, offset_y))
+        floor = self.background
+        if floor is not None and floor.gpu_active and not hide_floor:
+            # 地面改由显卡原生绘制：战斗区在 CPU 帧上抠空，让下层的高分辨率
+            # 地面透出来。压暗层仍在这一层合成，弹幕照旧在它之上。
+            screen.fill((0, 0, 0, 0),
+                        (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
+            register_gpu_floor(floor)
+        else:
+            # 背景（仅战斗区域）
+            pygame.draw.rect(screen, self.bg_color,
+                             (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH,
+                              cfg.BATTLE_AREA_HEIGHT))
+            if floor is not None and not hide_floor:
+                floor.draw(screen, offset_x, offset_y)
+        if floor is not None and not hide_floor and self.background_darkness:
+            dark = pygame.Surface(
+                (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), pygame.SRCALPHA)
+            dark.fill((0, 0, 0, self.background_darkness))
+            screen.blit(dark, (offset_x, offset_y))
 
         # 符卡特殊背景（Boss 展开符卡时覆盖在关卡背景之上、弹幕之下）
         for boss_ref in (self.mid_boss, self.boss):

@@ -8,6 +8,7 @@ import pygame
 from src.engine import settings as cfg
 from src.engine import boss_art
 from src.engine.collision import circle_collision
+from src.engine import hires
 from src.engine.fallback_font import FallbackFont
 from src.engine.spell_bg import SpellBackground
 from src.entities.bullet import Bullet, create_bullet_aimed, create_bullet_angle
@@ -51,9 +52,14 @@ _boss_sprite_cache = {}
 _boss_sprite_attempted = set()
 
 
-def _get_boss_sprite(path, target_height):
-    """加载并缓存 Boss 贴图（按目标高度等比缩放）；失败返回 None（回退几何绘制）"""
-    key = (path, target_height)
+def _get_boss_sprite(path, target_height, sharp=False):
+    """加载并缓存 Boss 贴图（按目标高度等比缩放）；失败返回 None（回退几何绘制）
+
+    sharp=True 走文字/立绘的高分辨率图层（符卡宣言那类整幅立绘用），像素乘渲染
+    倍率但度量仍是逻辑尺寸；战斗中的贴图与碰撞 Mask 一律用默认的 1x 版本，
+    这样判定范围不随画面设置改变。
+    """
+    key = (path, target_height, bool(sharp))
     if key in _boss_sprite_attempted:
         return _boss_sprite_cache.get(key)
     _boss_sprite_attempted.add(key)
@@ -66,7 +72,10 @@ def _get_boss_sprite(path, target_height):
         if h <= 0:
             raise ValueError("invalid sprite height")
         new_w = max(1, round(w * target_height / h))
-        _boss_sprite_cache[key] = pygame.transform.smoothscale(img, (new_w, target_height))
+        if sharp:
+            _boss_sprite_cache[key] = hires.scaled_image(img, (new_w, target_height))
+        else:
+            _boss_sprite_cache[key] = pygame.transform.smoothscale(img, (new_w, target_height))
     except Exception as e:
         print(f"[Boss] Failed to load boss sprite {path}: {e}")
     return _boss_sprite_cache.get(key)
@@ -214,6 +223,7 @@ SPELL_BANNER_DURATION = 100       # 总时长（帧）
 SPELL_BANNER_FADE_IN = 12         # 淡入帧数
 SPELL_BANNER_FADE_OUT = 40        # 淡出帧数
 SPELL_BANNER_SPRITE_HEIGHT = 648  # 立绘展示高度（px）
+SPELL_BANNER_FONT_SIZE = 34       # 符卡名字号（首次使用该字号要解析字体，约 5ms）
 PHANTOM_DRAGON_HEIGHT = 52        # 龙符幻影龙贴图展示高度（px）
 SPELL_BANNER_DROP = 36            # 淡出时向下平移距离（px）
 
@@ -1646,15 +1656,17 @@ class Boss:
         # 整幅立绘（等比放大铺满战斗区域中部）
         if self.sprite_path:
             banner_h = _banner_target_height(self.sprite_path)
-            sprite = _get_boss_sprite(self.sprite_path, banner_h)
+            sprite = _get_boss_sprite(self.sprite_path, banner_h, sharp=True)
             if sprite is not None:
-                if alpha < 255:
-                    sprite = _with_alpha(sprite, alpha)
+                # 整幅立绘逐帧调透明度：copy+fill 在 3x 下要 ~14ms/帧，横幅
+                # 100 帧全程被拖到 30fps。改用表面级 alpha（pygame 2 对带逐像素
+                # 透明的表面同样生效），开销接近 0，alpha=255 时与原样贴图等价。
+                sprite.set_alpha(alpha)
                 screen.blit(sprite, (cx - sprite.get_width() // 2, cy - sprite.get_height() // 2))
 
         # 符卡名（居中，加粗 + 下方投影，无底框）
         if self.spell_banner_name:
-            font = _get_font(34, bold=True)
+            font = _get_font(SPELL_BANNER_FONT_SIZE, bold=True)
             shadow = font.render(self.spell_banner_name, True, self.color)
             text = font.render(self.spell_banner_name, True, cfg.COLOR_WHITE)
             shadow = _with_alpha(shadow, int(alpha * 0.7))
