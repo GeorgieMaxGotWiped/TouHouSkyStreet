@@ -2,7 +2,7 @@
   "categories": [
     {
       "id": "player",
-      "label": "玩家"
+      "label": "自机"
     },
     {
       "id": "boss",
@@ -11,10 +11,28 @@
   ],
   "items": [
     {
-      "id": "player",
-      "name": "玩家（自机）",
+      "id": "mage",
+      "name": "魔法使 Mage",
       "category": "player",
-      "image": "assets/gallery/player.webp"
+      "image": "assets/gallery/mage.webp"
+    },
+    {
+      "id": "archer",
+      "name": "弓手 Archer",
+      "category": "player",
+      "image": "assets/gallery/archer.webp"
+    },
+    {
+      "id": "berserk",
+      "name": "狂战士 Berserk",
+      "category": "player",
+      "image": "assets/gallery/berserk.webp"
+    },
+    {
+      "id": "tank",
+      "name": "重装 Tank",
+      "category": "player",
+      "image": "assets/gallery/tank.webp"
     },
     {
       "id": "arachne",

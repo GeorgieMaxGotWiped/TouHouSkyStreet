@@ -1,0 +1,42 @@
+# 官网发布：把 web/ 目录当作站点根发布到 GitHub Pages。
+#
+# 首次使用需要在仓库 Settings -> Pages 把 Source 设为 "GitHub Actions"（一次点击），
+# 之后推送到 main 且改动涉及 web/ 时会自动重新发布，也可以在 Actions 页手动触发。
+name: Deploy website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v7
+      - name: 读取 Pages 配置
+        uses: actions/configure-pages@v6
+      # 纯静态站点：直接把 web/ 打包成站点根，不走 Jekyll，因此不需要 .nojekyll
+      - name: 打包站点（web/ 为站点根）
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: web
+      - name: 发布到 Pages
+        id: deploy
+        uses: actions/deploy-pages@v5

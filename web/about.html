@@ -33,10 +33,11 @@
   <section class="section">
     <div class="container prose">
       <h2>项目简介</h2>
-      <p><strong>东方天空街 ~ Touhou Sky Street</strong> 是一款基于 Hypixel Skyblock 的东方 Project 同人弹幕射击游戏（STG），使用 Python + Pygame 开发。玩家在 6 个舞台中躲避密集弹幕、击破道中与 Boss，收集并养成 Skyblock 风格物品。</p>
+      <p><strong>东方天空街 ~ Touhou Sky Street</strong> 是一款基于 Hypixel Skyblock 的东方 Project 同人弹幕射击游戏（STG），使用 Python + Pygame 开发。玩家在四位自机中选定一位，于 6 个舞台中躲避密集弹幕、击破道中与 Boss，收集并养成 Skyblock 风格物品。</p>
       <h3>技术栈</h3>
       <ul>
         <li>游戏：Python 3.8+ / Pygame，支持打包为单文件 Windows EXE。</li>
+        <li>渲染：自建高分辨率渲染管线——文字 / 立绘 / 地面 / 弹幕按渲染倍率原生绘制，最终缩放交由显卡完成，并提供输出分辨率、缩放模式与无边框全屏等显示设置。</li>
         <li>网站：纯静态 HTML / CSS / JavaScript，零构建依赖，便于托管到任意静态空间。</li>
       </ul>
 
@@ -47,12 +48,13 @@
       <h2>素材来源</h2>
       <ul>
         <li>来自游戏内资源：<code>assets/</code>（背景 / 精灵 / 标题图 / 音乐）。</li>
+        <li>自机立绘与战斗形象按角色分目录存放：<code>assets/sprites/self/&lt;角色&gt;/</code>；Boss 立绘按套组存放：<code>assets/sprites/bosses/&lt;套组&gt;/</code>。</li>
         <li>部分图像经由脚本从 Wiki 获取（<code>download_wiki_image.ps1</code>），使用前需核对来源与许可。</li>
         <li>开发期预览截图（<code>previews/</code>）仅作示意，正式宣传图制作中。</li>
       </ul>
 
       <h2>开发日志</h2>
-      <p>详细版本更新记录见仓库 <code>RELEASE_NOTES.md</code>，本站「最新动态」将随版本同步。</p>
+      <p>详细版本更新记录见仓库 <code>RELEASE_NOTES.md</code>，首页「制作手记」随版本同步。</p>
 
       <h2>联系方式</h2>
       <p>本页为占位，正式联系方式待补充。</p>

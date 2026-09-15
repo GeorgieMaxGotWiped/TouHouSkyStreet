@@ -17,11 +17,23 @@ HOST = "127.0.0.1"  # 仅本机访问；用 127.0.0.1 而非 localhost，规避 
 START_PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
 
 
+class PreviewHandler(SimpleHTTPRequestHandler):
+    """预览专用处理器：显式禁用浏览器缓存。
+
+    静态资源只带 Last-Modified，浏览器会按"启发式缓存"把旧图留到数小时后才回源，
+    导致重跑 tools/build_assets.py 之后刷新仍看到上一版立绘。
+    """
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store, must-revalidate")
+        super().end_headers()
+
+
 def make_server(host, start, tries=40):
     """在 [start, start+tries) 里找到可用端口并绑定。"""
     for port in range(start, start + tries):
         try:
-            return ThreadingHTTPServer((host, port), SimpleHTTPRequestHandler), port
+            return ThreadingHTTPServer((host, port), PreviewHandler), port
         except OSError:
             continue
     raise SystemExit("未找到可用端口。")

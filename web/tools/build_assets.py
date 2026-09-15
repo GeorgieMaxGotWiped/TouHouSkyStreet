@@ -6,8 +6,12 @@
 
 产物：
     web/assets/img/hero.webp         # 网站头图（assets/backgrounds/bg_0.png）
+    web/assets/img/<界面>.webp        # 新版界面的实机截图（previews/...）
     web/assets/gallery/<id>.webp     # 人物图（assets/sprites/...）
     web/data/gallery.json            # 图库元数据
+
+注意：画廊 webp 不会自动跟随素材更新——立绘换新（如 assets/sprites/bosses/new/、
+assets/sprites/self/<角色>/ 被替换）后必须重跑本脚本，否则站点仍会用上一版的出图。
 """
 import json
 import os
@@ -20,8 +24,11 @@ IMG_DIR = os.path.join(ROOT, "web", "assets", "img")
 
 # (id, 源文件, 名称, 分类)：Boss 立绘取自 assets/sprites/bosses/new（游戏内默认套组）
 GALLERY = [
-    # —— 玩家 ——
-    ("player", "assets/sprites/self/self1.png", "玩家（自机）", "player"),
+    # —— 自机（四位，对应游戏内「选择自机」界面）——
+    ("mage", "assets/sprites/self/Mage/self1.png", "魔法使 Mage", "player"),
+    ("archer", "assets/sprites/self/Archer/Archer.png", "弓手 Archer", "player"),
+    ("berserk", "assets/sprites/self/Berserk/Berserk.png", "狂战士 Berserk", "player"),
+    ("tank", "assets/sprites/self/Tank/Tank.png", "重装 Tank", "player"),
     # —— Boss / 角色 ——
     ("arachne", "assets/sprites/bosses/new/Arachne.png", "蛛后 Arachne", "boss"),
     ("bonzo", "assets/sprites/bosses/new/Bonzo.png", "邦佐 Bonzo", "boss"),
@@ -38,6 +45,14 @@ GALLERY = [
     ("thorn", "assets/sprites/bosses/new/Thorn.png", "荆棘 Thorn", "boss"),
     ("watcher", "assets/sprites/bosses/new/The_Watcher.png", "守望者 Watcher", "boss"),
     ("wither_king", "assets/sprites/bosses/new/Wither_King.png", "凋零之王 Wither King", "boss"),
+]
+
+# 实机截图：(产物名, 源文件)。源文件取自开发期预览 previews/（由 tools/ 下的脚本生成）；
+# 早期四张 PNG 截图（gameplay-1/2、loadout、shop）保持原样，不在此表内。
+SCREENSHOTS = [
+    ("chara-select.webp", "previews/_chara_select/_view_chara_0.png"),
+    ("difficulty.webp", "previews/_chara_select/_view_difficulty_after.png"),
+    ("settings.webp", "previews/_self_mage/_view_settings_after.png"),
 ]
 
 
@@ -59,6 +74,13 @@ def make_webp(src_rel, dst_abs, max_h=800, quality=82, portrait=False):
     return im.size
 
 
+def make_screenshot(src_rel, dst_abs, quality=82):
+    """实机截图转 WebP（截图已是 960x720 的逻辑分辨率，直接转码即可）"""
+    im = Image.open(os.path.join(ROOT, src_rel)).convert("RGB")
+    im.save(dst_abs, "WEBP", quality=quality, method=6)
+    return im.size
+
+
 def main():
     os.makedirs(GALLERY_DIR, exist_ok=True)
     os.makedirs(IMG_DIR, exist_ok=True)
@@ -67,6 +89,15 @@ def main():
     hero = os.path.join(IMG_DIR, "hero.webp")
     size = make_webp("assets/backgrounds/bg_0.png", hero, max_h=1200, quality=80)
     print("头图 -> %s %s %dkB" % (hero, size, os.path.getsize(hero) // 1024))
+
+    # 实机截图
+    for name, rel in SCREENSHOTS:
+        if not os.path.exists(os.path.join(ROOT, rel)):
+            print("跳过（缺源）：%s" % rel)
+            continue
+        dst = os.path.join(IMG_DIR, name)
+        size = make_screenshot(rel, dst)
+        print("截图 -> %-18s %s %dkB" % (name, size, os.path.getsize(dst) // 1024))
 
     # 人物图
     items = []
@@ -87,7 +118,7 @@ def main():
     out = os.path.join(ROOT, "web", "data", "gallery.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"categories": [
-            {"id": "player", "label": "玩家"},
+            {"id": "player", "label": "自机"},
             {"id": "boss", "label": "Boss / 角色"},
         ], "items": items}, f, ensure_ascii=False, indent=2)
     print("图库数据 -> %s（%d 张）" % (out, len(items)))

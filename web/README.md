@@ -11,26 +11,27 @@
 
 > 请用 `127.0.0.1` 而不是 `localhost`，避免 IPv6 解析导致的连接问题。
 > 图鉴 / 画廊 / OST 页通过 `fetch` 读取 `data/*.json`，**必须经由 HTTP 服务访问**（直接双击 HTML 文件无法加载）。
+> 预览服务对所有响应附加 `Cache-Control: no-store`，重跑 `tools/build_assets.py` 换图后刷新即可看到新出图，无需手动清缓存。
 
 ## 页面
 
 | 路径 | 说明 |
 | --- | --- |
-| `index.html` | 首页：标题画面（bg_0 原画）、特色、舞台、截图、手记 |
-| `gameplay.html` | 玩法、操作、难度与模式 |
-| `characters.html` | 六大舞台与主要 Boss（图鉴整理中） |
+| `index.html` | 首页：标题画面（bg_0 原画）、特色、舞台、实机截图、制作手记 |
+| `gameplay.html` | 玩法、自机选择、操作、画面与显示设置、难度与模式 |
+| `characters.html` | 四位自机与六大舞台 / Boss |
 | `items.html` | 物品图鉴（按罕见度/类型筛选） |
-| `gallery.html` | 人物画廊：玩家与 Boss 图鉴（瀑布流 + 灯箱） |
+| `gallery.html` | 人物画廊：四位自机与 Boss 图鉴（瀑布流 + 灯箱） |
 | `ost.html` | 原声音乐页（曲目暂空） |
-| `download.html` | 下载、系统要求、运行方式 |
-| `about.html` | 项目简介、同人声明、素材许可 |
+| `download.html` | 下载、系统要求、运行方式、画面设置 |
+| `about.html` | 项目简介、技术栈、同人声明、素材许可 |
 
 ## 数据
 
 | 文件 | 生成方式 |
 | --- | --- |
 | `data/items.json` | `python web/tools/export_items.py`（从游戏源码导出） |
-| `data/gallery.json` | `python web/tools/build_assets.py`（人物图优化 + 元数据） |
+| `data/gallery.json` | `python web/tools/build_assets.py`（自机 / Boss 立绘优化 + 元数据，同时生成 `assets/img/` 下的新版界面截图） |
 | `data/music.json` | 手动维护，当前曲目为空 |
 
 ## 目录
@@ -46,11 +47,11 @@ web/
   data/items.json       # 物品数据（导出生成）
   data/gallery.json     # 画廊数据（导出生成）
   data/music.json       # 曲目数据（手动）
-  assets/img/           # 站点位图素材（含 hero.webp 头图）
+  assets/img/           # 站点位图素材（hero.webp 头图 + 实机截图）
   assets/gallery/       # 人物图（WebP）
   assets/fonts/         # font1.ttf（英文）/ font2.otf（中文）
   serve.py              # 本地多线程服务
   启动预览.bat          # 一键预览
   tools/export_items.py # 物品数据导出脚本
-  tools/build_assets.py # 头图/人物图优化 + 画廊数据
+  tools/build_assets.py # 头图 / 实机截图 / 人物图优化 + 画廊数据
 ```
