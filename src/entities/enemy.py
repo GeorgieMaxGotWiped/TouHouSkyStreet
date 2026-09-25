@@ -5,26 +5,43 @@ import math
 import random
 import pygame
 from src.engine import settings as cfg
+from src.engine import boss_art
+from src.engine import hires
 from src.engine.collision import circle_collision, circle_ellipse_collision
 from src.entities.bullet import Bullet, create_bullet_aimed, create_bullet_angle
 
-# 小怪贴图缓存（路径 + 目标高度 -> Surface）
+# 小怪贴图缓存（路径 + 目标高度 + 渲染倍率 -> Surface）
 _enemy_sprite_cache = {}
 _enemy_sprite_attempted = set()
 
 
-def _get_enemy_sprite(path, target_height):
-    key = (path, target_height)
+def _get_enemy_sprite(path, target_height, factor=1):
+    """小怪贴图；factor > 1 时返回按渲染倍率放大的高清版（战斗区实体层用）
+
+    高分辨率版的度量仍是逻辑尺寸（见 hires.HiresSurface），所以画布上的居中算式
+    一行都不用改。判定范围 / 白色描边仍取默认的 1x 版本，不受画面设置影响。
+    """
+    factor = max(1, int(factor))
+    key = (path, target_height, factor)
     if key in _enemy_sprite_attempted:
         return _enemy_sprite_cache.get(key)
     _enemy_sprite_attempted.add(key)
     try:
-        img = pygame.image.load(path).convert_alpha()
+        # 走 boss_art 的共享解码缓存：小怪贴图与 Boss / 符卡演出贴图常常是同一张
+        # （第 4 面的巨人、石像兵既是小怪也是符卡召唤物），共用一份缓存以后，
+        # 载入界面按路径预热的图在这里直接命中，不会再解码一次。
+        img = boss_art.load_sprite(path)
+        if img is None:
+            raise ValueError("sprite unavailable")
         w, h = img.get_size()
         if h <= 0:
             raise ValueError("invalid sprite height")
         new_w = max(1, int(round(w * target_height / h)))
-        _enemy_sprite_cache[key] = pygame.transform.smoothscale(img, (new_w, target_height))
+        if factor > 1:
+            _enemy_sprite_cache[key] = hires.scaled_image(img, (new_w, target_height),
+                                                          factor)
+        else:
+            _enemy_sprite_cache[key] = pygame.transform.smoothscale(img, (new_w, target_height))
     except Exception as exc:
         print(f"[Enemy] Failed to load enemy sprite {path}: {exc}")
     return _enemy_sprite_cache.get(key)
@@ -249,12 +266,21 @@ class Enemy:
         # 贴图（若有）：多帧循环 + 半透明白色呼吸描边
         if self.sprite_paths:
             frame = (self.age // self.anim_speed) % len(self.sprite_paths)
-            sprite, white_layer = _get_outlined_layers(self.sprite_paths[frame], self.sprite_height)
+            path = self.sprite_paths[frame]
+            sprite, white_layer = _get_outlined_layers(path, self.sprite_height)
             if sprite is not None and white_layer is not None:
+                # 呼吸描边是逐帧改「表面级」alpha 的半透明副本：显卡指令只认逐像素
+                # alpha，所以它继续画在 1x 画布上（本身就是柔光，看不出落差）；
+                # 本体贴图改走战斗区实体层，按渲染倍率原生绘制
                 glow = white_layer.copy()
                 glow.set_alpha(_breath_alpha(self.age))
                 screen.blit(glow, (px - glow.get_width() // 2, py - glow.get_height() // 2))
-                screen.blit(sprite, (px - sprite.get_width() // 2, py - sprite.get_height() // 2))
+                body = _get_enemy_sprite(path, self.sprite_height, hires.scale())
+                if body is None:            # 高清版取失败时退回 1x 那一张
+                    body = sprite
+                hires.blit_entity(screen, body,
+                                  (px - body.get_width() // 2,
+                                   py - body.get_height() // 2))
                 return
 
         # 本体（六边形）+ 半透明白色呼吸描边
@@ -522,4 +548,3 @@ class EnemyManager:
         self.active_enemies.clear()
         self.current_wave_idx = 0
         self.wave_complete = False
-

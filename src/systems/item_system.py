@@ -84,7 +84,7 @@ _EFFECT_LORE = {
     "tracking_damage_pct": "追踪弹伤害+{}%",
     "non_tracking_damage_pct": "非追踪弹伤害+{}%",
     "tracking_high_speed_damage_pct": "高速状态追踪弹伤害+{}%",
-    "fixed_bullet_speed_pct": "低速状态固定弹射速+{}%",
+    "fixed_double_damage_chance": "低速状态固定弹有{}%概率造成双倍伤害",
     "graze_slow_pct": "低速状态擦弹范围内敌弹速度-{}%",
     "fixed_bullet_add": "固定弹道{}条",
     "tracking_bullet_add": "追踪弹道+{}条",
@@ -477,7 +477,7 @@ SKYBLOCK_ITEMS = {
     # ============ 重铸石 ============
     "necromancers_brooch": SkyblockItem(
         "necromancers_brooch", "Necromancer's Brooch", "RARE", "reforge_stone",
-        lore=["Reforge Stone", "Necrotic：低速状态下固定弹射速+3%"],
+        lore=["Reforge Stone", "Necrotic：低速状态下固定弹有3%概率造成双倍伤害"],
         buy_price="1M", sell_price="350k",
     ),
     "red_scarf": SkyblockItem(
@@ -615,8 +615,8 @@ REFORGES = {
     "necrotic": {
         "name": "Necrotic",
         "label": "死灵",
-        "effects": {"fixed_bullet_speed_pct": 3},
-        "lore": ["低速状态下固定弹射速+3%"],
+        "effects": {"fixed_double_damage_chance": 3},
+        "lore": ["低速状态下固定弹有3%概率造成双倍伤害"],
     },
     "loving": {
         "name": "Loving",

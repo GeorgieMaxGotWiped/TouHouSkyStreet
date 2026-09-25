@@ -13,6 +13,8 @@
 import colorsys
 
 import pygame
+from src.engine import hires
+from src.engine.painter import SurfaceCache
 from src.engine import settings as cfg
 
 # 槽位 → 源图裁剪区域 (x, y, w, h)，相对 etama.png 左上角
@@ -89,7 +91,10 @@ SLOT_RECTS = _build_slot_rects()
 
 _atlas = None             # 整张图集 Surface
 _atlas_attempted = False
-_cache = {}               # (slot, width, angle_deg, color) -> Surface
+# (slot, width, angle_deg, color, 倍率) -> Surface
+# 上限：显卡路径上每个旋转变体都是一张独立贴图（也是显存里的一张纹理），必须有界。
+# 实际工作集很小（同一场战斗里弹种组合不到 10 种），给几百个变体足够。
+_cache = SurfaceCache(limit=512)
 _color_sig_cache = {}     # slot -> (r, g, b) 原图代表性颜色
 _color_pick_cache = {}    # (base_slot, color) -> 最接近的颜色槽位
 
@@ -150,6 +155,20 @@ def get_native_size(slot):
     return rect[2], rect[3]
 
 
+# 高分辨率路径的旋转量化步长（度）：每步一种贴图，最多 360 / 步长 种
+_ANGLE_STEP = 3
+
+
+def _quantize_angle(angle_deg):
+    """把旋转角度量化到 _ANGLE_STEP 度一档（显卡路径的贴图缓存 key）"""
+    return int(round(angle_deg / float(_ANGLE_STEP))) * _ANGLE_STEP % 360
+
+
+def angle_step():
+    """旋转量化步长（度）。调用方按这个档距自己量化，缓存 key 才不会每帧都变。"""
+    return _ANGLE_STEP
+
+
 def _slot_candidates(base_slot):
     """返回与 base_slot 同排 / 同大弹带的全部颜色变体槽位。"""
     rect = SLOT_RECTS.get(base_slot)
@@ -200,6 +219,16 @@ def _slot_color_signature(slot):
     return sig
 
 
+def warm_color_signatures():
+    """预先把所有图集槽位的代表性颜色算出来（载入界面调用）
+
+    每个槽位要逐像素扫一遍原图（16x16 约 0.1ms、32x32 约 0.4ms），第一次用到
+    某个弹种的几帧会因此多出几毫秒。弹种是有限的，载入界面一次算完更划算。
+    """
+    for slot in SLOT_RECTS:
+        _slot_color_signature(slot)
+
+
 def _hsv_distance(color_a, color_b):
     """按色相、饱和度和明度比较颜色，色相优先，避免绿色误配成青色。"""
     ha, sa, va = colorsys.rgb_to_hsv(*(channel / 255.0 for channel in color_a))
@@ -239,36 +268,56 @@ def pick_color_slot(base_slot, color):
     return chosen
 
 
-def get_sprite(slot, width, angle_deg=None, tint_color=None):
+def _scale_crop(crop, real_size, factor):
+    """按倍率缩放裁剪出来的原图
+
+    整数倍（显卡路径）走最近邻：像素画放大后是硬的像素块，这才是「原生分辨率」
+    该有的样子；1x 仍然用 smoothscale（与旧版一致）。
+    """
+    if factor > 1:
+        return pygame.transform.scale(crop, real_size)
+    return pygame.transform.smoothscale(crop, real_size)
+
+
+def get_sprite(slot, width, angle_deg=None, tint_color=None, factor=1):
     """取槽位贴图，缩放到指定宽度（保持源图宽高比），可按角度旋转、按颜色染色。
 
+    factor > 1 时返回「逻辑尺寸 x factor」的高分辨率表面（带 hi_scale 标记，显卡
+    可 1:1 贴出），调用方拿到的度量接口仍是逻辑尺寸。
     返回 Surface；图集缺失或槽位不存在时返回 None。
-    结果按 (slot, width, angle_deg, color) 缓存。
+    结果按 (slot, width, angle, color, factor) 缓存。
     """
+    factor = max(1, int(factor))
     if slot not in SLOT_RECTS:
         return None
     atlas = _load_atlas()
     if atlas is None:
         return None
-    angle = int(round(angle_deg)) % 360 if angle_deg else 0
+    raw_angle = int(round(angle_deg)) % 360 if angle_deg else 0
+    # 高分辨率路径上必须按角度缓存：角度每帧都在变的弹（米弹 / 尖弹 / 刀弹）如果
+    # 按原角度建图，每帧每发都会新建一张贴图 —— 缓存永远命不中，还会变成每帧一次
+    # 纹理上传。量化成 3 度一档（最多 120 种）后全部命中，肉眼看不出来。
+    angle = _quantize_angle(raw_angle) if factor > 1 else raw_angle
     color_key = tuple(int(c) for c in tint_color) if tint_color else None
-    key = (slot, width, angle, color_key)
-    cached = _cache.get(key)
-    if cached is not None:
-        return cached
+    key = (slot, width, angle, color_key, factor)
     rect = SLOT_RECTS[slot]
-    crop = atlas.subsurface(rect).copy()   # subsurface 是视图，copy 后独立缩放
-    sw, sh = crop.get_size()
-    height = max(1, int(round(width * sh / sw)))
-    width = max(1, width)
-    if (width, height) != (sw, sh):
-        crop = pygame.transform.smoothscale(crop, (width, height))
-    if tint_color:
-        crop = _tint(crop, tint_color)
-    if angle:
-        crop = pygame.transform.rotate(crop, angle)
-    _cache[key] = crop
-    return crop
+
+    def _build():
+        crop = atlas.subsurface(rect).copy()   # subsurface 是视图，copy 后独立缩放
+        sw, sh = crop.get_size()
+        real_w = max(1, int(round(max(1, width) * factor)))
+        real_h = max(1, int(round(real_w * sh / float(sw))))
+        if tint_color:
+            crop = _tint(crop, tint_color)
+        if (real_w, real_h) != (sw, sh):
+            crop = _scale_crop(crop, (real_w, real_h), factor)
+        if angle:
+            crop = pygame.transform.rotate(crop, angle)
+        if factor > 1:
+            crop = hires.wrap(crop, factor)
+        return crop
+
+    return _cache.get(key, _build)
 
 
 def clear_cache():

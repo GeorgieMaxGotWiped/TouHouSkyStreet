@@ -4,6 +4,7 @@
 import math
 import pygame
 from src.engine import settings as cfg
+from src.engine import hires
 from src.engine.collision import circle_collision
 
 
@@ -12,8 +13,10 @@ _player_sprite_attempted = set()
 _player_glow_cache = {}
 
 
-def _load_player_sprite(path):
-    key = path
+def _load_player_sprite(path, factor=1):
+    """立绘 → 自机贴图（factor > 1 时像素乘渲染倍率的高清版，度量仍是逻辑尺寸）"""
+    factor = max(1, int(factor))
+    key = (path, factor)
     if key in _player_sprite_attempted:
         return _player_sprite_cache.get(key)
     _player_sprite_attempted.add(key)
@@ -25,38 +28,53 @@ def _load_player_sprite(path):
         img = img.subsurface(bbox)
         target_h = max(1, cfg.PLAYER_SPRITE_HEIGHT)
         target_w = max(1, int(round(img.get_width() * target_h / img.get_height())))
-        _player_sprite_cache[key] = pygame.transform.smoothscale(img, (target_w, target_h))
+        if factor > 1:
+            _player_sprite_cache[key] = hires.scaled_image(img, (target_w, target_h),
+                                                          factor)
+        else:
+            _player_sprite_cache[key] = pygame.transform.smoothscale(img, (target_w, target_h))
     except Exception as exc:
         print(f"[Player] Failed to load sprite {path}: {exc}")
         _player_sprite_cache[key] = None
     return _player_sprite_cache[key]
 
 
-def _get_player_sprite(path, flipped=False):
-    base = _load_player_sprite(path)
+def _get_player_sprite(path, flipped=False, factor=1):
+    factor = max(1, int(factor))
+    base = _load_player_sprite(path, factor)
     if base is None:
         return None
-    key = (path, flipped)
+    key = (path, flipped, factor)
     if key not in _player_sprite_cache:
-        _player_sprite_cache[key] = (
-            pygame.transform.flip(base, True, False) if flipped else base
-        )
+        if not flipped:
+            _player_sprite_cache[key] = base
+        else:
+            # flip 返回普通表面：高分辨率版的像素乘过倍率，要重新打上倍率标记
+            flipped_sprite = pygame.transform.flip(base, True, False)
+            _player_sprite_cache[key] = (hires.wrap(flipped_sprite, factor)
+                                         if factor > 1 else flipped_sprite)
     return _player_sprite_cache[key]
 
 
-def _get_player_glow(path, flipped=False):
-    sprite = _get_player_sprite(path, flipped)
+def _get_player_glow(path, flipped=False, factor=1):
+    factor = max(1, int(factor))
+    sprite = _get_player_sprite(path, flipped, factor)
     if sprite is None:
         return None
 
-    key = ("glow", path, flipped)
+    key = ("glow", path, flipped, factor)
     if key in _player_glow_cache:
         return _player_glow_cache[key]
 
     try:
-        radius = max(1, cfg.PLAYER_SPRITE_GLOW_RADIUS)
-        sw, sh = sprite.get_size()
-        glow = pygame.Surface((sw + radius * 2, sh + radius * 2), pygame.SRCALPHA)
+        # 半径与尺寸都按「真实像素」算，成品直接贴到战斗区实体层：柔光的不透明度
+        # 已经烘进像素里，不依赖表面级 alpha（显卡指令只认逐像素 alpha）
+        radius = max(1, int(round(cfg.PLAYER_SPRITE_GLOW_RADIUS * factor)))
+        sw, sh = pygame.Surface.get_size(sprite)
+        if factor > 1:
+            glow = hires.HiresSurface((sw + radius * 2, sh + radius * 2), factor)
+        else:
+            glow = pygame.Surface((sw + radius * 2, sh + radius * 2), pygame.SRCALPHA)
         mask = pygame.mask.from_surface(sprite, threshold=32)
         silhouette = mask.to_surface(setcolor=(255, 255, 255, 255), unsetcolor=(0, 0, 0, 0))
         max_alpha = max(1, cfg.PLAYER_SPRITE_GLOW_ALPHA)
@@ -66,7 +84,11 @@ def _get_player_glow(path, flipped=False):
                 if dist <= radius:
                     t = dist / radius
                     silhouette.set_alpha(int(max_alpha * (1.0 - t)))
-                    glow.blit(silhouette, (radius + dx, radius + dy))
+                    # 这里整条链路都在「真实像素」里算（半径、蒙版、偏移都是），
+                    # 所以必须绕开 HiresSurface.blit —— 那个接口按逻辑坐标收参，
+                    # 会把这张 1x 蒙版再放大一个倍率、偏移也再乘一遍，结果只在
+                    # 柔光面片的右下角留下一块白色方块（自机右下的白角）
+                    pygame.Surface.blit(glow, silhouette, (radius + dx, radius + dy))
         _player_glow_cache[key] = glow
     except Exception as exc:
         print(f"[Player] Failed to build glow for {path}: {exc}")
@@ -190,7 +212,10 @@ class Player:
             return
 
         path, flipped = self._current_sprite_spec()
-        sprite = _get_player_sprite(path, flipped)
+        # 战斗中的自机走「战斗区实体层」：贴图按渲染倍率原生绘制（度量仍是逻辑
+        # 尺寸，锚点算式不用改），倍率为 1 时取到的就是旧版那张 1x 贴图
+        factor = hires.scale()
+        sprite = _get_player_sprite(path, flipped, factor)
         if sprite is None:
             self._draw_placeholder(screen, px, py)
             return
@@ -200,12 +225,12 @@ class Player:
         sprite_x = px - sprite.get_width() // 2
         sprite_y = py - anchor_y
 
-        glow = _get_player_glow(path, flipped)
+        glow = _get_player_glow(path, flipped, factor)
         if glow is not None:
             radius = max(1, cfg.PLAYER_SPRITE_GLOW_RADIUS)
-            screen.blit(glow, (sprite_x - radius, sprite_y - radius))
+            hires.blit_entity(screen, glow, (sprite_x - radius, sprite_y - radius))
 
-        screen.blit(sprite, (sprite_x, sprite_y))
+        hires.blit_entity(screen, sprite, (sprite_x, sprite_y))
 
     def draw_hitbox(self, screen, offset_x=0, offset_y=0):
         if self.invincible > 0 and self.invincible % 6 < 3:

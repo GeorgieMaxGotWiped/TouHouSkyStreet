@@ -66,6 +66,21 @@ def _remember_floor(key, data):
         _floor_cache.pop(next(iter(_floor_cache)))
 
 
+def _floor_flat_index(rows, ns, th):
+    """把「按行取源贴图」的映射压成一维扁平下标（组, 行, 通道）-> 源数组下标。
+
+    地面每个分组要按预计算的行号 r0/r1 去源贴图列上取两次。原先是每帧
+    np.take_along_axis 在 (组, 3, 行) 的转置视图上取（0.31ms/帧）；换成一次性
+    算好的扁平下标 + 一维花式索引后 0.13ms/帧，输出逐位相同。
+
+    下标必须是 intp（64 位）：实测同一份下标用 int32 做花式索引要 0.40ms/帧，
+    比 take_along_axis 还慢 —— numpy 对非 intp 索引会先做一次转换/缓冲。
+    """
+    g = np.arange(ns, dtype=np.intp)[:, None, None]
+    c = np.arange(3, dtype=np.intp)[None, None, :]
+    return ((g * th + rows[:, :, None]) * 3 + c)
+
+
 class CylinderPanorama:
     """360° 环形全景渲染器（伪3D 圆柱投影，纯 2D 贴图 + 射线求交数学变换）。"""
 
@@ -190,6 +205,13 @@ class CylinderPanorama:
         # float64：避免 yaw 偏移叠加时 float32 舍入导致环绕边界差一列（无缝循环）
         self._col_base = (ang / math.tau * self.tex_w).astype(np.float64)
         self._col_int = np.empty(self.w, dtype=np.int32)
+        # 逐列几何（列高 / 列起点 y）预先拆成 Python 元组表：cylinder 投影每帧要遍历
+        # 每列一次，循环里再取 numpy 标量（_col_h[x] 之类）单次约 0.15us，578 次就是
+        # 0.09ms，且会挡住循环体内联。拆成静态表后循环体只剩 scale + blit。
+        if self.projection == "banner":
+            self._col_geom = None
+        else:
+            self._col_geom = list(zip(self._col_h.tolist(), self._col_y0.tolist()))
 
     def _apply_floor_cache(self, cached):
         """把缓存好的地面层静态数据装回实例（工作表面仍按实例新建）"""
@@ -200,15 +222,27 @@ class CylinderPanorama:
         self._floor_step = cached["step"]
         self._floor_ns = cached["ns"]
         self._floor_gx = cached["gx"]
-        self._floor_r0 = cached["r0"]
-        self._floor_r1 = cached["r1"]
+        self._floor_i0 = cached["i0"]
+        self._floor_i1 = cached["i1"]
         self._floor_fr = cached["fr"]
         self._floor_y0 = cached["y0"]
         self._floor_len = cached["len"]
         self.floor_y0 = cached["center_y0"]
         self.floor_h = cached["center_h"]
+        self._make_floor_working(cached["ns"], cached["max_h"])
+
+    def _make_floor_working(self, ns, max_h):
+        """地面每帧要写入的面 / 中间缓冲：只随实例存在，不进缓存
+
+        lerp 用预分配的 float32 缓冲就地算。不预分配的话那两个乘加要现造
+        4~5 个 (组, 行, 3) 的临时数组，实测 0.94ms/帧；就地算 0.67ms/帧，
+        结果逐位相同。1-fr 也在这里一并算好，省掉每帧一次减法。
+        """
+        self._floor_omfr = 1.0 - self._floor_fr
         self._floor_surf = pygame.surfarray.make_surface(
-            np.zeros((self.w, cached["max_h"], 3), dtype=np.uint8))
+            np.zeros((self.w, max_h, 3), dtype=np.uint8))
+        self._floor_buf = np.empty((ns, max_h, 3), dtype=np.float32)
+        self._floor_tmp = np.empty((ns, max_h, 3), dtype=np.float32)
 
     def _detect_junction_v(self):
         """自动检测墙体贴图灰/黄交界：取下 60% 内行亮度跳变最大处。"""
@@ -317,20 +351,19 @@ class CylinderPanorama:
         self._floor_step = step
         self._floor_ns = ns
         self._floor_gx = gx.astype(np.int32)
-        self._floor_r0 = r0m
-        self._floor_r1 = r1m
+        self._floor_i0 = _floor_flat_index(r0m, ns, th)
+        self._floor_i1 = _floor_flat_index(r1m, ns, th)
         self._floor_fr = frm
         self._floor_y0 = y0_arr[gx].astype(np.int32)
         self._floor_len = floor_h_arr[gx]
         self.floor_y0 = int(y0_arr[self.w // 2])
         self.floor_h = int(floor_h_arr[self.w // 2])
-        # 复用的地面帧表面：每帧用 numpy 写入像素后逐组 blit（不逐帧分配）
-        self._floor_surf = pygame.surfarray.make_surface(
-            np.zeros((self.w, max_h, 3), dtype=np.uint8))
+        # 复用的地面帧表面与中间缓冲：每帧用 numpy 写入像素后逐组 blit（不逐帧分配）
+        self._make_floor_working(ns, max_h)
         # 只缓存只读的静态数据 + 参数（工作表面 _floor_surf 每次新建）
         _remember_floor(floor_key, {
             "src": self._floor_src, "step": step, "ns": ns, "gx": self._floor_gx,
-            "r0": r0m, "r1": r1m, "fr": frm, "y0": self._floor_y0,
+            "i0": self._floor_i0, "i1": self._floor_i1, "fr": frm, "y0": self._floor_y0,
             "len": self._floor_len, "max_h": max_h,
             "center_y0": self.floor_y0, "center_h": self.floor_h,
         })
@@ -364,14 +397,6 @@ class CylinderPanorama:
 
     # --- 渲染 ---
 
-    def _blit_column(self, blit, scale, col_surfs, idx, x, width, h):
-        ch = int(self._col_h[x])
-        col = col_surfs[idx[x]]
-        if ch == h and width == 1:
-            blit(col, (x, int(self._col_y0[x])))
-        else:
-            blit(scale(col, (width, ch)), (x, int(self._col_y0[x])))
-
     def _render_floor(self, blit, idx):
         """渲染地面：静态贴图按列索引重采样（与墙体同一 idx -> 同步旋转）。
 
@@ -380,15 +405,13 @@ class CylinderPanorama:
         """
         step = self._floor_step
         src = self._floor_src[idx[self._floor_gx]]          # (ns, th, 3) 组首列取源贴图
-        sub = np.transpose(src, (0, 2, 1))                  # (ns, 3, th)
-        r0 = self._floor_r0
-        r1 = self._floor_r1
-        fr = self._floor_fr
-        s0 = np.take_along_axis(sub, r0[:, None, :], axis=2)
-        s1 = np.take_along_axis(sub, r1[:, None, :], axis=2)
-        arr = np.ascontiguousarray(
-            (s0 * (1.0 - fr)[:, None, :] + s1 * fr[:, None, :])
-            .transpose(0, 2, 1)).astype(np.uint8)
+        flat = src.reshape(-1)                              # 行下标已在 _build_floor 压平
+        buf = self._floor_buf
+        tmp = self._floor_tmp
+        np.multiply(flat[self._floor_i0], self._floor_omfr[:, :, None], out=buf)
+        np.multiply(flat[self._floor_i1], self._floor_fr[:, :, None], out=tmp)
+        np.add(buf, tmp, out=buf)
+        arr = buf.astype(np.uint8)
         px = pygame.surfarray.pixels3d(self._floor_surf)
         px[:, :, :] = np.repeat(arr, step, axis=0)[:self.w]
         del px
@@ -440,10 +463,17 @@ class CylinderPanorama:
         else:
             # 圆柱内壁投影：每列按交点做垂直真实投影（v 随列变化），
             # 按 col_step 合并采样以减半 blit/scale 次数（fov<=约115° 时无损细节）
+            geom = self._col_geom
             for x in range(0, w - step + 1, step):
-                self._blit_column(blit, scale, col_surfs, idx, x, step, h)
+                ch, y0 = geom[x]
+                blit(scale(col_surfs[idx[x]], (step, ch)), (x, y0))
             for x in range(w - step + 1, w):
-                self._blit_column(blit, scale, col_surfs, idx, x, 1, h)
+                ch, y0 = geom[x]
+                col = col_surfs[idx[x]]
+                if ch == h:
+                    blit(col, (x, y0))
+                else:
+                    blit(scale(col, (1, ch)), (x, y0))
         # 地面层：与墙体共用同一列索引（同步旋转），逐列按预计算行表渲染
         if self._floor_src is not None:
             self._render_floor(blit, self._col_int)

@@ -4,24 +4,69 @@
 import math
 import pygame
 from src.engine import settings as cfg
+from src.engine import hires
 from src.engine.collision import circle_collision, point_segment_distance
 from src.entities import bullet_atlas
 
+
+# --- 显卡原生绘制的弹幕 ---
+# 弹幕在战斗画面里是「敌人之上、判定点 / HUD 之下」的一层，一张画布装不下这个顺序
+# （见 painter.py 文件头），所以弹幕改由显卡按渲染倍率原生绘制：贴图先按倍率放大成
+# 「原生像素」，再作为纹理贴出，不再经过 1x 画布那一次放大 —— 那正是战斗区弹幕发糊
+# 的根源。下面两个助手只管「用几倍率」「贴到哪一层」，绘制点本身一行都不用改：
+# 没有显卡路径时两者都退回旧行为。
+
+
+def _render_factor(screen):
+    """本帧弹幕贴图该用的倍率（1 = 1x，与旧版画面完全一致）
+
+    取的是画布的预烤倍率：关掉显卡路径（TOUHOU_UI_GPU=0）或无 GPU 呈现时，
+    它返回 1 —— 贴图保持 1x、照旧画在画布上，方便做新旧对比。
+    """
+    bake = getattr(screen, "bake_factor", None)
+    if bake is None:
+        return 1
+    gpu = getattr(screen, "gpu", None)
+    if gpu is not None and not getattr(gpu, "enabled", False):
+        return 1
+    try:
+        return max(1, int(bake()))
+    except Exception:
+        return 1
+
+
+def _blit_bullet(screen, sprite, dest):
+    """把弹幕贴图贴到「画布之上」那一层（没有显卡路径时落回画布，顺序不变）
+
+    dest 允许浮点坐标：显卡路径保留小数、改在图层空间取整（见 painter._dest_scaled），
+    弹幕的位置因此不会先被吸到 960x720 的逻辑网格上 —— 否则斜着飞的弹每帧位移都是
+    倍率个物理像素的整数倍，走成一级一级的锯齿。落回画布时由 blit_gpu_over 取整。
+    """
+    blit_over = getattr(screen, "blit_gpu_over", None)
+    if blit_over is None:
+        return screen.blit(sprite, dest)
+    return blit_over(sprite, dest)
+
+
 # 消弹动画时长（帧）：弹幕变白自爆的持续时间
 BULLET_CANCEL_DURATION = 20
+# 爆炸箭命中时的清弹光效颜色（爆炸箭的橙红，区别于击破小怪的冷白）
+EXPLOSIVE_HIT_COLOR = (255, 176, 64)
 
-# 玩家子弹贴图缓存
-_player_bullet_sprite = None
-_player_bullet_sprite_attempted = False
+# 玩家子弹贴图缓存：(贴图路径, 角度, 倍率) -> Surface
+# （显卡路径上按渲染倍率各存一张；同一张图转了角度的也各存一张）
+_player_bullet_sprite = {}
+_player_bullet_sprite_attempted = set()
 
 
 _custom_bullet_sprite_cache = {}
 _custom_bullet_sprite_attempted = set()
 
 
-def _get_custom_bullet_sprite(path, target_height):
+def _get_custom_bullet_sprite(path, target_height, factor=1):
     """Load and cache an arbitrary bullet sprite, scaled by height."""
-    key = (path, target_height)
+    factor = max(1, int(factor))
+    key = (path, target_height, factor)
     if key in _custom_bullet_sprite_attempted:
         return _custom_bullet_sprite_cache.get(key)
     _custom_bullet_sprite_attempted.add(key)
@@ -31,8 +76,8 @@ def _get_custom_bullet_sprite(path, target_height):
         if h <= 0:
             raise ValueError("invalid custom bullet sprite height")
         new_w = max(1, int(round(w * target_height / h)))
-        _custom_bullet_sprite_cache[key] = pygame.transform.smoothscale(
-            img, (new_w, target_height))
+        _custom_bullet_sprite_cache[key] = hires.scaled_image(
+            img, (new_w, target_height), factor)
     except Exception as exc:
         print(f"[Bullet] Failed to load custom bullet sprite {path}: {exc}")
     return _custom_bullet_sprite_cache.get(key)
@@ -66,24 +111,50 @@ def _build_sprite_glow(sprite, color, pad):
     return glow
 
 
-def _get_player_bullet_sprite():
-    """加载并缓存玩家子弹贴图；失败返回 None（回退原来的米弹绘制）"""
-    global _player_bullet_sprite, _player_bullet_sprite_attempted
-    if _player_bullet_sprite_attempted:
-        return _player_bullet_sprite
-    _player_bullet_sprite_attempted = True
+def _get_player_bullet_sprite(factor=1, path=None, angle=None, heading=None):
+    """加载并缓存自机子弹贴图；失败返回 None（回退原来的米弹绘制）
+
+    贴图与旋转角缺省取自当前自机（cfg.PLAYER_BULLET_SPRITE / PLAYER_BULLET_SPRITE_ANGLE，
+    切换自机时刷新）；带 path / angle 时按这一发弹自己的贴图取（弓手的爆炸箭与
+    普通箭同场混发，只按自机缓存的话两者会互相顶掉）。缓存键因此要带上它们 ——
+    只按倍率缓存的话，换了自机以后还会接着贴上一位的子弹。
+
+    heading 是这一发的运动方向（弧度）：给了就把已经转正的贴图再转到那个方向，
+    缓存键也要带上它（弓手的扇形箭各飞各的方向，只按贴图缓存的话所有箭都朝上）。
+    """
+    factor = max(1, int(factor))
+    path = path or cfg.PLAYER_BULLET_SPRITE
+    if angle is None:
+        angle = float(getattr(cfg, "PLAYER_BULLET_SPRITE_ANGLE", 0.0) or 0.0)
+    angle = float(angle)
+    rot = 0
+    if heading is not None:
+        # 贴图转正后朝上（-90°），转到运动方向；pygame.rotate 逆时针为正
+        rot_deg = -90.0 - math.degrees(heading)
+        # 方向每帧在变：量化到固定档距（倍率路径同理），否则每发弹每帧都要新建一张
+        step = bullet_atlas.angle_step() if factor > 1 else 1
+        rot = int(round(rot_deg / step)) * step % 360
+    key = (path, angle, rot, factor)
+    if key in _player_bullet_sprite_attempted:
+        return _player_bullet_sprite.get(key)
+    _player_bullet_sprite_attempted.add(key)
     try:
-        img = pygame.image.load(cfg.PLAYER_BULLET_SPRITE)
+        img = pygame.image.load(path)
         try:
             img = img.convert_alpha()
         except Exception:
             pass
         size = cfg.PLAYER_BULLET_SPRITE_SIZE
-        _player_bullet_sprite = pygame.transform.smoothscale(img, (size, size))
+        img = hires.scaled_image(img, (size, size), factor)
+        if angle:
+            # 贴图原图不朝上时先转正（如冰箭原图指向斜上方），自机弹一律朝上飞
+            img = hires.rotate(img, angle)
+        if rot:
+            img = hires.rotate(img, rot)
+        _player_bullet_sprite[key] = img
     except Exception as e:
         print(f"[Bullet] Failed to load player bullet sprite: {e}")
-        _player_bullet_sprite = None
-    return _player_bullet_sprite
+    return _player_bullet_sprite.get(key)
 
 
 class Bullet:
@@ -95,6 +166,7 @@ class Bullet:
     TYPE_BIG = "big"              # 大玉
     TYPE_LASER = "laser"          # 激光（特殊处理）
     TYPE_KNIFE = "knife"          # 刀弹
+    TYPE_SCALE = "scale"          # 鳞弹
     TYPE_BEAM = "beam"            # 光束线（两点连线，电网连接用）
     size_scale_global = 1.0       # 敌弹全局尺寸倍率（末影龙放大子弹，其他 Boss 默认 1.0）
 
@@ -133,6 +205,8 @@ class Bullet:
         self.alive = True
         self.grazed = False  # 是否已被擦弹计数
         self.homing = homing    # 是否自动追踪敌人
+        self.pierce = False      # 穿透弹：命中敌人后不消失，可继续打其他目标
+        self.hit_targets = []    # 穿透弹已经结算过的目标（同一目标只结算一次）
         self.harmless = False    # 无判定子弹：绘制/成形期间不参与碰撞与擦弹（如蛛网）
         self.shootable = False   # 可被玩家子弹击破的敌弹（如展符缺口大玉）
         self.hp = 0              # 可击破敌弹的剩余生命值（<=0 时被击破）
@@ -145,6 +219,9 @@ class Bullet:
         self.glow_color = None          # 外发光颜色（None=不发光；如骷髅暗色贴图用白色描边）
         self.glow_padding = 5           # 发光描边外扩像素
         self._sprite_cache = {}      # (slot, width, angle) -> Surface 旋转贴图缓存
+        self.player_sprite_path = None   # 自机弹贴图覆盖（None=按当前自机）
+        self.player_sprite_angle = None  # 覆盖贴图的转正角（None=按当前自机）
+        self.clear_radius_on_hit = 0.0   # 命中敌人时炸掉的敌弹半径（0=不爆炸）
 
         # 特殊弹幕行为（默认普通直线弹，符卡按需启用）
         self.manager = None          # 子弹管理器引用（转向/分裂瞄准用）
@@ -179,7 +256,7 @@ class Bullet:
         self.ax = 0.0
         self.ay = 0.0
 
-        # 角度（用于旋转弹）
+        # 角度（用于旋转弹 / 光束轴向）
         self.angle = math.atan2(vy, vx)
         self.base_speed = math.hypot(vx, vy)  # 初始速度（擦弹减速效果还原用）
 
@@ -426,13 +503,22 @@ class Bullet:
             self.manager.add_enemy_bullet(child)
 
     def draw(self, screen, offset_x=0, offset_y=0):
+        if len(self._sprite_cache) > 256:
+            # 本发弹的贴图缓存只是加速用：转得久的弹会攒下上百个角度变体，超过上限
+            # 就整块丢掉（共享的贴图还在图集缓存里，重建一次只是一次旋转）
+            self._sprite_cache.clear()
         # 玩家子弹：优先使用贴图
         if self.is_player_bullet:
             self._draw_player_sprite(screen, offset_x, offset_y)
             return
 
-        px = int(self.x + offset_x)
-        py = int(self.y + offset_y)
+        # 贴图按浮点位置贴（显卡改在图层空间取整，位置的最小步进因此是 1 个物理
+        # 像素而不是 1 个逻辑像素）；下面回退到 pygame.draw.* 的图元绘制仍要整数
+        fx = self.x + offset_x
+        fy = self.y + offset_y
+        px = int(fx)
+        py = int(fy)
+        factor = _render_factor(screen)
 
         # 消弹动画：变白自爆
         if self.cancel_timer > 0:
@@ -443,35 +529,47 @@ class Bullet:
         # Custom external sprite (Spirit Bear giant arrow) takes priority over atlas rendering.
         if self.custom_sprite_path:
             target_height = self.custom_sprite_height or max(1, int(self.visual_radius * 2))
-            base = _get_custom_bullet_sprite(self.custom_sprite_path, target_height)
+            base = _get_custom_bullet_sprite(self.custom_sprite_path, target_height,
+                                             factor)
             if base is not None:
                 rot_deg = -90.0 - math.degrees(self.angle + self.custom_sprite_angle)
-                key = ("custom", self.custom_sprite_path, target_height, int(round(rot_deg)) % 360)
+                step = bullet_atlas.angle_step() if factor > 1 else 1
+                angle_key = int(round(rot_deg / step)) * step % 360
+                key = ("custom", self.custom_sprite_path, target_height, angle_key,
+                       factor)
                 if key not in self._sprite_cache:
-                    self._sprite_cache[key] = pygame.transform.rotate(base, rot_deg)
+                    rotated = pygame.transform.rotate(base, rot_deg)
+                    # rotate 返回的是不带倍率标记的普通表面（真实像素是逻辑尺寸的
+                    # factor 倍）：光晕按真实像素做，之后一并 wrap 成高分辨率表面——
+                    # wrap 之后 get_width() 回报逻辑尺寸，居中算式与 1x 完全一致
+                    glow = None
+                    if self.glow_color is not None and self.glow_padding > 0:
+                        glow = _build_sprite_glow(rotated, self.glow_color,
+                                                  self.glow_padding * factor)
+                        glow = hires.wrap(glow, factor)
+                    if factor > 1:
+                        rotated = hires.wrap(rotated, factor)
+                    self._sprite_cache[key] = rotated
+                    self._sprite_cache[("glow",) + key] = glow
                 sprite = self._sprite_cache[key]
-                if self.glow_color is not None and self.glow_padding > 0:
-                    glow_key = ("glow", self.custom_sprite_path, target_height,
-                                int(round(rot_deg)) % 360,
-                                self.glow_color, self.glow_padding)
-                    if glow_key not in self._sprite_cache:
-                        self._sprite_cache[glow_key] = _build_sprite_glow(
-                            sprite, self.glow_color, self.glow_padding)
-                    glow = self._sprite_cache[glow_key]
-                    if glow is not None:
-                        screen.blit(glow, (px - glow.get_width() // 2,
-                                           py - glow.get_height() // 2))
-                screen.blit(sprite, (px - sprite.get_width() // 2, py - sprite.get_height() // 2))
+                glow = self._sprite_cache[("glow",) + key]
+                if glow is not None:
+                    _blit_bullet(screen, glow, (fx - glow.get_width() // 2,
+                                                fy - glow.get_height() // 2))
+                _blit_bullet(screen, sprite,
+                             (fx - sprite.get_width() // 2,
+                              fy - sprite.get_height() // 2))
                 return
 
-        sprite = self._get_atlas_sprite()
+        sprite = self._get_atlas_sprite(factor)
         if sprite is not None:
-            screen.blit(sprite, (px - sprite.get_width() // 2, py - sprite.get_height() // 2))
+            _blit_bullet(screen, sprite, (fx - sprite.get_width() // 2,
+                                          fy - sprite.get_height() // 2))
             return
 
         if self.bullet_type == Bullet.TYPE_CIRCLE:
             self._draw_circle(screen, px, py)
-        elif self.bullet_type == Bullet.TYPE_RICE:
+        elif self.bullet_type in (Bullet.TYPE_RICE, Bullet.TYPE_SCALE):
             self._draw_rice(screen, px, py)
         elif self.bullet_type == Bullet.TYPE_ARROW:
             self._draw_arrow(screen, px, py)
@@ -486,13 +584,20 @@ class Bullet:
 
     def _draw_player_sprite(self, screen, offset_x=0, offset_y=0):
         """玩家子弹贴图（失败时回退原来的米弹）"""
-        sprite = _get_player_bullet_sprite()
-        px = int(self.x + offset_x)
-        py = int(self.y + offset_y)
+        # 单发覆盖（爆炸箭）优先于机体默认弹贴图；贴图按这一发的运动方向转正 ——
+        # 自机弹只会被追踪逻辑改向（_update_homing_bullets 会同步刷新 angle），
+        # 所以 angle 就是当前运动方向。敌弹那条路仍按原来的 angle 贴，不受影响。
+        sprite = _get_player_bullet_sprite(_render_factor(screen),
+                                           self.player_sprite_path,
+                                           self.player_sprite_angle,
+                                           self.angle)
+        fx = self.x + offset_x
+        fy = self.y + offset_y
         if sprite is None:
-            self._draw_rice(screen, px, py)
+            self._draw_rice(screen, int(fx), int(fy))
             return
-        screen.blit(sprite, (px - sprite.get_width() // 2, py - sprite.get_height() // 2))
+        _blit_bullet(screen, sprite, (fx - sprite.get_width() // 2,
+                                      fy - sprite.get_height() // 2))
 
     def _draw_circle(self, screen, px, py):
         """圆形弹（敌弹：白芯+彩边）"""
@@ -578,12 +683,13 @@ class Bullet:
         ex = px + math.cos(a) * length
         ey = py + math.sin(a) * length
         if self.sprite_slot and length >= 2:
-            sprite = self._get_beam_pattern()
+            sprite = self._get_beam_pattern(_render_factor(screen))
             if sprite is not None:
                 midx = px + math.cos(a) * length * 0.5
                 midy = py + math.sin(a) * length * 0.5
-                screen.blit(sprite, (midx - sprite.get_width() * 0.5,
-                                     midy - sprite.get_height() * 0.5))
+                _blit_bullet(screen, sprite,
+                             (midx - sprite.get_width() * 0.5,
+                              midy - sprite.get_height() * 0.5))
                 return
         if self.beam_glow_color is not None and self.beam_glow_width > 0:
             pygame.draw.line(screen, self.beam_glow_color,
@@ -597,15 +703,18 @@ class Bullet:
         pygame.draw.line(screen, self.color,
                          (px, py), (int(ex), int(ey)), max(1, self.beam_width - 2))
 
-    def _get_beam_pattern(self):
+    def _get_beam_pattern(self, factor=1):
         """取 etama.png 第一行「射线」图案：白芯沿光束长度、有色在光束两侧。
 
         图案本身是「左右有色 + 中间白芯」的横条：白芯带沿图案纵向铺满。
         因此按纵向拉伸成光束长度（白芯变中线、两侧成色边），再旋转到光束方向。
         光束静止不动，同一颗弹的结果按 (length, angle) 缓存，避免每帧重复缩放旋转。
+        factor > 1 时源图与拉伸结果都按倍率放大（显卡直贴），倍率参与缓存 key。
         """
         rot_deg = 90.0 - math.degrees(self.angle)
-        key = ("beam", int(round(self.beam_length)), int(round(rot_deg)) % 360)
+        step = bullet_atlas.angle_step() if factor > 1 else 1
+        key = ("beam", int(round(self.beam_length)),
+               int(round(rot_deg / step)) * step % 360, factor)
         cached = self._sprite_cache.get(key)
         if cached is not None:
             return cached
@@ -613,18 +722,24 @@ class Bullet:
         if native is None:
             return None
         # Preserve the original etama gradient: no tint for beam patterns.
-        src = bullet_atlas.get_sprite(self.sprite_slot, native[0])
+        src = bullet_atlas.get_sprite(self.sprite_slot, native[0], factor=factor)
         if src is None:
             return None
         # 裁掉图案上下各 1px 透明边，避免沿光束方向拉伸后两端出现渐变淡出
+        k = getattr(src, "hi_scale", 1)
         try:
-            src = src.subsurface((0, 1, src.get_width(), src.get_height() - 2)).copy()
+            # 注意用真实像素尺寸：subsurface 认的是真实像素，而高分辨率表面的
+            # get_size() 回报的是逻辑尺寸（见 hires.HiresSurface）
+            src = src.subsurface((0, k, pygame.Surface.get_width(src),
+                                  pygame.Surface.get_height(src) - 2 * k)).copy()
         except Exception:
             pass
         width = max(1, native[0])          # 光束厚度：图案原始宽度（含两侧色边）
         length = max(1, int(round(self.beam_length)))
-        stretched = pygame.transform.smoothscale(src, (width, length))
+        stretched = pygame.transform.smoothscale(src, (width * k, length * k))
         rotated = pygame.transform.rotate(stretched, rot_deg)
+        if factor > 1:
+            rotated = hires.wrap(rotated, factor)
         self._sprite_cache[key] = rotated
         return rotated
 
@@ -637,8 +752,11 @@ class Bullet:
             ring_r = max(1, int(r * 1.35))
             pygame.draw.circle(screen, cfg.COLOR_WHITE, (px, py), ring_r, 1)
 
-    def _get_atlas_sprite(self):
-        """按弹种和颜色从图集取颜色最接近的原图贴图；无匹配时返回 None。"""
+    def _get_atlas_sprite(self, factor=1):
+        """按弹种和颜色从图集取颜色最接近的原图贴图；无匹配时返回 None。
+
+        factor > 1 时取的是「原生像素」贴图（显卡路径直贴），倍率参与缓存 key。
+        """
         if self.is_player_bullet:
             return None
         if self.bullet_type == Bullet.TYPE_BEAM:
@@ -654,12 +772,19 @@ class Bullet:
             return None
         width = native[0]
         angle = None
-        if self.bullet_type in (Bullet.TYPE_RICE, Bullet.TYPE_ARROW, Bullet.TYPE_KNIFE):
-            # 贴图默认朝上（-90°），转到移动方向；pygame.rotate 逆时针为正
+        if self.bullet_type in (Bullet.TYPE_RICE, Bullet.TYPE_ARROW, Bullet.TYPE_KNIFE,
+                                Bullet.TYPE_SCALE):
+            # 贴图默认朝上（-90°），转到当前运动方向；pygame.rotate 逆时针为正。
+            # 圆弹 / 大玉的贴图是各向同性的，转了也看不出来，就省下这一次旋转
             angle = -90.0 - math.degrees(self.angle)
-        key = (slot, width, angle)
+        if factor > 1 and angle is not None:
+            # 角度每帧在变：量化到固定档距，否则每发弹每帧都要新建一张旋转贴图
+            step = bullet_atlas.angle_step()
+            angle = int(round(angle / step)) * step % 360
+        key = (slot, width, angle, factor)
         if key not in self._sprite_cache:
-            self._sprite_cache[key] = bullet_atlas.get_sprite(slot, width, angle)
+            self._sprite_cache[key] = bullet_atlas.get_sprite(slot, width, angle,
+                                                               factor=factor)
         return self._sprite_cache[key]
 
     def start_cancel(self):
@@ -669,6 +794,35 @@ class Bullet:
 
     def get_hitbox(self):
         return (self.x, self.y, self.collision_radius)
+
+    def try_hit(self, target):
+        """自机弹命中一个目标：返回 False 表示本次不该结算伤害。
+
+        普通弹一命中就消失（旧版行为），穿透弹（pierce）则记下目标继续飞 ——
+        同一个目标只结算一次，所以它穿过同一个敌人时不会每帧重复扣血。
+        结算成功时还会触发这一发自带的命中爆炸（爆炸箭，见 clear_radius_on_hit）。
+        """
+        if self.pierce:
+            for hit in self.hit_targets:
+                if hit is target:
+                    return False
+            self.hit_targets.append(target)
+        else:
+            self.alive = False
+        self._explode_on_hit()
+        return True
+
+    def _explode_on_hit(self):
+        """命中爆炸（爆炸箭）：炸掉命中点周围小范围的敌弹
+
+        半径由弹自己带（clear_radius_on_hit），清弹本体复用击破小怪那一套
+        （burst_cancel_bullets：范围内的敌弹进消弹动画 + 一圈扩散光效）。
+        没有 manager（离线测试直接造的弹）时静默跳过，不影响命中结算。
+        """
+        if self.clear_radius_on_hit <= 0 or self.manager is None:
+            return
+        burst_cancel_bullets(self.manager, self.x, self.y,
+                             self.clear_radius_on_hit, EXPLOSIVE_HIT_COLOR)
 
     def hits_player(self, px, py, pr):
         """玩家碰撞判定：光束按整条线段判定，其余弹按圆形判定"""
@@ -708,6 +862,27 @@ def create_player_bullet(x, y, vx=0, vy=None, homing=False):
     return Bullet(x, y, vx, vy, Bullet.TYPE_RICE, radius=2.0,
                   color=cfg.COLOR_BLUE, damage=cfg.BULLET_PLAYER_DAMAGE,
                   is_player_bullet=True, lifetime=60, homing=homing)
+
+
+def burst_cancel_bullets(bullet_manager, x, y, radius, color=(235, 245, 255)):
+    """爆炸清弹：把半径内的敌弹推进「变白自爆」动画，并补一圈扩散光效。
+
+    用于「小怪被击破 / 残影离场」这类击破奖励（六面，见 stages/stage6.py）：
+    半径由调用方按体型给。光效本身是无害的短命圆弹，所以不参与碰撞与擦弹，
+    也不吃难度下的弹幕密度缩减（`add_enemy_bullet` 会放过 harmless 弹）。
+    """
+    for bullet in bullet_manager.enemy_bullets:
+        if bullet.harmless or bullet.cancel_timer > 0 or not bullet.alive:
+            continue
+        if circle_collision(x, y, radius, bullet.x, bullet.y, 0):
+            bullet.start_cancel()
+    for scale, frames in ((0.62, 7), (0.34, 12)):
+        flash = create_bullet_angle(x, y, 0.0, 0.0, Bullet.TYPE_CIRCLE,
+                                    radius=radius * scale, color=color)
+        flash.manager = bullet_manager
+        flash.harmless = True
+        flash.lifetime = frames
+        bullet_manager.add_enemy_bullet(flash)
 
 
 class BulletManager:

@@ -1,0 +1,7 @@
+*** Begin Patch
+*** Update File: src/stages/stage6.py
+@@
+-from src.entities.bullet import Bullet, create_bullet_aimed, create_bullet_angle
++from src.entities.bullet import (Bullet, burst_cancel_bullets, create_bullet_aimed,
++                                create_bullet_angle)
+*** End Patch

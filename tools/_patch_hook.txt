@@ -1,0 +1,24 @@
+*** Begin Patch
+*** Update File: src/stages/stage1.py
+@@
+-        elif self.boss and self.boss.alive and self.boss.combat_enabled:
+-            enemies.append(self.boss)
+-        return enemies
+-
+-
+-class Stage1_SkyblockHub(Stage):
++        elif self.boss and self.boss.alive and self.boss.combat_enabled:
++            enemies.append(self.boss)
++        return enemies
++
++    def enemy_death_clear_radius(self, enemy):
++        """小怪被击破时炸掉周围这个半径内的敌弹（0 = 不清弹，基类默认不炸）。
++
++        半径按体型由各面自己给（六面 = 判定半径 × CLEAR_RADIUS_PER_SIZE），
++        越大的怪炸得越大；Boss 是否参与也由各面决定。
++        """
++        return 0.0
++
++
++class Stage1_SkyblockHub(Stage):
+*** End Patch

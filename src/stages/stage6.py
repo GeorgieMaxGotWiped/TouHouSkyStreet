@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 # 六面：最终进军 ~ Final Approach（通往凋零之王 Kaeman 的王座）
 # 取消传统道中 Boss，整体为「最终进军」三段式：
-#   - 前半段「进军」：Wither Miner / Wither Guard / Wither Husk 亡灵军队防线渐强；
+#   - 前半段「进军」：Skeleton Lord（首波左右两位横切入场）与 Wither Miner /
+#     Wither Guard / Wither Husk 亡灵军队防线渐强；
 #   - 中段「注视」：Kaeman 远程干涉——巨颅 Wither Skull 注视并锁定玩家区域、
 #     黑色 Wither 能量持续侵入战场（游魂 + 侵入波），压迫感来自「被注视」；
-#   - 后半段「要塞」：进入凋零要塞，敌人减少而弹幕更宏大，曾败北的
-#     Maxor / Storm / Goldor / Necron 以残影短暂出现作为王之门徒象征；
+#   - 后半段「要塞」：推进到凋零要塞后不再生成小怪，曾败北的
+#     Maxor / Storm / Goldor / Necron 以残影接力出现（一位撑到后一位登场）作为
+#     王之门徒象征，每位一登场就打出一小段自己符卡的削弱片段（见 _ghost_spell_*）；
 #   - 突破王座前的最后防线后直面凋零之王 Kaeman（即 The Wither King），
 #     六张符卡：五张通常符（1~5 已实装）+ 一张 Last Spell「终仪」（已实装）。
+# 背景：整面沿用同一套地面 / 洞壁贴图（不再切要塞贴图），阶段推进带来的变化
+# 由逐帧加深的压暗值（见 _mid_darkness）与镜头高度负责。
 
 import math
 import os
@@ -17,9 +21,12 @@ import pygame
 
 from src.engine import settings as cfg
 from src.engine import hires
-from src.engine.pseudo3d import Pseudo3DFloor, register_gpu_floor
+from src.engine import boss_art
+from src.engine.spell_bg import SpellBackground
+from src.engine.pseudo3d import Pseudo3DFloor
 from src.entities.boss import Boss, SpellCard, _get_font
-from src.entities.bullet import Bullet, create_bullet_aimed, create_bullet_angle
+from src.entities.bullet import (Bullet, burst_cancel_bullets, create_bullet_aimed,
+                                create_bullet_angle)
 from src.entities.enemy import Enemy, EnemyWave
 from src.stages.stage1 import (
     Stage,
@@ -33,6 +40,31 @@ MARCH_END = 42 * 60                 # 42s：亡灵军队进军结束
 INTERFERENCE_END = 66 * 60          # 66s：进入凋零要塞
 FORTRESS_FINAL_WAVE_AT = 100 * 60   # 100s：王座前最后防线
 
+# 道中背景亮度：压暗值 0-255（越大越暗），在关键帧之间线性加深。开场就已经比
+# 其它面暗，之后随「进军 → 干涉 → 要塞 → 最后防线」持续推进而不断下降。
+BG_DARKNESS_KEYS = (
+    (0, 66),                        # 开场：已经明显压暗
+    (MARCH_END, 92),                # 进军段结束
+    (INTERFERENCE_END, 122),        # 干涉段结束（进入要塞）
+    (FORTRESS_FINAL_WAVE_AT, 152),  # 王座前的最后防线
+)
+BG_DARKNESS_TAIL_RATE = 7.0 / 60.0  # 最后防线之后继续变暗的速度（每秒 7，约 4s 到顶）
+BG_DARKNESS_MAX = 178               # 道中终点的压暗值（随后的对话段固定 190）
+BG_DARKNESS_BOSS = 40               # Boss 开战：镜头抬高、压暗复位
+
+
+def _mid_darkness(timer):
+    """道中压暗值：在关键帧之间线性加深，最后防线之后按固定速度继续加深并封顶。"""
+    if timer <= BG_DARKNESS_KEYS[0][0]:
+        return BG_DARKNESS_KEYS[0][1]
+    for (t0, v0), (t1, v1) in zip(BG_DARKNESS_KEYS, BG_DARKNESS_KEYS[1:]):
+        if timer <= t1:
+            u = (timer - t0) / float(t1 - t0)
+            return v0 + (v1 - v0) * u
+    t0, v0 = BG_DARKNESS_KEYS[-1]
+    return min(BG_DARKNESS_MAX, v0 + (timer - t0) * BG_DARKNESS_TAIL_RATE)
+
+
 # Kaeman 巨颅注视节奏
 KAEMAN_FIRST_ATTACK_IN = 4 * 60     # 进入干涉阶段 4s 后首次注视
 KAEMAN_ATTACK_INTERVAL = 290        # 两次注视间隔（帧）
@@ -40,25 +72,42 @@ KAEMAN_WATCH_FRAMES = 78            # 注视追踪时长
 KAEMAN_LOCK_FRAMES = 68             # 锁定玩家区域时长
 KAEMAN_FADE_FRAMES = 55             # 巨颅退场时长
 
-# 王之门徒残影（出现时刻 -> 残影配置）
+# 王之门徒残影（出现时刻 -> 残影配置）。一位接一位：前一位撑到后一位登场那一刻才
+# 退场（两人之间不再留间隔），最后一位仍按 GHOST_MAX_AGE 收场，于是残影段的起止
+# 时刻与原来的总时长完全一致。
 GHOST_PLAN = (
     (70 * 60, "maxor"),
     (78 * 60, "storm"),
     (86 * 60, "goldor"),
     (94 * 60, "necron"),
 )
+# 残影登场时的背景：前三位直接换成五面那张对应的整幅竞技场贴图（风格同名），
+# Necron 用六面自己的 NecronP.png（风格 "necron_p"，见 engine/spell_bg.py）。
+# 背景与残影同时出现、残影退场后淡出，等于这位门徒「短暂开了一面」。
+GHOST_BG_STYLES = {
+    "maxor": "maxor",
+    "storm": "storm",
+    "goldor": "goldor",
+    "necron": "necron_p",
+}
 GHOST_POSITIONS = {
     "maxor": (140, 116),
     "storm": (300, 100),
     "goldor": (432, 116),
     "necron": (300, 92),
 }
-GHOST_SPRITES = {
-    "maxor": cfg.STAGE6_MAXOR_GHOST_SPRITE,
-    "storm": cfg.STAGE6_STORM_GHOST_SPRITE,
-    "goldor": cfg.STAGE6_GOLDOR_GHOST_SPRITE,
-    "necron": cfg.STAGE6_NECRON_GHOST_SPRITE,
-}
+
+
+def _ghost_sprite_path(gid):
+    """残影立绘：直接借「Boss 立绘套组」里这位在五面的那张立绘
+
+    assets/sprites/bosses/<套组>/，见 settings.boss_art_path —— 因此跟着设置里的
+    new / another 套组走，不再单独准备 *_ghost.png。路径在残影登场那一刻解析、
+    记在残影自己身上，绘制时按 GHOST_HEIGHT 现缩（_load_sprite 按路径缓存）。
+    """
+    return cfg.boss_art_path(gid)
+
+
 GHOST_GLOWS = {
     "maxor": (255, 130, 60),
     "storm": (120, 200, 255),
@@ -66,8 +115,9 @@ GHOST_GLOWS = {
     "necron": (190, 60, 235),
 }
 GHOST_HEIGHT = 190
-GHOST_MAX_AGE = 190
-GHOST_FIRE_AT = 62
+GHOST_MAX_AGE = 190       # 最后一位（Necron）的存活帧数，决定残影段的结束时刻
+GHOST_SPELL_FRAMES = 110  # 登场即起手的「告别弹」长度（帧，见 _ghost_spell）
+GHOST_CLEAR_RADIUS = 180.0  # 残影离场清弹半径（立绘 190 高，正好炸掉大半个战斗区）
 
 WKING_HP = 24000
 
@@ -75,37 +125,58 @@ WKING_HP = 24000
 _sprite_cache = {}
 
 
-def _load_sprite(path, target_height):
-    key = (path, target_height)
+def _load_sprite(path, target_height, sharp=False):
+    factor = hires.scale() if sharp else 1
+    key = (path, target_height, factor)
     if key in _sprite_cache:
         return _sprite_cache[key]
     try:
-        img = pygame.image.load(path).convert_alpha()
+        # 走 boss_art 的共享解码缓存：冥符的凋零幽影是 1024x1536，现解码一张要
+        # 25~45ms，正好落在符卡展开那几帧上。载入界面按 cfg.stage_spell_sprites
+        # 提前解码的也是这一份缓存，这里直接命中。
+        img = boss_art.load_sprite(path)
+        if img is None:
+            raise ValueError("sprite unavailable")
         w, h = img.get_size()
         new_w = max(1, int(round(w * target_height / h)))
-        _sprite_cache[key] = pygame.transform.smoothscale(img, (new_w, target_height))
+        _sprite_cache[key] = hires.scaled_image(img, (new_w, target_height), factor)
     except Exception as exc:
         print("[Stage6] Failed to load sprite %s: %s" % (path, exc))
         _sprite_cache[key] = None
     return _sprite_cache[key]
 
 
+def _hi_battle_panel(screen):
+    """借一块战斗区尺寸的离屏面板（面板内用战斗区局部坐标作画）
+
+    六面的符卡视觉层原先共用一块常驻的 1x 表面，每帧填透明、作画、再整幅贴到
+    画布上。改按倍率作画后不能再就地改写同一块表面 —— 显卡纹理是按表面对象缓存
+    的，但引擎给这类面板留了「本帧专用」的复用池（hires.scratch_panel）：帧内发给
+    不同的槽位、帧首统一归还并重新上传，因此既不必每帧新建一块 13MB 的表面，也
+    不会把上一帧的内容留在显卡上。关掉显卡路径时倍率是 1，得到的仍是旧版的 1x
+    画面。
+    """
+    return hires.scratch_panel(screen,
+                               (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
+
+
 _relic_glow_cache = {}
 
 
-def _get_relic_glow(radius, color):
+def _get_relic_glow(radius, color, sharp=False):
     """Relic 光晕：同心圆叠加的柔和彩色柔光（纯视觉）。"""
-    key = (int(radius), color)
+    factor = hires.scale() if sharp else 1
+    key = (int(radius), color, factor)
     if key in _relic_glow_cache:
         return _relic_glow_cache[key]
     size = int(radius) * 2 + 2
-    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    surf = hires.panel((size, size), factor)
     cx = cy = size // 2
     steps = max(4, int(radius))
     for i in range(steps):
         rr = max(1, int(radius * (1.0 - i / steps)))
         alpha = int(12 + 64 * (i / steps))
-        pygame.draw.circle(surf, (*color, alpha), (cx, cy), rr)
+        surf.hi_circle((*color, alpha), (cx, cy), rr)
     _relic_glow_cache[key] = surf
     return surf
 
@@ -125,15 +196,38 @@ def _clamp_y(y, low=80, high=240):
 # ---------------------------------------------------------------------------
 # 六面小怪（亡灵军队）
 # ---------------------------------------------------------------------------
+# 行军型小怪一律竖直下落（Husk / Miner / Knight）；黑能量游魂 Wisp 仍走原来的
+# 正弦漂移（sin），停驻型的 Golem / Colossus 保留到位后的微摆。
+# 「直接出现在画面里」的两种小怪（凋零守卫 / 凋零矿工）：不再从区域外落下，
+# 而是直接出现在战斗区上部。原来的「区外高度」按 _top_spawn 换算成画面内落点，
+# 并且保持原来的先后关系 —— 原来 y 越负（越高）的，落点也越高。
+TOP_SPAWN_LOWEST_Y = 180.0    # 落点最低的一档（对应原来最靠画面上缘的 -24）
+TOP_SPAWN_HIGHEST_Y = 64.0    # 落点最高的一档（再高的原高度压在这一行，免得贴图顶出框）
+TOP_SPAWN_SPREAD = 2.4        # 原高度每高 1px，落点就高 2.4px
+
+
+def _top_spawn(y_above):
+    """把原来的「区域外高度」换算成画面内的落点（越高的原高度 -> 越高的落点）。"""
+    y = TOP_SPAWN_LOWEST_Y + (y_above + 24) * TOP_SPAWN_SPREAD
+    return int(round(max(TOP_SPAWN_HIGHEST_Y, y)))
+
+
+# 同一批凋零游魂的队形（见 _husk_line）：整队摆在战斗区上缘之外，下落时保持形状
+HUSK_FORMATION_TOP_Y = -112.0   # 队形最高的一档
+HUSK_FORMATION_STEP = 40.0      # 队形里每往里 / 往下走一档就低这么多
+
+# 击破清弹：小怪被击破时炸掉周围这个半径内的敌弹，半径按体型给（判定半径 × 3）
+CLEAR_RADIUS_PER_SIZE = 3.0
+
+
 class WitherHuskEnemy(Enemy):
-    """Wither Husk：迅捷亡灵近卫，逼近后自机狙。"""
-    def __init__(self, x, y, move_pattern="strafe"):
+    """Wither Husk：迅捷亡灵近卫，竖直下落逼近后自机狙。"""
+    def __init__(self, x, y):
         super().__init__(x, y, hp=95, score=700, size=14, color=(170, 90, 130),
                          sprite_paths=cfg.STAGE6_HUSK_SPRITES,
                          sprite_height=cfg.STAGE6_HUSK_SPRITE_HEIGHT, anim_speed=14)
-        self.move_pattern = move_pattern
-        self.move_speed = 1.5
-        self.move_amplitude = 2.2
+        self.move_pattern = "descend"
+        self.move_speed = 3.0       # 全道中最快的一档（原 1.5）
         self.shoot_interval = 96
         self.shoot_pattern = "none"
 
@@ -142,6 +236,26 @@ class WitherHuskEnemy(Enemy):
         _add(bullet_manager, create_bullet_angle(
             self.x, self.y, base, 2.6, Bullet.TYPE_CIRCLE,
             radius=2.5, color=(150, 60, 110)))
+
+
+def _husk_line(xs, shape="v", top_y=HUSK_FORMATION_TOP_Y, step=HUSK_FORMATION_STEP):
+    """把同一批凋零游魂摆成一个队形，返回这一批敌机（按 x 排序后取位次定高低）。
+
+    shape="v"：中间最低、两翼依次抬高，两臂档高一致（V 字）；
+    "\\"：最左端最高，向右逐档降低；"/"：最右端最高，向左逐档降低。
+    整队都在战斗区上缘之外，三者下落速度相同，因此下压时队形不变。
+    """
+    order = sorted(xs)
+    count = len(order)
+    if shape == "v":
+        middle = (count - 1) / 2.0
+        drops = [middle - abs(i - middle) for i in range(count)]
+    else:
+        drops = [float(i) for i in range(count)]
+        if shape == "/":
+            drops.reverse()
+    return [WitherHuskEnemy(x, int(round(top_y + step * drop)))
+            for x, drop in zip(order, drops)]
 
 
 class WitherGuardEnemy(Enemy):
@@ -173,14 +287,13 @@ class WitherGuardEnemy(Enemy):
 
 
 class WitherMinerEnemy(Enemy):
-    """Wither Miner：凋零矿工，扇形碎弹 + 缓速挖矿大玉。"""
+    """Wither Miner：凋零矿工，竖直下落，扇形碎弹 + 缓速挖矿大玉。"""
     def __init__(self, x, y):
         super().__init__(x, y, hp=150, score=1200, size=16, color=(90, 160, 130),
                          sprite_paths=cfg.STAGE6_MINER_SPRITES,
                          sprite_height=cfg.STAGE6_MINER_SPRITE_HEIGHT, anim_speed=16)
-        self.move_pattern = "strafe"
+        self.move_pattern = "descend"
         self.move_speed = 0.8
-        self.move_amplitude = 2.2
         self.shoot_interval = 105
         self.shoot_pattern = "none"
         self._shots = 0
@@ -199,14 +312,13 @@ class WitherMinerEnemy(Enemy):
                 radius=5, color=(60, 120, 90)))
 
 class WitherKnightEnemy(Enemy):
-    """Wither Knight：凋零骑士，刀弹扇面 + 周期圆环。"""
+    """Wither Knight：凋零骑士，竖直下落，刀弹扇面 + 周期圆环。"""
     def __init__(self, x, y):
         super().__init__(x, y, hp=230, score=2000, size=19, color=(120, 130, 90),
                          sprite_paths=cfg.STAGE6_KNIGHT_SPRITES,
                          sprite_height=cfg.STAGE6_KNIGHT_SPRITE_HEIGHT, anim_speed=20)
-        self.move_pattern = "strafe"
+        self.move_pattern = "descend"
         self.move_speed = 0.9
-        self.move_amplitude = 2.4
         self.shoot_interval = 110
         self.shoot_pattern = "none"
         self._shots = 0
@@ -328,6 +440,65 @@ class WitherWispEnemy(Enemy):
         _add(bullet_manager, create_bullet_angle(
             self.x, self.y, base, 2.1, Bullet.TYPE_CIRCLE,
             radius=2.5, color=(90, 40, 140)))
+
+
+class SkeletonLordEnemy(Enemy):
+    """Skeleton Lord：从侧面高速横向切入，随即铺开高速密集的螺旋鳞弹。
+
+    第一波由左右两位同时入场（side=-1 左 / +1 右）：横向切入到左右对称的停驻位后
+    开始射击，螺旋方向按入场侧镜像，两位的弹幕左右对称。除入场方式与螺旋鳞弹外没有
+    别的机制，弹速与弹密是该兵种的全部压迫感来源；弹色每轮在黄 / 绿之间交替。
+    """
+    ENTRY_SPEED = 7.0        # 横向切入速度（px/帧），约 0.2s 从边框切到停驻位
+    ANCHOR_INSET = 150.0     # 停驻点到同侧边框的距离
+    SETTLE_FRAMES = 6        # 到位后停顿多少帧再开火（0.1s，几乎紧接着就起手）
+    VOLLEY_FRAMES = 6        # 螺旋每轮间隔（帧），比初版快一倍
+    VOLLEY_BULLETS = 5       # 每轮弹数（同轮等分一圈，5 发 + 每轮偏转 = 螺旋）
+    SPIN_STEP = 1.10         # 每轮螺旋的偏转角（弧度），比初版大一倍
+    BULLET_SPEED = 4.2       # 鳞弹弹速（px/帧），比道中其它小怪的 1.5~2.6 快得多
+    COLOR_YELLOW = (225, 190, 30)   # 黄鳞弹（图集里落在 g01_13）
+    COLOR_GREEN = (60, 205, 70)     # 绿鳞弹（图集里落在 g01_10）
+
+    def __init__(self, side=-1, y=150):
+        self.side = -1 if side < 0 else 1
+        x = -46.0 if self.side < 0 else cfg.BATTLE_AREA_WIDTH + 46.0
+        super().__init__(x, y, hp=420, score=3000, size=22, color=(150, 110, 200),
+                         sprite_paths=cfg.STAGE6_LORD_SPRITES,
+                         sprite_height=cfg.STAGE6_LORD_SPRITE_HEIGHT, anim_speed=18)
+        self.move_pattern = "none"
+        self.entry_done = True      # 入场动画由 _move 的切入段承担，不走基类的降落入场
+        self.entered = False
+        self.anchor_x = (self.ANCHOR_INSET if self.side < 0
+                         else cfg.BATTLE_AREA_WIDTH - self.ANCHOR_INSET)
+        self.shoot_interval = self.VOLLEY_FRAMES
+        self.shoot_pattern = "none"
+        self.spin = 0.0             # 当前螺旋偏转角
+        self.volley = 0             # 已发射轮数：偶数轮黄、奇数轮绿
+
+    def _move(self):
+        if not self.entered:
+            self.x += self.ENTRY_SPEED * (1 if self.side < 0 else -1)
+            if ((self.side < 0 and self.x >= self.anchor_x)
+                    or (self.side > 0 and self.x <= self.anchor_x)):
+                self.x = self.anchor_x
+                self.entered = True
+                self.shoot_timer = self.SETTLE_FRAMES
+            return
+        # 停驻后原地悬停微摆（不再横移，保证螺旋中心稳定）
+        self.y += math.sin(self.age * 0.035) * 0.45
+
+    def can_shoot(self):
+        return self.entered and super().can_shoot()
+
+    def shoot(self, bullet_manager, player_x, player_y):
+        color = self.COLOR_YELLOW if self.volley % 2 == 0 else self.COLOR_GREEN
+        for i in range(self.VOLLEY_BULLETS):
+            angle = self.spin + i * math.tau / self.VOLLEY_BULLETS
+            _add(bullet_manager, create_bullet_angle(
+                self.x, self.y, angle, self.BULLET_SPEED, Bullet.TYPE_SCALE,
+                radius=5, color=color))
+        self.spin += self.SPIN_STEP * (1 if self.side < 0 else -1)
+        self.volley += 1
 
 
 # ---------------------------------------------------------------------------
@@ -539,9 +710,9 @@ def _kaeman_draw_dominion_crack(overlay, cx, cy, angle, length, seed, side,
             continue
         piece = pts[i0:i1 + 1]
         core_piece = core[i0:i1 + 1]
-        pygame.draw.lines(overlay, (90, 30, 160, 140), False, piece, 8)
-        pygame.draw.lines(overlay, (12, 3, 22, 235), False, piece, 5)
-        pygame.draw.lines(overlay, (195, 135, 255, 185), False, core_piece, 2)
+        overlay.hi_lines((90, 30, 160, 140), piece, 8)
+        overlay.hi_lines((12, 3, 22, 235), piece, 5)
+        overlay.hi_lines((195, 135, 255, 185), core_piece, 2)
 
 
 def spell_kaeman_dominion(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
@@ -703,24 +874,26 @@ _wd_sprite_attempted = set()
 _wd_glow_cache = {}
 
 
-def _wd_glow(color, radius):
+def _wd_glow(color, radius, sharp=False):
     """柔和圆形光晕（纯视觉，缓存）。"""
-    key = (color, radius)
+    factor = hires.scale() if sharp else 1
+    key = (color, radius, factor)
     if key not in _wd_glow_cache:
         size = max(2, radius * 2)
-        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        surf = hires.panel((size, size), factor)
         steps = max(4, radius)
         for i in range(steps):
             rr = max(1, int(radius * (1.0 - i / steps)))
             alpha = int(120 * (1.0 - i / steps) ** 1.4)
-            pygame.draw.circle(surf, (*color, alpha), (radius, radius), rr)
+            surf.hi_circle((*color, alpha), (radius, radius), rr)
         _wd_glow_cache[key] = surf
     return _wd_glow_cache[key]
 
 
-def _get_withered_dragon_sprite(height):
+def _get_withered_dragon_sprite(height, sharp=False):
     """加载枯龙贴图（GIF 首帧）并裁掉透明边距，缓存为指定高度。"""
-    key = height
+    factor = hires.scale() if sharp else 1
+    key = (height, factor)
     if key in _wd_sprite_attempted:
         return _wd_sprite_cache.get(key)
     _wd_sprite_attempted.add(key)
@@ -734,9 +907,9 @@ def _get_withered_dragon_sprite(height):
         if h <= 0:
             raise ValueError("invalid dragon sprite height")
         new_w = max(1, int(round(w * height / h)))
-        img = pygame.transform.smoothscale(img, (new_w, height))
+        img = hires.scaled_image(img, (new_w, height), factor)
         # 轻微紫调压暗，突出「枯龙」质感
-        tint = pygame.Surface(img.get_size(), pygame.SRCALPHA)
+        tint = hires.panel((new_w, height), factor)
         tint.fill((140, 120, 185, 255))
         img.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
         _wd_sprite_cache[key] = img
@@ -748,25 +921,30 @@ def _get_withered_dragon_sprite(height):
 _wd_outline_cache = {}
 
 
-def _get_withered_dragon_outline(height, color=(235, 205, 255)):
+def _get_withered_dragon_outline(height, color=(235, 205, 255), sharp=False):
     """枯龙剪影描边层：沿轮廓外扩 2px 的亮色边缘（缓存）。"""
-    key = (height, color)
+    factor = hires.scale() if sharp else 1
+    key = (height, color, factor)
     if key in _wd_outline_cache:
         return _wd_outline_cache[key]
-    sprite = _get_withered_dragon_sprite(height)
+    sprite = _get_withered_dragon_sprite(height, sharp)
     if sprite is None:
         _wd_outline_cache[key] = None
         return None
     try:
-        w, h = sprite.get_size()
+        w = pygame.Surface.get_width(sprite)
+        h = pygame.Surface.get_height(sprite)
         pad = 3
         mask = pygame.mask.from_surface(sprite, threshold=32)
         sil = mask.to_surface(setcolor=(*color, 255), unsetcolor=(0, 0, 0, 0))
+        # 外扩量按倍率换算：真实像素上做，描边的粗细才与 1x 时一致
+        edge = 2 * factor
+        pad *= factor
         out = pygame.Surface((w + pad * 2, h + pad * 2), pygame.SRCALPHA)
-        for dx in (-2, 0, 2):
-            for dy in (-2, 0, 2):
+        for dx in (-edge, 0, edge):
+            for dy in (-edge, 0, edge):
                 out.blit(sil, (pad + dx, pad + dy))
-        _wd_outline_cache[key] = out
+        _wd_outline_cache[key] = hires.wrap(out, factor)
     except Exception:
         _wd_outline_cache[key] = None
     return _wd_outline_cache[key]
@@ -1935,68 +2113,150 @@ def _kaeman_fire(skull, bullet_manager, player_x, player_y):
             lx, ly, a, 2.2, Bullet.TYPE_KNIFE, radius=2.5, color=(170, 60, 200)))
 
 
-def _ghost_fire(ghost, bullet_manager, player_x, player_y):
-    """残影离场前打出一组「门徒告别弹」：分别呼应四人的弹幕风格。"""
-    gid = ghost["id"]
-    gx, gy = ghost["x"], ghost["y"]
-    if gid == "maxor":
+# ---------------------------------------------------------------------------
+# 王之门徒残影的「告别弹」：每位门徒从自己那张符卡里借一小段弹幕
+#
+# 只留弹幕的形状，且一律削弱（弹数 / 密度 / 弹速都低于原版）；符卡机制一概不带：
+# 没有无敌与破防、没有结晶 / 终端 / 避雷柱、没有判定窗口与全屏雷击、没有 TNT 与
+# 地狱火。残影本身打不到，打完这一小段就淡出。
+# ---------------------------------------------------------------------------
+def _ghost_spell_maxor(ghost, bullet_manager, player_x, player_y, t):
+    """Phase1「Maxor's Frenzy」的穿梭骷髅排——只留「折返时撒一排 Wither Skull」。
+
+    原版 Maxor 以 6.6px/帧 在屏幕上方来回穿梭，每次折返在整个宽度上撒一排 Wither
+    Skull（5.6px/帧，飞出 36 帧后逐渐减速）；这里削成四排、每排 5 发、弹速 3.0、
+    左右方向交替，末尾补两轮自机狙大玉（每轮 3 发）。TNT / 冲击波 / 结晶 / 红激光
+    解除无敌那套机制全部去掉。
+    """
+    if t in (0, 14, 28, 42):
+        base = math.pi * (0.38 if (t // 14) % 2 == 0 else 0.62)
+        for i in range(5):
+            bullet = create_bullet_angle(
+                cfg.BATTLE_AREA_WIDTH * (i + 1) / 6.0, ghost["y"] + 4,
+                base + (i - 2) * 0.05, 3.0, Bullet.TYPE_CIRCLE,
+                radius=4.0, color=(170, 215, 255), lifetime=420)
+            bullet.custom_sprite_path = cfg.STAGE6_WITHER_SKULL_SPRITE
+            bullet.custom_sprite_height = 30
+            bullet.glow_color = (255, 245, 225)
+            bullet.glow_padding = 6
+            _add(bullet_manager, bullet)
+    if t in (58, 76):
+        base = math.atan2(player_y - ghost["y"], player_x - ghost["x"])
+        for offset in (-0.20, 0.0, 0.20):
+            _add(bullet_manager, create_bullet_angle(
+                ghost["x"], ghost["y"] + 30, base + offset, 2.6,
+                Bullet.TYPE_BIG, radius=4.0, color=(255, 90, 60)))
+
+
+def _ghost_spell_storm(ghost, bullet_manager, player_x, player_y, t):
+    """雷符「Giga Lightning」狂暴状态的四层弹幕——每层各取一点、全部削弱。
+
+    原版狂暴状态是「解封可被打（受伤翻 4 倍）后用弹幕铺场」：每 8 帧一圈八向圆弹
+    （基准角随机）、每 20 帧一对自己狙刀弹、每 52 帧一圈十四发旋转箭环、每 150 帧
+    六发随机大玉，期间 Storm 还会换位。这里只留弹幕本身并削一层：八向环改成每 18
+    帧 8 发、自机狙双刀每 36 帧、旋转箭环 12 发来两圈、随机大玉 4 发；换位与
+    「可被攻击 / 受伤翻倍」那套机制都不带。
+    """
+    if t % 18 == 0:
+        base = random.uniform(0.0, math.tau)
         for i in range(8):
-            a = math.atan2(player_y - gy, player_x - gx) + (i - 3.5) * 0.14
             _add(bullet_manager, create_bullet_angle(
-                gx, gy + 42, a, 2.5, Bullet.TYPE_BIG,
-                radius=5, color=(255, 120, 50)))
-    elif gid == "storm":
-        for dx in (-95, 95):
-            top = 14.0
-            beam = create_bullet_angle(
-                gx + dx, top, math.pi / 2, 0.0, Bullet.TYPE_BEAM,
-                radius=2.5, color=(140, 220, 255))
-            beam.angle = math.pi / 2
-            beam.beam_length = cfg.BATTLE_AREA_HEIGHT - 22
-            beam.lifetime = 22
-            _add(bullet_manager, beam)
+                ghost["x"], ghost["y"], base + i * math.tau / 8, 1.6,
+                Bullet.TYPE_CIRCLE, radius=2.5, color=(130, 210, 255)))
+    if t % 36 == 0:
+        base = math.atan2(player_y - ghost["y"], player_x - ghost["x"])
+        for offset in (-0.15, 0.15):
+            _add(bullet_manager, create_bullet_angle(
+                ghost["x"], ghost["y"], base + offset, 2.8,
+                Bullet.TYPE_KNIFE, radius=2.5, color=(170, 225, 255)))
+    if t in (56, 84):
+        for i in range(12):
+            _add(bullet_manager, create_bullet_angle(
+                ghost["x"], ghost["y"], t * 0.06 + i * math.tau / 12, 1.7,
+                Bullet.TYPE_ARROW, radius=3, color=(90, 190, 255)))
+    if t == 70:
+        for _ in range(4):
+            _add(bullet_manager, create_bullet_angle(
+                ghost["x"], ghost["y"], random.uniform(0.0, math.tau), 2.4,
+                Bullet.TYPE_BIG, radius=4, color=(200, 240, 255)))
+
+
+def _ghost_spell_goldor(ghost, bullet_manager, player_x, player_y, t):
+    """Phase3「Infinite Rage」的金环与米弹螺旋——去掉剑盾本体与剑隙机制。
+
+    原版 Goldor 中央悬停，4 把金色巨剑环绕成旋转剑盾，凋零骷髅从剑的间隙散射、
+    金色圆弹环随剑盾角度旋转、再叠一层反向白环与米弹四臂螺旋（每 13~15 帧一波）。
+    这里不要剑、也不要剑隙，只留弹幕形状且全部削弱：金环 10 发、反向白环 8 发各来
+    两圈，米弹改成四臂、每 10 帧一圈、共 5 圈。
+    """
+    gx, gy = ghost["x"], ghost["y"] + 30
+    if t in (0, 84):
         for i in range(10):
-            a = math.atan2(player_y - gy, player_x - gx) + (i - 4.5) * 0.12
             _add(bullet_manager, create_bullet_angle(
-                gx, gy, a, 2.3, Bullet.TYPE_CIRCLE,
-                radius=2.5, color=(120, 200, 255)))
-    elif gid == "goldor":
-        for i in range(18):
-            a = i * math.tau / 18 + ghost["age"] * 0.02
+                gx, gy, i * math.tau / 10, 1.6, Bullet.TYPE_CIRCLE,
+                radius=3, color=(255, 210, 110)))
+    if t in (18, 94):
+        for i in range(8):
             _add(bullet_manager, create_bullet_angle(
-                gx, gy + 36, a, 1.9, Bullet.TYPE_CIRCLE,
-                radius=3, color=(255, 205, 90)))
-        for i in range(6):
-            a = math.atan2(player_y - gy, player_x - gx) + (i - 2.5) * 0.14
+                gx, gy, 0.3 - i * math.tau / 8, 1.3, Bullet.TYPE_CIRCLE,
+                radius=3, color=(245, 235, 200)))
+    if 30 <= t <= 70 and (t - 30) % 10 == 0:
+        for arm in range(4):
             _add(bullet_manager, create_bullet_angle(
-                gx, gy + 30, a, 2.4, Bullet.TYPE_RICE,
-                radius=2.5, color=(240, 190, 80)))
+                gx, gy, t * 0.08 + arm * math.tau / 4, 1.6, Bullet.TYPE_RICE,
+                radius=2.5, color=(255, 200, 110), lifetime=300))
+
+
+def _ghost_spell_necron(ghost, bullet_manager, player_x, player_y, t):
+    """终符「Necron's Frenzy」的八臂螺旋与大玉环——去掉加速与烈焰上涌。
+
+    原版每 5 帧放一圈八臂螺旋（弹速随符卡时间由 1.55 涨到 7.0）、每 72 帧一圈大玉，
+    屏幕底部还有不断上涌、蛇形摆动的地狱火逼玩家往场地上方退；这里削成八臂、每 10
+    帧一圈、弹速固定 1.5，共 7 圈，末尾补两圈大玉，火焰与加速都不带。
+    """
+    gx, gy = ghost["x"], ghost["y"] + 42
+    if t <= 60 and t % 10 == 0:
+        for arm in range(8):
+            _add(bullet_manager, create_bullet_angle(
+                gx, gy, t * 0.22 + arm * math.tau / 8, 1.5,
+                Bullet.TYPE_CIRCLE, radius=3.0, lifetime=320,
+                color=(255, 92, 92) if arm % 2 == 0 else (206, 84, 255)))
+    if t in (72, 90):
+        for i in range(12):
+            _add(bullet_manager, create_bullet_angle(
+                gx, gy, i * math.tau / 12 + 0.07, 1.6, Bullet.TYPE_BIG,
+                radius=4.0, color=(196, 74, 255), lifetime=340))
+
+
+def _ghost_spell(ghost, bullet_manager, player_x, player_y):
+    """残影登场即起手的「一小段符卡」：从登场那一帧（age 0，本函数在 age 自增之前
+    被调用）起 GHOST_SPELL_FRAMES 帧里逐帧调用对应门徒那一段（见上四个函数），
+    窗口之外什么都不做。"""
+    t = ghost["age"]
+    if t >= GHOST_SPELL_FRAMES:
+        return
+    if ghost["id"] == "maxor":
+        _ghost_spell_maxor(ghost, bullet_manager, player_x, player_y, t)
+    elif ghost["id"] == "storm":
+        _ghost_spell_storm(ghost, bullet_manager, player_x, player_y, t)
+    elif ghost["id"] == "goldor":
+        _ghost_spell_goldor(ghost, bullet_manager, player_x, player_y, t)
     else:  # necron
-        for i in range(14):
-            a = i * math.tau / 14 + ghost["age"] * 0.015
-            _add(bullet_manager, create_bullet_angle(
-                gx, gy + 42, a, 1.6, Bullet.TYPE_KNIFE,
-                radius=2.5, color=(200, 70, 230)))
+        _ghost_spell_necron(ghost, bullet_manager, player_x, player_y, t)
 
 class Stage6_FinalApproach(Stage):
     """Stage 6: Final Approach（通往凋零之王 Kaeman 的王座）"""
 
     def __init__(self):
         super().__init__(6, "最终进军 ~ Final Approach", bg_color=(6, 4, 10))
-        # 进军阶段复用四面墓穴风格；进入要塞后切换到自绘凋零要塞贴图。
+        # 道中只用一个伪3D 背景：整面沿用原来的地面 / 洞壁贴图，不再切要塞贴图；
+        # 阶段推进带来的变化由逐帧压暗（_mid_darkness）与镜头高度负责。
         self.background = Pseudo3DFloor(
             cfg.STAGE6_FLOOR, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT,
             bg_color=self.bg_color,
             wall_texture_path=cfg.STAGE6_WALL,
             horizon_ratio=0.34, tunnel_width=1.7,
             far_opening=30, floor_stretch=3.4, wall_stretch=1.0,
-            wall_align_to_floor=True)
-        self.background_fortress = Pseudo3DFloor(
-            cfg.STAGE6_FORTRESS_FLOOR, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT,
-            bg_color=self.bg_color,
-            wall_texture_path=cfg.STAGE6_FORTRESS_WALL,
-            horizon_ratio=0.30, tunnel_width=1.55,
-            far_opening=34, floor_stretch=3.4, wall_stretch=1.0,
             wall_align_to_floor=True)
         self.title_path = cfg.STAGE6_TITLE
         self.music_path = cfg.STAGE6_MUSIC_START
@@ -2006,7 +2266,9 @@ class Stage6_FinalApproach(Stage):
         self.music_name = cfg.STAGE6_MUSIC_NAME
         self.boss_music_name = cfg.STAGE6_BOSS_MUSIC_NAME
         self.mid_boss_music_path = None
-        self.background_darkness = 40
+        # 道中每帧按 _mid_darkness 覆盖；初值取 Boss 战的值，好让练习模式
+        # （直接进 Kaeman 战，不跑道中曲线）与关底战画面一致
+        self.background_darkness = BG_DARKNESS_BOSS
 
         # 阶段状态
         self.phase = "march"
@@ -2030,48 +2292,43 @@ class Stage6_FinalApproach(Stage):
         # 王之门徒残影
         self.ghosts = []
         self.ghost_queue = list(GHOST_PLAN)
+        self.ghost_bg = None            # 残影登场时换上的背景（SpellBackground）
+        self.ghost_bg_prev = None       # 接力交接时留着铺底的上一张（新的铺满后丢弃）
 
         # 战后对话：Kaeman（即 The Wither King）被击破后
         self.defeat_dialogue_lines = [
             ("Kaeman", "真是令人怀念。"),
             ("Kaeman", "已经很久没有这样战斗过了。"),
-            ("魔法使 Mage", "结束了吗？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "结束了吗？"),
             ("Kaeman", "结束？"),
             ("Kaeman", "呵。"),
-            ("魔法使 Mage", "什么意思？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "什么意思？"),
             ("Kaeman", "地下城不会因为某个人而停止运转。"),
             ("Kaeman", "就像天空街不会因为某个人而改变一样。"),
-            ("魔法使 Mage", "那你呢？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "那你呢？"),
             ("Kaeman", "我只是有些累了。"),
-            ("魔法使 Mage", "......"),
+            (cfg.PLAYER_DIALOGUE_NAME, "......"),
             ("Kaeman", "魔法使。"),
             ("Kaeman", "别让自己变成和我一样的人。"),
-            ("魔法使 Mage", "我会记住的。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "我会记住的。"),
             ("Kaeman", "是吗？"),
             ("Kaeman", "那就好。"),
         ]
         self.defeat_dialogue_portraits = {
-            "魔法使 Mage": cfg.SELF_SPRITE,
+            cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             "Kaeman": cfg.STAGE6_KAEMAN_PORTRAIT,
         }
         self.defeat_dialogue_portrait_sides = {
-            "魔法使 Mage": "left",
+            cfg.PLAYER_DIALOGUE_NAME: "left",
             "Kaeman": "right",
         }
         # Kaeman 说话时立绘放大 1.5x
         self.dialogue_portrait_scales = {"Kaeman": 1.5}
-        self.dialogue_portrait_offsets = {"Kaeman": 120}  # Kaeman 立绘右移 120px
+        # Kaeman 的立绘宽得多、脸又在正中，x 位置交给对话框的「靠边探出量限幅」摆
+        # （见 ui/dialogue.py 的 DIALOGUE_PORTRAIT_EDGE_BLEED），这里不再单独右移
         self.dialogue_portrait_vertical_offsets = {"Kaeman": 80}  # 上移，让脸与 Mage 同高
 
-        # 前景遮罩（锁定圈 / 边缘压暗用，避免每帧新建 Surface）
-        self._fg_overlay = pygame.Surface(
-            (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), pygame.SRCALPHA)
-        self._dark_cache = {}
-        self._dominion_overlay = None   # 王符领域视觉层缓存
-        self._relic_overlay = None     # 冥符 Relic 五边形视觉层缓存
-        self._dragon_overlay = None     # 龙符枯龙视觉层缓存
         self._dragon_ring = None       # 龙符轨道虚线缓存
-        self._slumber_overlay = None  # 终仪吸收核心/冲击环视觉层缓存
 
     # ------------------------------------------------------------------
     # 基础接口
@@ -2083,36 +2340,41 @@ class Stage6_FinalApproach(Stage):
         em = self.enemy_manager
 
         # 前半段：亡灵军队防线（0 ~ 42s，逐渐加强）
+        # 凋零守卫 / 凋零矿工直接在画面内上部出现（_top_spawn 换算落点，见其定义）；
+        # 凋零游魂仍从区域外落下，速度 3.0，每波数量为原来的两倍。
         march_waves = (
+            # 第一梯队：左右两位 Skeleton Lord 同时横向切入（左右对称入场）
             (4 * 60, EnemyWave([
-                WitherHuskEnemy(100, -24), WitherHuskEnemy(288, -48),
-                WitherHuskEnemy(470, -24)], name="Wither Vanguard")),
+                SkeletonLordEnemy(side=-1), SkeletonLordEnemy(side=1)],
+                name="Skeleton Lords")),
             (9 * 60, EnemyWave([
-                WitherGuardEnemy(140, -30), WitherGuardEnemy(430, -30),
-                WitherHuskEnemy(200, -60), WitherHuskEnemy(380, -60)],
+                WitherGuardEnemy(140, _top_spawn(-30)), WitherGuardEnemy(430, _top_spawn(-30)),
+                *_husk_line([150, 200], "\\", step=48),
+                *_husk_line([380, 430], "/", step=48)],
                 name="Undead Line")),
             (14 * 60, EnemyWave([
-                WitherMinerEnemy(80, -24), WitherMinerEnemy(288, -56),
-                WitherMinerEnemy(492, -24), WitherHuskEnemy(160, -70),
-                WitherHuskEnemy(420, -70)], name="Miner Phalanx")),
+                WitherMinerEnemy(80, _top_spawn(-24)), WitherMinerEnemy(288, _top_spawn(-56)),
+                WitherMinerEnemy(492, _top_spawn(-24)),
+                *_husk_line([105, 160], "\\", step=48),
+                *_husk_line([420, 475], "/", step=48)], name="Miner Phalanx")),
             (19 * 60, EnemyWave([
-                WitherGuardEnemy(110, -40), WitherGuardEnemy(460, -40),
-                WitherMinerEnemy(200, -60), WitherMinerEnemy(380, -60),
-                WitherHuskEnemy(288, -80)], name="Fortress Gate")),
+                WitherGuardEnemy(110, _top_spawn(-40)), WitherGuardEnemy(460, _top_spawn(-40)),
+                WitherMinerEnemy(200, _top_spawn(-60)), WitherMinerEnemy(380, _top_spawn(-60)),
+                *_husk_line([232, 288, 344], step=44)], name="Fortress Gate")),
             (24 * 60, EnemyWave([
-                WitherMinerEnemy(90, -24), WitherMinerEnemy(250, -56),
-                WitherMinerEnemy(400, -24), WitherMinerEnemy(500, -56),
-                WitherGuardEnemy(288, -70)], name="Wither Labor")),
+                WitherMinerEnemy(90, _top_spawn(-24)), WitherMinerEnemy(250, _top_spawn(-56)),
+                WitherMinerEnemy(400, _top_spawn(-24)), WitherMinerEnemy(500, _top_spawn(-56)),
+                WitherGuardEnemy(288, _top_spawn(-70))], name="Wither Labor")),
             (29 * 60, EnemyWave([
-                WitherGuardEnemy(130, -40), WitherGuardEnemy(320, -70),
-                WitherGuardEnemy(450, -40), WitherHuskEnemy(80, -80),
-                WitherHuskEnemy(230, -90), WitherHuskEnemy(420, -90)],
+                WitherGuardEnemy(130, _top_spawn(-40)), WitherGuardEnemy(320, _top_spawn(-70)),
+                WitherGuardEnemy(450, _top_spawn(-40)),
+                *_husk_line([80, 150, 230, 300, 420, 490], step=34)],
                 name="Guard Wall")),
             (34 * 60, EnemyWave([
-                WitherHuskEnemy(70, -24), WitherHuskEnemy(180, -56),
-                WitherHuskEnemy(288, -80), WitherHuskEnemy(400, -56),
-                WitherHuskEnemy(500, -24), WitherMinerEnemy(240, -90),
-                WitherMinerEnemy(350, -90)], name="Last March")),
+                *_husk_line([70, 180, 288, 400, 500]),
+                *_husk_line([40, 150, 288, 430, 540], top_y=-160.0),
+                WitherMinerEnemy(240, _top_spawn(-90)),
+                WitherMinerEnemy(350, _top_spawn(-90))], name="Last March")),
         )
         for t, wave in march_waves:
             em.add_timed_wave(t, wave)
@@ -2132,35 +2394,17 @@ class Stage6_FinalApproach(Stage):
         for t, wave in wisp_waves:
             em.add_timed_wave(t, wave)
 
-        # 后半段：凋零要塞（66 ~ 100s）：敌人减少、场面变大
-        fortress_waves = (
-            (68 * 60, EnemyWave([
-                WitherGuardEnemy(130, -40), WitherGuardEnemy(430, -40),
-                WitherKnightEnemy(288, -70)], name="Fortress Wall")),
-            (75 * 60, EnemyWave([
-                WitherMinerEnemy(110, -40), WitherMinerEnemy(360, -40),
-                WitherKnightEnemy(210, -70)], name="Siege Detail")),
-            (82 * 60, EnemyWave([
-                WitherKnightEnemy(110, -50), WitherKnightEnemy(280, -50),
-                WitherKnightEnemy(460, -50), WitherGuardEnemy(200, -80),
-                WitherGuardEnemy(380, -80)], name="Knight Order")),
-            (90 * 60, EnemyWave([
-                WitherTerracottaEnemy(160, -40, deploy_y=150),
-                WitherTerracottaEnemy(420, -40, deploy_y=150),
-                WitherGuardEnemy(288, -60)], name="Golem Ward")),
-        )
-        for t, wave in fortress_waves:
-            em.add_timed_wave(t, wave)
+        # 后半段：凋零要塞（66 ~ 100s）：这一段不再生成小怪 —— 王之门徒的四位残影
+        # 会在 70s 起接力登场（见 _update_ghosts），原来的四波小怪（68s Fortress
+        # Wall / 75s Siege Detail / 82s Knight Order / 90s Golem Ward）全部取消，
+        # 整段只留残影本身的弹幕；残影收场后照旧进入王座前的最后防线（100s）。
 
         # 王座前的最后防线（100s 出场）：突破后直接进入 Kaeman（The Wither King）战
         self.final_wave = EnemyWave([
-            WitherColossusEnemy(288, -70, deploy_y=150),
-            WitherTerracottaEnemy(110, -40, deploy_y=150),
-            WitherTerracottaEnemy(466, -40, deploy_y=150),
-            WitherGuardEnemy(150, -50),
-            WitherGuardEnemy(430, -50),
-            WitherKnightEnemy(220, -80),
-            WitherKnightEnemy(360, -80),
+            WitherColossusEnemy(288, -70, deploy_y=94),
+            SkeletonLordEnemy(side=-1, y=204), SkeletonLordEnemy(side=1, y=204),
+            WitherGuardEnemy(196, _top_spawn(-50)),
+            WitherGuardEnemy(380, _top_spawn(-50)),
         ], name="Final Defense")
         em.add_timed_wave(FORTRESS_FINAL_WAVE_AT, self.final_wave)
 
@@ -2173,6 +2417,22 @@ class Stage6_FinalApproach(Stage):
     def setup_boss(self):
         """关底 Boss：Kaeman（即 The Wither King）——五张通常符 + 一张 Last Spell。"""
         self.boss = self._make_kaeman()
+
+    def warm_spell_effects(self):
+        """把四位王之门徒残影的立绘提前缩好（_load_sprite 那一步）
+
+        立绘改借「Boss 立绘套组」之后是 2040x3072 的大图：第一次绘制要现缩一次，
+        实测 new 套组 100~120ms、another 套组 36~49ms —— 正好落在残影淡入的头几帧。
+        解码那一步由 cfg.stage_spell_sprites 的「符卡贴图」预热负责（见 ui/loading.py），
+        这里补上按 GHOST_HEIGHT 缩小、以及显卡层要的那一份。
+        """
+        done = 0
+        for gid in GHOST_POSITIONS:
+            path = _ghost_sprite_path(gid)
+            for sharp in (False, True):
+                if _load_sprite(path, GHOST_HEIGHT, sharp) is not None:
+                    done += 1
+        return done
 
     def _make_kaeman(self):
         boss = Boss(
@@ -2235,7 +2495,6 @@ class Stage6_FinalApproach(Stage):
             self.phase = "interference"
             self._set_banner("—— Kaeman 的注视 ——")
             self.kaeman_next_attack = KAEMAN_FIRST_ATTACK_IN
-            self.background_darkness = 84
             return
         if self.phase == "interference" and self.timer >= INTERFERENCE_END:
             self.phase = "fortress"
@@ -2245,21 +2504,18 @@ class Stage6_FinalApproach(Stage):
         if self.phase == "fortress" and self.timer >= FORTRESS_FINAL_WAVE_AT:
             self.phase = "final_wave"
             self._set_banner("—— 王座前的最后防线 ——")
-            self.background_darkness = 150
             return
         if self.phase == "final_wave" and self.enemy_manager.is_cleared():
             self._start_final_dialogue()
 
     def _enter_fortress(self):
-        old = self.background
-        fort = self.background_fortress
-        if old is not None and fort is not None:
-            fort.scroll = old.scroll
-            fort.speed_mult = old.speed_mult
-        self.background = fort
+        """进入凋零要塞：不再换背景贴图，只把镜头抬高、滚动加快；
+
+        战场变暗依旧由 _mid_darkness 的压暗曲线负责（阶段推进即越来越暗）。
+        """
         self._ramp_background_speed(2.2, BOSS_BG_RAMP_TIME)
-        self.background.ramp_view_height(70.0, 2.0)
-        self.background_darkness = 120
+        if self.background is not None:
+            self.background.ramp_view_height(70.0, 2.0)
 
     # ------------------------------------------------------------------
     # 更新循环
@@ -2267,9 +2523,23 @@ class Stage6_FinalApproach(Stage):
     def update(self, dt, bullet_manager, player_x, player_y):
         if self.background:
             self.background.update(dt)
+        # 残影背景：不在道中阶段也要继续推进（保证淡出能播完、实例会被回收）
+        if self.ghost_bg is not None:
+            self.ghost_bg.update(dt)
+            if self.ghost_bg.done:
+                self.ghost_bg = None
+        if self.ghost_bg_prev is not None:
+            # 交接铺底的那一张：当前这张铺满、或在退场、或已回收，就无声丢掉
+            cur = self.ghost_bg
+            if cur is None or cur.fading or cur.is_opaque:
+                self.ghost_bg_prev = None
+            else:
+                self.ghost_bg_prev.update(dt)
         self.timer += 1
 
         if self.phase in ("march", "interference", "fortress", "final_wave"):
+            # 背景压暗随时间持续加深：阶段越往后，战场越暗
+            self.background_darkness = int(round(_mid_darkness(self.timer)))
             self.enemy_manager.update(dt, bullet_manager, player_x, player_y,
                                       stage_time=self.timer)
             self._update_kaeman(bullet_manager, player_x, player_y)
@@ -2403,19 +2673,51 @@ class Stage6_FinalApproach(Stage):
     def _update_ghosts(self, bullet_manager, player_x, player_y):
         if self.phase in ("fortress", "final_wave"):
             while self.ghost_queue and self.timer >= self.ghost_queue[0][0]:
-                _, gid = self.ghost_queue.pop(0)
+                spawn_at, gid = self.ghost_queue.pop(0)
                 gx, gy = GHOST_POSITIONS[gid]
+                # 撑到下一个残影登场那一刻再退场（+1 帧：退场发生在后一位登场那一帧的
+                # 末尾，这样任何一帧都至少有一位残影在场）；队列里没有了就按
+                # GHOST_MAX_AGE 收场
+                life = (self.ghost_queue[0][0] - spawn_at + 1
+                        if self.ghost_queue else GHOST_MAX_AGE)
                 self.ghosts.append({
                     "id": gid, "x": gx, "y": gy,
-                    "age": 0, "max_age": GHOST_MAX_AGE, "fired": False,
+                    "sprite": _ghost_sprite_path(gid),
+                    "age": 0, "max_age": max(1, life),
                 })
+                # 随着残影登场把背景换成这位门徒在五面的那一张
+                bg = SpellBackground("", GHOST_BG_STYLES[gid])
+                # 整幅贴图缺失（资源没拷全）时不换背景：退回走廊，别铺一块纯底色
+                missing = any(layer.image is not None and img is None
+                              for layer, img in zip(bg.layers, bg.images))
+                if missing:
+                    self.ghost_bg = None
+                else:
+                    # 上一位的背景下台：先留着铺底，等新的一张铺满再无声丢掉 —— 两位
+                    # 残影现在无缝接力，直接换会在这 20 帧淡入里露出走廊
+                    self.ghost_bg_prev = self.ghost_bg
+                    self.ghost_bg = bg
         for ghost in self.ghosts[:]:
+            # 一小段削弱版符卡：登场那一帧就起手（窗口外直接返回）
+            _ghost_spell(ghost, bullet_manager, player_x, player_y)
             ghost["age"] += 1
-            if ghost["age"] == GHOST_FIRE_AT and not ghost["fired"]:
-                ghost["fired"] = True
-                _ghost_fire(ghost, bullet_manager, player_x, player_y)
             if ghost["age"] >= ghost["max_age"]:
                 self.ghosts.remove(ghost)
+                # 离场清弹：这么大的一位门徒退场，把它周围一圈弹幕一起炸掉
+                burst_cancel_bullets(bullet_manager, ghost["x"], ghost["y"],
+                                     GHOST_CLEAR_RADIUS, GHOST_GLOWS[ghost["id"]])
+                if not self.ghosts and self.ghost_bg is not None:
+                    self.ghost_bg.begin_fade_out()
+
+    def enemy_death_clear_radius(self, enemy):
+        """六面：小怪被击破时炸掉周围的敌弹，半径按体型给（判定半径 × 3）
+
+        凋零游魂 42 / 矿工 48 / 骑士 57 / 守卫与兵马俑 60 / Skeleton Lord 66 /
+        巨像 90；Boss（Kaeman）不走这条 —— 击破 Boss 的那一下不清屏。
+        """
+        if isinstance(enemy, Boss):
+            return 0.0
+        return enemy.size * CLEAR_RADIUS_PER_SIZE
 
     # ------------------------------------------------------------------
     # 对话与转场
@@ -2435,31 +2737,34 @@ class Stage6_FinalApproach(Stage):
         self.energy_wisps = []
         self.mist_particles = []
         self.ghosts = []
+        self.ghost_bg_prev = None
+        if self.ghost_bg is not None:
+            self.ghost_bg.begin_fade_out()
         self.enemy_manager.reset()
         self.boss = self._make_kaeman()
         self.boss.hold_combat()
         self._set_dialogue(
             [
                 ("Kaeman", "你来了。"),
-                ("魔法使 Mage", "看来，他们说得没错。"),
-                ("魔法使 Mage", "你一直在等我。"),
+                (cfg.PLAYER_DIALOGUE_NAME, "看来，他们说得没错。"),
+                (cfg.PLAYER_DIALOGUE_NAME, "你一直在等我。"),
                 ("Kaeman", "不。"),
                 ("Kaeman", "我只是在等一个能够来到这里的人。"),
-                ("魔法使 Mage", "地下城最近的异常，果然和你有关。"),
+                (cfg.PLAYER_DIALOGUE_NAME, "地下城最近的异常，果然和你有关。"),
                 ("Kaeman", "是吗？"),
                 ("Kaeman", "也许吧。"),
-                ("魔法使 Mage", "所以，你究竟想做什么？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "所以，你究竟想做什么？"),
                 ("Kaeman", "我只是做了一件魔法使都会做的事情。"),
-                ("魔法使 Mage", "什么？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "什么？"),
                 ("Kaeman", "试图改变不应该改变的事情。"),
-                ("魔法使 Mage", "看来，我们已经没有继续谈下去的必要了。"),
+                (cfg.PLAYER_DIALOGUE_NAME, "看来，我们已经没有继续谈下去的必要了。"),
                 ("Kaeman", "也许，从一开始就没有。"),
             ],
             {
-                "魔法使 Mage": cfg.SELF_SPRITE,
+                cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
                 "Kaeman": cfg.STAGE6_KAEMAN_PORTRAIT,
             },
-            {"魔法使 Mage": "left", "Kaeman": "right"},
+            {cfg.PLAYER_DIALOGUE_NAME: "left", "Kaeman": "right"},
             None)
         self.phase = "dialogue"
         self._ramp_background_speed(FINAL_BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)
@@ -2514,7 +2819,7 @@ class Stage6_FinalApproach(Stage):
     def _on_boss_combat_start(self):
         """Kaeman 开战时抬升视角，俯瞰王座；撤去黑能量入侵的压抑氛围。"""
         self.mist_particles = []
-        self.background_darkness = 40
+        self.background_darkness = BG_DARKNESS_BOSS
         if self.background is not None:
             self.background.ramp_view_height(122.0, 2.4)
 
@@ -2522,37 +2827,20 @@ class Stage6_FinalApproach(Stage):
     # 绘制
     # ------------------------------------------------------------------
     def draw(self, screen, offset_x=0, offset_y=0):
-        hide_floor = any(
-            b is not None and b.spell_bg is not None and not b.spell_bg.done
-            and b.spell_bg.is_opaque
-            for b in (self.mid_boss, self.boss))
-        floor = self.background
-        if floor is not None and floor.gpu_active and not hide_floor:
-            # 地面改由显卡原生绘制：战斗区在 CPU 帧上抠空（见 Stage.draw）
-            screen.fill((0, 0, 0, 0),
-                        (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH,
-                         cfg.BATTLE_AREA_HEIGHT))
-            register_gpu_floor(floor)
-        else:
-            pygame.draw.rect(screen, self.bg_color,
-                             (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH,
-                              cfg.BATTLE_AREA_HEIGHT))
-            if floor is not None and not hide_floor:
-                floor.draw(screen, offset_x, offset_y)
-        if floor is not None and not hide_floor and self.background_darkness:
-            dark = self._dark_cache.get(self.background_darkness)
-            if dark is None:
-                dark = pygame.Surface(
-                    (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
-                    pygame.SRCALPHA)
-                dark.fill((0, 0, 0, self.background_darkness))
-                self._dark_cache[self.background_darkness] = dark
-            screen.blit(dark, (offset_x, offset_y))
+        # 铺在战斗区上的背景：Boss 的符卡背景 + 道中残影的登场背景
+        backdrops = [b.spell_bg for b in (self.mid_boss, self.boss)
+                     if b is not None and b.spell_bg is not None]
+        # 接力交接铺底的那一张排在前：先画旧的，再把新的叠上去
+        if self.ghost_bg_prev is not None:
+            backdrops.append(self.ghost_bg_prev)
+        if self.ghost_bg is not None:
+            backdrops.append(self.ghost_bg)
+        hide_floor = any(bg.is_opaque for bg in backdrops if not bg.done)
+        self.draw_battle_backdrop(screen, offset_x, offset_y, hide_floor)
 
-        for boss_ref in (self.mid_boss, self.boss):
-            if boss_ref is not None and boss_ref.spell_bg is not None \
-                    and not boss_ref.spell_bg.done:
-                boss_ref.spell_bg.draw(screen, offset_x, offset_y)
+        for bg in backdrops:
+            if not bg.done:
+                bg.draw(screen, offset_x, offset_y)
 
         # 环境层：背景之上、敌人之下（巨颅 / 黑能量 / 门徒残影）
         self._draw_kaeman(screen, offset_x, offset_y)
@@ -2584,8 +2872,7 @@ class Stage6_FinalApproach(Stage):
         """子弹与自机之上：锁定预警圈 + 黑能量入侵边缘压暗 + 枯龙俯冲危险轨迹。"""
         if self.phase not in ("march", "interference", "fortress", "final_wave", "boss"):
             return
-        overlay = self._fg_overlay
-        overlay.fill((0, 0, 0, 0))
+        overlay = _hi_battle_panel(screen)
 
         if self.phase in ("march", "interference", "fortress", "final_wave"):
             # Kaeman 锁定玩家区域的预警圈
@@ -2595,13 +2882,13 @@ class Stage6_FinalApproach(Stage):
                 cx = int(w["x"] + offset_x)
                 cy = int(w["y"] + offset_y)
                 alpha = 60 + int(180 * (0.5 + 0.5 * math.sin(prog * math.pi)))
-                pygame.draw.circle(overlay, (255, 70, 90, alpha), (cx, cy), int(r), 2)
-                pygame.draw.circle(overlay, (255, 40, 60, alpha // 2),
-                                   (cx, cy), int(r * 0.85), 1)
-                pygame.draw.line(overlay, (255, 80, 100, alpha),
-                                 (cx - int(r) - 8, cy), (cx + int(r) + 8, cy), 1)
-                pygame.draw.line(overlay, (255, 80, 100, alpha),
-                                 (cx, cy - int(r) - 8), (cx, cy + int(r) + 8), 1)
+                overlay.hi_circle((255, 70, 90, alpha), (cx, cy), int(r), 2)
+                overlay.hi_circle((255, 40, 60, alpha // 2),
+                                  (cx, cy), int(r * 0.85), 1)
+                overlay.hi_line((255, 80, 100, alpha),
+                                (cx - int(r) - 8, cy), (cx + int(r) + 8, cy), 1)
+                overlay.hi_line((255, 80, 100, alpha),
+                                (cx, cy - int(r) - 8), (cx, cy + int(r) + 8), 1)
 
             # 黑能量入侵：上下边缘压暗（干涉/要塞阶段加深）
             if self.phase in ("interference", "fortress", "final_wave"):
@@ -2610,11 +2897,11 @@ class Stage6_FinalApproach(Stage):
             else:
                 pulse = 26 + int(14 * math.sin(pygame.time.get_ticks() * 0.004))
                 edge_alpha = 70
-            pygame.draw.rect(overlay, (0, 0, 0, edge_alpha),
-                             (0, 0, cfg.BATTLE_AREA_WIDTH, pulse))
-            pygame.draw.rect(overlay, (0, 0, 0, edge_alpha),
-                             (0, cfg.BATTLE_AREA_HEIGHT - pulse,
-                              cfg.BATTLE_AREA_WIDTH, pulse))
+            overlay.hi_rect((0, 0, 0, edge_alpha),
+                            (0, 0, cfg.BATTLE_AREA_WIDTH, pulse))
+            overlay.hi_rect((0, 0, 0, edge_alpha),
+                            (0, cfg.BATTLE_AREA_HEIGHT - pulse,
+                             cfg.BATTLE_AREA_WIDTH, pulse))
 
         # 枯龙本体（巡场 / 俯冲）绘制在子弹与自机之上
         if self.phase == "boss" and self.boss is not None and self.boss.alive:
@@ -2638,23 +2925,23 @@ class Stage6_FinalApproach(Stage):
             atom = getattr(self.boss, "kaeman_atomize", None)
             if atom is not None:
                 self._draw_kaeman_atomize_foreground(overlay)
-        screen.blit(overlay, (offset_x, offset_y))
+        hires.blit_fg(screen, overlay, (offset_x, offset_y))
 
 
     def _draw_kaeman(self, screen, offset_x=0, offset_y=0):
+        factor = hires.entity_factor(screen)
+        sharp = factor > 1
         # 干涉阶段顶部淡淡的注视之眼
         if self.phase in ("interference", "fortress", "final_wave"):
-            eye = _load_sprite(cfg.STAGE6_WATCHFUL_EYE_SPRITE, 120)
+            eye = _load_sprite(cfg.STAGE6_WATCHFUL_EYE_SPRITE, 120, sharp)
             if eye is not None:
-                eimg = eye.copy()
-                eimg.set_alpha(42)
-                ex = offset_x + cfg.BATTLE_AREA_WIDTH // 2 - eimg.get_width() // 2
-                screen.blit(eimg, (ex, offset_y - 40))
+                ex = offset_x + cfg.BATTLE_AREA_WIDTH // 2 - eye.get_width() // 2
+                hires.blit_entity(screen, eye, (ex, offset_y - 40), alpha=42)
 
         sk = self.kaeman_skull
         if sk is None:
             return
-        sprite = _load_sprite(cfg.STAGE6_WITHER_SKULL_SPRITE, 118)
+        sprite = _load_sprite(cfg.STAGE6_WITHER_SKULL_SPRITE, 118, sharp)
         if sprite is None:
             return
         state = sk["state"]
@@ -2667,54 +2954,60 @@ class Stage6_FinalApproach(Stage):
             remain = (KAEMAN_WATCH_FRAMES + KAEMAN_LOCK_FRAMES
                       + KAEMAN_FADE_FRAMES - sk["age"])
             alpha = int(160 * max(0.0, min(1.0, remain / KAEMAN_FADE_FRAMES)))
-        img = sprite.copy()
-        img.set_alpha(max(0, alpha))
         x = int(sk["x"] + offset_x)
         y = int(sk["y"] + offset_y)
         # 巨颅光晕
-        glow = pygame.Surface((img.get_width() + 44, img.get_height() + 44),
-                              pygame.SRCALPHA)
-        pygame.draw.circle(glow, (150, 40, 190, 55),
-                           (glow.get_width() // 2, glow.get_height() // 2),
-                           glow.get_width() // 2 - 8)
-        screen.blit(glow, (x - glow.get_width() // 2, y - glow.get_height() // 2))
-        screen.blit(img, (x - img.get_width() // 2, y - img.get_height() // 2))
+        gw = sprite.get_width() + 44
+        gh = sprite.get_height() + 44
+        glow = hires.panel((gw, gh), factor)
+        glow.hi_circle((150, 40, 190, 55), (gw // 2, gh // 2), gw // 2 - 8)
+        hires.blit_entity(screen, glow, (x - gw // 2, y - gh // 2))
+        hires.blit_entity(screen, sprite,
+                          (x - sprite.get_width() // 2,
+                           y - sprite.get_height() // 2),
+                          alpha=max(0, alpha))
         # 红紫双眼
         eye_r = 5 if state == "watch" else 7
         for dx in (-13, 13):
             ex = x + dx
             ey = y - 8
-            pygame.draw.circle(screen, (255, 40, 90), (ex, ey), eye_r)
-            pygame.draw.circle(screen, (255, 210, 220), (ex, ey), max(2, eye_r - 3))
+            fx = hires.entity_effect(screen, (ex - eye_r - 1, ey - eye_r - 1),
+                                     (eye_r * 2 + 2, eye_r * 2 + 2))
+            fx.circle((255, 40, 90), (ex, ey), eye_r)
+            fx.circle((255, 210, 220), (ex, ey), max(2, eye_r - 3))
+            fx.commit()
 
     def _draw_energy(self, screen, offset_x=0, offset_y=0):
+        factor = hires.entity_factor(screen)
+        sharp = factor > 1
         for wisp in self.energy_wisps:
-            sprite = _load_sprite(cfg.STAGE6_DARK_ORB_SPRITE, 42)
+            sprite = _load_sprite(cfg.STAGE6_DARK_ORB_SPRITE, 42, sharp)
             if sprite is None:
                 continue
             alpha = 170 if wisp["age"] < wisp["max_age"] - 20 else 120
-            img = sprite.copy()
-            img.set_alpha(alpha)
             x = int(wisp["x"] + offset_x)
             y = int(wisp["y"] + offset_y)
-            trail = pygame.Surface((img.get_width() + 18, img.get_height() + 18),
-                                   pygame.SRCALPHA)
-            pygame.draw.circle(trail, (90, 30, 150, 60),
-                               (trail.get_width() // 2, trail.get_height() // 2),
-                               trail.get_width() // 2 - 7)
-            screen.blit(trail, (x - trail.get_width() // 2, y - trail.get_height() // 2))
-            screen.blit(img, (x - img.get_width() // 2, y - img.get_height() // 2))
+            tw = sprite.get_width() + 18
+            th = sprite.get_height() + 18
+            trail = hires.panel((tw, th), factor)
+            trail.hi_circle((90, 30, 150, 60), (tw // 2, th // 2), tw // 2 - 7)
+            hires.blit_entity(screen, trail, (x - tw // 2, y - th // 2))
+            hires.blit_entity(screen, sprite,
+                              (x - sprite.get_width() // 2,
+                               y - sprite.get_height() // 2), alpha=alpha)
 
     def _draw_mist(self, screen, offset_x=0, offset_y=0):
         """黑雾粒子：柔和的暗紫黑色雾团，缓缓升腾营造能量入侵感。"""
         if not self.mist_particles:
             return
-        if not hasattr(self, "_mist_blob") or self._mist_blob is None:
-            blob = pygame.Surface((96, 96), pygame.SRCALPHA)
+        factor = hires.entity_factor(screen)
+        if getattr(self, "_mist_blob_scale", 0) != factor:
+            blob = hires.panel((96, 96), factor)
             for i in range(48, 0, -1):
                 a = int(120 * (1.0 - i / 48.0) ** 1.7)
-                pygame.draw.circle(blob, (14, 5, 28, a), (48, 48), i)
+                blob.hi_circle((14, 5, 28, a), (48, 48), i)
             self._mist_blob = blob
+            self._mist_blob_scale = factor
             self._mist_cache = {}
         cache = self._mist_cache
         for p in self.mist_particles:
@@ -2722,17 +3015,18 @@ class Stage6_FinalApproach(Stage):
             key = r * 2
             img = cache.get(key)
             if img is None:
-                img = pygame.transform.smoothscale(self._mist_blob, (key, key))
+                img = hires.scale_to(self._mist_blob, (key, key))
                 cache[key] = img
-            img = img.copy()
-            img.set_alpha(max(0, min(255, int(p["alpha"]))))
             x = int(p["x"] + offset_x)
             y = int(p["y"] + offset_y)
-            screen.blit(img, (x - r, y - r))
+            hires.blit_entity(screen, img, (x - r, y - r),
+                              alpha=max(0, min(255, int(p["alpha"]))))
 
     def _draw_ghosts(self, screen, offset_x=0, offset_y=0):
+        factor = hires.entity_factor(screen)
+        sharp = factor > 1
         for ghost in self.ghosts:
-            sprite = _load_sprite(GHOST_SPRITES[ghost["id"]], GHOST_HEIGHT)
+            sprite = _load_sprite(ghost["sprite"], GHOST_HEIGHT, sharp)
             if sprite is None:
                 continue
             age = ghost["age"]
@@ -2742,19 +3036,19 @@ class Stage6_FinalApproach(Stage):
                 alpha = int(150 * (ghost["max_age"] - age) / 46)
             else:
                 alpha = 150
-            img = sprite.copy()
-            img.set_alpha(max(0, alpha))
             bob = math.sin(age * 0.05) * 4
             x = int(ghost["x"] + offset_x)
             y = int(ghost["y"] + offset_y + bob)
             glow_color = GHOST_GLOWS[ghost["id"]]
-            glow = pygame.Surface((img.get_width() + 44, img.get_height() + 44),
-                                  pygame.SRCALPHA)
-            pygame.draw.circle(glow, glow_color + (48,),
-                               (glow.get_width() // 2, glow.get_height() // 2),
-                               glow.get_width() // 2 - 8)
-            screen.blit(glow, (x - glow.get_width() // 2, y - glow.get_height() // 2))
-            screen.blit(img, (x - img.get_width() // 2, y - img.get_height() // 2))
+            gw = sprite.get_width() + 44
+            gh = sprite.get_height() + 44
+            glow = hires.panel((gw, gh), factor)
+            glow.hi_circle(glow_color + (48,), (gw // 2, gh // 2), gw // 2 - 8)
+            hires.blit_entity(screen, glow, (x - gw // 2, y - gh // 2))
+            hires.blit_entity(screen, sprite,
+                              (x - sprite.get_width() // 2,
+                               y - sprite.get_height() // 2),
+                              alpha=max(0, alpha))
 
     def _draw_banner(self, screen, offset_x=0, offset_y=0):
         if not self.banner_text or self.banner_timer <= 0:
@@ -2773,12 +3067,12 @@ class Stage6_FinalApproach(Stage):
     # ------------------------------------------------------------------
     # 龙符「Withered Dragon」视觉层
     # ------------------------------------------------------------------
-    def _dragon_ring_cache(self):
+    def _dragon_ring_cache(self, factor):
         """大型环形轨道的虚线提示层（缓存，纯装饰）。"""
-        if self._dragon_ring is not None:
+        if (self._dragon_ring is not None
+                and getattr(self._dragon_ring, "hi_scale", 1) == factor):
             return self._dragon_ring
-        surf = pygame.Surface((cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
-                              pygame.SRCALPHA)
+        surf = hires.panel((cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), factor)
         steps = 72
         for i in range(0, steps, 2):
             a0 = i * math.tau / steps
@@ -2787,7 +3081,7 @@ class Stage6_FinalApproach(Stage):
             y0 = _DRAGON_ORBIT_CY + math.sin(a0) * _DRAGON_ORBIT_RY
             x1 = _DRAGON_ORBIT_CX + math.cos(a1) * _DRAGON_ORBIT_RX
             y1 = _DRAGON_ORBIT_CY + math.sin(a1) * _DRAGON_ORBIT_RY
-            pygame.draw.line(surf, (120, 78, 180, 60), (x0, y0), (x1, y1), 1)
+            surf.hi_line((120, 78, 180, 60), (x0, y0), (x1, y1), 1)
         self._dragon_ring = surf
         return surf
 
@@ -2799,31 +3093,31 @@ class Stage6_FinalApproach(Stage):
         lit = st["lit"] > 0
         burst = st["burst"] > 0
         now = pygame.time.get_ticks()
+        sharp = getattr(overlay, "hi_scale", 1) > 1
         if lit or burst:
             pulse = 0.72 + 0.28 * math.sin(now * 0.02)
             rad = int(34 * (1.15 if burst else 1.0)
                       * (0.9 + 0.1 * math.sin(now * 0.03)))
-            glow = _wd_glow(col, rad).copy()
+            glow = _wd_glow(col, rad, sharp).copy()
             glow.set_alpha(int(210 * pulse + (60 if burst else 0)))
             overlay.blit(glow, (x - rad, y - 30 - rad // 2))
             # 对应颜色的提示光环
             ring_r = int(25 + 6 * pulse)
-            pygame.draw.circle(overlay, (*col, int(190 * pulse)),
-                               (x, y - 12), ring_r, 2)
-            pygame.draw.circle(overlay, (255, 255, 255, int(150 * pulse)),
-                               (x, y - 12), max(3, ring_r - 3), 1)
+            overlay.hi_circle((*col, int(190 * pulse)), (x, y - 12), ring_r, 2)
+            overlay.hi_circle((255, 255, 255, int(150 * pulse)),
+                              (x, y - 12), max(3, ring_r - 3), 1)
         # 底座
-        pygame.draw.rect(overlay, (22, 20, 30), (x - 22, y + 14, 44, 9), border_radius=3)
-        pygame.draw.rect(overlay, (72, 68, 90), (x - 22, y + 14, 44, 9), 1, border_radius=3)
+        overlay.hi_rect((22, 20, 30), (x - 22, y + 14, 44, 9), 0, 3)
+        overlay.hi_rect((72, 68, 90), (x - 22, y + 14, 44, 9), 1, 3)
         # 柱身
-        pygame.draw.rect(overlay, (34, 32, 46), (x - 10, y - 4, 20, 20))
-        pygame.draw.rect(overlay, (86, 82, 108), (x - 10, y - 4, 20, 20), 1)
+        overlay.hi_rect((34, 32, 46), (x - 10, y - 4, 20, 20))
+        overlay.hi_rect((86, 82, 108), (x - 10, y - 4, 20, 20), 1)
         # 顶部宝石
         gem = col if (lit or burst) else tuple(max(0, c - 120) for c in col)
-        pygame.draw.polygon(overlay, gem, [
+        overlay.hi_polygon(gem, [
             (x, y - 24), (x + 9, y - 12), (x, y - 1), (x - 9, y - 12)])
         if lit:
-            pygame.draw.polygon(overlay, (255, 245, 255), [
+            overlay.hi_polygon((255, 245, 255), [
                 (x, y - 21), (x + 5, y - 13), (x, y - 4)], 1)
 
     def _draw_dragon_telegraph(self, overlay, d):
@@ -2837,40 +3131,42 @@ class Stage6_FinalApproach(Stage):
         fade = max(0.0, 1.0 - max(0, tg["age"] - 30) / 40.0)
         alpha = int(150 * fade)
         # 整条穿越线（入场端 → 出界端）
-        pygame.draw.line(overlay, (*col, alpha // 2),
-                         (int(sx), int(sy)), (int(ex), int(ey)), 2)
+        overlay.hi_line((*col, alpha // 2),
+                        (int(sx), int(sy)), (int(ex), int(ey)), 2)
         # 从入场端到雕像的展开亮段
         ex2 = sx + (st["x"] - sx) * prog
         ey2 = sy + (st["y"] - sy) * prog
-        pygame.draw.line(overlay, (*col, alpha),
-                         (int(sx), int(sy)), (int(ex2), int(ey2)), 4)
-        pygame.draw.line(overlay, (255, 255, 255, alpha),
-                         (int(sx), int(sy)), (int(ex2), int(ey2)), 1)
+        overlay.hi_line((*col, alpha),
+                        (int(sx), int(sy)), (int(ex2), int(ey2)), 4)
+        overlay.hi_line((255, 255, 255, alpha),
+                        (int(sx), int(sy)), (int(ex2), int(ey2)), 1)
         # 入场端标记
-        pygame.draw.circle(overlay, (255, 255, 255, alpha), (int(sx), int(sy)), 5, 1)
+        overlay.hi_circle((255, 255, 255, alpha), (int(sx), int(sy)), 5, 1)
 
     def _draw_withered_dragon(self, target, d, x, y, ang, offset_x=0, offset_y=0,
                               alpha=255, height=110, outline=True):
         """绘制枯龙本体：100% 实心 + 剪影描边发光（按运动方向旋转）。"""
-        sprite = _get_withered_dragon_sprite(height)
+        sharp = getattr(target, "hi_scale", 1) > 1
+        sprite = _get_withered_dragon_sprite(height, sharp)
         if sprite is None:
             return
         px = int(x + offset_x)
         py = int(y + offset_y)
-        img = pygame.transform.rotate(sprite, -math.degrees(ang))
+        img = hires.rotate(sprite, -math.degrees(ang))
         if math.cos(ang) < 0:
-            img = pygame.transform.flip(img, True, False)
+            img = hires.flip(img, True, False)
         # 柔和光晕
-        glow = _wd_glow((70, 40, 110), max(12, int(img.get_width() * 0.30))).copy()
+        glow = _wd_glow((70, 40, 110), max(12, int(img.get_width() * 0.30)),
+                        sharp).copy()
         glow.set_alpha(max(0, min(255, int(alpha * 0.45))))
         target.blit(glow, (px - glow.get_width() // 2, py - glow.get_height() // 2))
         # 剪影描边：沿轮廓外扩 2px 的亮色边缘
         if outline:
-            rim = _get_withered_dragon_outline(height)
+            rim = _get_withered_dragon_outline(height, sharp=sharp)
             if rim is not None:
-                oimg = pygame.transform.rotate(rim, -math.degrees(ang))
+                oimg = hires.rotate(rim, -math.degrees(ang))
                 if math.cos(ang) < 0:
-                    oimg = pygame.transform.flip(oimg, True, False)
+                    oimg = hires.flip(oimg, True, False)
                 oimg.set_alpha(min(255, alpha))
                 target.blit(oimg, (px - oimg.get_width() // 2, py - oimg.get_height() // 2))
         img.set_alpha(alpha)
@@ -2882,13 +3178,10 @@ class Stage6_FinalApproach(Stage):
         d = getattr(boss, "kaeman_dragon", None)
         if d is None or not boss.alive:
             return
-        if self._dragon_overlay is None:
-            self._dragon_overlay = pygame.Surface(
-                (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), pygame.SRCALPHA)
-        overlay = self._dragon_overlay
-        overlay.fill((0, 0, 0, 0))
+        factor = hires.entity_factor(screen)
+        overlay = _hi_battle_panel(screen)
 
-        ring = self._dragon_ring_cache()
+        ring = self._dragon_ring_cache(factor)
         if ring is not None:
             overlay.blit(ring, (0, 0))
 
@@ -2902,9 +3195,9 @@ class Stage6_FinalApproach(Stage):
             for i in range(1, len(hist)):
                 fade = i / len(hist)
                 a = int(64 * fade)
-                pygame.draw.line(overlay, (150, 110, 210, a),
-                                 (int(hist[i - 1][0]), int(hist[i - 1][1])),
-                                 (int(hist[i][0]), int(hist[i][1])), 3)
+                overlay.hi_line((150, 110, 210, a),
+                                (int(hist[i - 1][0]), int(hist[i - 1][1])),
+                                (int(hist[i][0]), int(hist[i][1])), 3)
 
         # 腐化能量轨迹（不同形状：短弧 / 短线 / 小圆环）
         for t in d["trails"]:
@@ -2915,7 +3208,7 @@ class Stage6_FinalApproach(Stage):
                 if a <= 0:
                     continue
                 r = 7
-                glow = _wd_glow(col, r).copy()
+                glow = _wd_glow(col, r, factor > 1).copy()
                 glow.set_alpha(a)
                 overlay.blit(glow, (int(px) - r, int(py) - r))
 
@@ -2925,7 +3218,7 @@ class Stage6_FinalApproach(Stage):
         if d["telegraph"] is not None:
             self._draw_dragon_telegraph(overlay, d)
 
-        screen.blit(overlay, (offset_x, offset_y))
+        hires.blit_entity(screen, overlay, (offset_x, offset_y))
 
     def _draw_dragon_dive_foreground(self, overlay, d):
         """俯冲危险轨迹：从入场端到当前位置的亮线 + 俯冲中的枯龙本体。"""
@@ -2941,12 +3234,12 @@ class Stage6_FinalApproach(Stage):
             fy = y0 + (y1 - y0) * i / steps
             fade = i / steps
             a = int(60 + 150 * fade)
-            pygame.draw.circle(overlay, (*col, a), (int(fx), int(fy)),
-                               max(2, int(2 + 5 * fade)), 2)
-        pygame.draw.line(overlay, (*col, 210), (int(x0), int(y0)),
-                         (int(x1), int(y1)), 4)
-        pygame.draw.line(overlay, (255, 255, 255, 210), (int(x0), int(y0)),
-                         (int(x1), int(y1)), 1)
+            overlay.hi_circle((*col, a), (int(fx), int(fy)),
+                              max(2, int(2 + 5 * fade)), 2)
+        overlay.hi_line((*col, 210), (int(x0), int(y0)),
+                        (int(x1), int(y1)), 4)
+        overlay.hi_line((255, 255, 255, 210), (int(x0), int(y0)),
+                        (int(x1), int(y1)), 1)
         self._draw_withered_dragon(overlay, d, d["px"], d["py"],
                                    d.get("dragon_angle", 0.0),
                                    0, 0, alpha=255, height=132)
@@ -2960,11 +3253,7 @@ class Stage6_FinalApproach(Stage):
         d = getattr(boss, "kaeman_dominion", None)
         if d is None or not boss.alive:
             return
-        if self._dominion_overlay is None:
-            self._dominion_overlay = pygame.Surface(
-                (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), pygame.SRCALPHA)
-        overlay = self._dominion_overlay
-        overlay.fill((0, 0, 0, 0))
+        overlay = _hi_battle_panel(screen)
         now = pygame.time.get_ticks()
         cx = int(d["cx"])
         cy = int(d["cy"])
@@ -2973,42 +3262,42 @@ class Stage6_FinalApproach(Stage):
         pulse = 0.82 + 0.18 * math.sin(now * 0.011)
 
         # 领域底色：内部为安全区域，仅保留淡淡的王权法阵光影
-        pygame.draw.circle(overlay, (14, 6, 26, 52), (cx, cy), int(R))
-        pygame.draw.circle(overlay, (22, 10, 38, 40), (cx, cy), int(R * 0.86))
+        overlay.hi_circle((14, 6, 26, 52), (cx, cy), int(R))
+        overlay.hi_circle((22, 10, 38, 40), (cx, cy), int(R * 0.86))
         # 领域边界：淡淡的脉冲能量环（边框大玉叠加其上）
         er = int(R)
-        pygame.draw.circle(overlay, (28, 12, 50, int(90 + 30 * pulse)), (cx, cy), er, 3)
-        pygame.draw.circle(overlay, (120, 60, 190, int(70 + 30 * pulse)),
-                           (cx, cy), max(1, er - 4), 2)
+        overlay.hi_circle((28, 12, 50, int(90 + 30 * pulse)), (cx, cy), er, 3)
+        overlay.hi_circle((120, 60, 190, int(70 + 30 * pulse)),
+                          (cx, cy), max(1, er - 4), 2)
 
         # 旋转王徽内圈：缓慢旋转的王权法阵（外圈贴合边框大玉）
         rev = min(R, 470.0)
         inner = rev * 0.76
         outer = rev * 0.98
-        pygame.draw.circle(overlay, (70, 24, 120, 84), (cx, cy), int(outer), 10)
-        pygame.draw.circle(overlay, (170, 105, 235, 110), (cx, cy), int(outer), 2)
-        pygame.draw.circle(overlay, (95, 40, 155, 96), (cx, cy), int(inner), 6)
-        pygame.draw.circle(overlay, (205, 155, 255, 105), (cx, cy), int(inner), 2)
+        overlay.hi_circle((70, 24, 120, 84), (cx, cy), int(outer), 10)
+        overlay.hi_circle((170, 105, 235, 110), (cx, cy), int(outer), 2)
+        overlay.hi_circle((95, 40, 155, 96), (cx, cy), int(inner), 6)
+        overlay.hi_circle((205, 155, 255, 105), (cx, cy), int(inner), 2)
         for k in range(12):
             a = rot + k * math.tau / 12
             x0 = cx + math.cos(a) * inner
             y0 = cy + math.sin(a) * inner
             x1 = cx + math.cos(a) * outer
             y1 = cy + math.sin(a) * outer
-            pygame.draw.line(overlay, (155, 88, 225, 120), (x0, y0), (x1, y1), 2)
+            overlay.hi_line((155, 88, 225, 120), (x0, y0), (x1, y1), 2)
         for k in range(12):
             a0 = rot + k * math.tau / 12
             a1 = a0 + 0.24
             pts = [(cx + math.cos(a) * outer, cy + math.sin(a) * outer)
                    for a in (a0, (a0 + a1) * 0.5, a1)]
-            pygame.draw.lines(overlay, (235, 190, 120, 130), False, pts, 2)
+            overlay.hi_lines((235, 190, 120, 130), pts, 2)
 
         # 王权裂隙：中部断开（断开点为穿行口），随领域旋转
         for k in range(_DOM_FISSURE_COUNT):
             _kaeman_draw_dominion_crack(
                 overlay, cx, cy, _dom_fissure_angle(rot, k), R * 0.98, k, 1)
 
-        screen.blit(overlay, (offset_x, offset_y))
+        hires.blit_entity(screen, overlay, (offset_x, offset_y))
 
 
     def _draw_kaeman_relics(self, screen, offset_x=0, offset_y=0):
@@ -3021,11 +3310,8 @@ class Stage6_FinalApproach(Stage):
         st = getattr(boss, "kaeman_relics", None)
         if st is None or not boss.alive:
             return
-        if self._relic_overlay is None:
-            self._relic_overlay = pygame.Surface(
-                (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), pygame.SRCALPHA)
-        overlay = self._relic_overlay
-        overlay.fill((0, 0, 0, 0))
+        factor = hires.entity_factor(screen)
+        overlay = _hi_battle_panel(screen)
         now = pygame.time.get_ticks()
         cx = int(st["cx"])
         cy = int(st["cy"])
@@ -3034,9 +3320,9 @@ class Stage6_FinalApproach(Stage):
         pulse = 0.72 + 0.28 * math.sin(now * 0.013)
 
         # 环绕轨道：淡环提示五边形旋转范围
-        pygame.draw.circle(overlay, (70, 46, 128, 34), (cx, cy), int(R), 1)
-        pygame.draw.circle(overlay, (104, 64, 178, 22),
-                           (cx, cy), max(1, int(R * 0.97)), 1)
+        overlay.hi_circle((70, 46, 128, 34), (cx, cy), int(R), 1)
+        overlay.hi_circle((104, 64, 178, 22),
+                          (cx, cy), max(1, int(R * 0.97)), 1)
 
         # 五边形连线：顶点间发光连线（Relic 各自颜色）
         pts = []
@@ -3047,27 +3333,33 @@ class Stage6_FinalApproach(Stage):
             x0, y0 = int(pts[i][0]), int(pts[i][1])
             x1, y1 = int(pts[(i + 1) % 5][0]), int(pts[(i + 1) % 5][1])
             col = RELIC_COLORS[i]
-            pygame.draw.line(overlay, (*col, int(110 * pulse)), (x0, y0), (x1, y1), 3)
-            pygame.draw.line(overlay, (235, 215, 255, int(56 * pulse)), (x0, y0), (x1, y1), 1)
-        screen.blit(overlay, (offset_x, offset_y))
+            overlay.hi_line((*col, int(110 * pulse)), (x0, y0), (x1, y1), 3)
+            overlay.hi_line((235, 215, 255, int(56 * pulse)), (x0, y0), (x1, y1), 1)
+        hires.blit_entity(screen, overlay, (offset_x, offset_y))
 
         # 五颗 Relic 本体：彩色光晕 + 贴图（随五边形旋转，自身缓慢自旋）
         for i in range(5):
             a = rot + i * math.tau / 5
             px = cx + math.cos(a) * R
             py = cy + math.sin(a) * R
-            sprite = _load_sprite(cfg.STAGE6_RELIC_SPRITES[i], _REL_SPRITE_HEIGHT)
+            sprite = _load_sprite(cfg.STAGE6_RELIC_SPRITES[i], _REL_SPRITE_HEIGHT,
+                                  factor > 1)
             if sprite is None:
                 continue
             color = RELIC_COLORS[i]
             glow = _get_relic_glow(
-                int(_REL_SPRITE_HEIGHT * 0.85 * (0.8 + 0.2 * pulse)), color)
+                int(_REL_SPRITE_HEIGHT * 0.85 * (0.8 + 0.2 * pulse)), color,
+                factor > 1)
             gx = int(px + offset_x)
             gy = int(py + offset_y)
-            screen.blit(glow, (gx - glow.get_width() // 2, gy - glow.get_height() // 2))
+            hires.blit_entity(screen, glow,
+                              (gx - glow.get_width() // 2,
+                               gy - glow.get_height() // 2))
             spin = now * 0.00022 + i * math.tau / 5
-            spr = pygame.transform.rotozoom(sprite, math.degrees(spin), 1.0)
-            screen.blit(spr, (gx - spr.get_width() // 2, gy - spr.get_height() // 2))
+            spr = hires.rotate(sprite, math.degrees(spin))
+            hires.blit_entity(screen, spr,
+                              (gx - spr.get_width() // 2,
+                               gy - spr.get_height() // 2))
 
 
     def _draw_kaeman_slash(self, screen, offset_x=0, offset_y=0):
@@ -3083,15 +3375,19 @@ class Stage6_FinalApproach(Stage):
         ky = int(boss.y + offset_y)
 
         # Kaeman 周围极小的危险范围（淡淡红圈，提示勿靠近）
-        pygame.draw.circle(screen, (64, 8, 16), (kx, ky), _SLASH_TENTACLE_R, 1)
         pulse = 0.5 + 0.5 * math.sin(now * 0.007)
         pr = int(_SLASH_TENTACLE_R * (0.96 + 0.05 * pulse))
-        pygame.draw.circle(screen, (104, 14, 24), (kx, ky), pr, 1)
+        ring = hires.entity_effect(
+            screen, (kx - _SLASH_TENTACLE_R - 1, ky - _SLASH_TENTACLE_R - 1),
+            (_SLASH_TENTACLE_R * 2 + 2, _SLASH_TENTACLE_R * 2 + 2))
+        ring.circle((64, 8, 16), (kx, ky), _SLASH_TENTACLE_R, 1)
+        ring.circle((104, 14, 24), (kx, ky), pr, 1)
         for k in range(4):
             a = k * math.pi / 2 + now * 0.0012
             tx = kx + math.cos(a) * _SLASH_TENTACLE_R
             ty = ky + math.sin(a) * _SLASH_TENTACLE_R
-            pygame.draw.line(screen, (128, 18, 30), (kx, ky), (int(tx), int(ty)), 1)
+            ring.line((128, 18, 30), (kx, ky), (int(tx), int(ty)), 1)
+        ring.commit()
 
         for crack in st["cracks"]:
             t = crack["t"]
@@ -3101,8 +3397,11 @@ class Stage6_FinalApproach(Stage):
                 rr = max(2, int(5 + 9 * prog * (0.5 + 0.5 * math.sin(now * 0.02))))
                 ox = int(crack["x"] + offset_x)
                 oy = int(crack["y"] + offset_y)
-                pygame.draw.circle(screen, (255, 70, 84), (ox, oy), rr, 1)
-                pygame.draw.circle(screen, (255, 150, 158), (ox, oy), 2)
+                mark = hires.entity_effect(screen, (ox - rr - 1, oy - rr - 1),
+                                           (rr * 2 + 2, rr * 2 + 2))
+                mark.circle((255, 70, 84), (ox, oy), rr, 1)
+                mark.circle((255, 150, 158), (ox, oy), 2)
+                mark.commit()
                 # 细小红色标记：一开始就点出整条未来斩击线（仅屏幕内），
                 # 亮度随预警进度增强，且一个亮点从起点扫向终点提示斩击方向。
                 targets = _slash_reveal_targets(crack, prog)
@@ -3125,21 +3424,25 @@ class Stage6_FinalApproach(Stage):
                             if d <= tl + 14.0:
                                 # 扫描亮点：亮度更高、颜色更亮
                                 mr = max(2, int(3 + 1.6 * glow))
-                                pygame.draw.circle(screen,
-                                                   (int(205 + 50 * glow), 66, 80),
-                                                   (sx, sy), mr)
-                                pygame.draw.circle(screen, (255, 178, 182),
-                                                   (sx, sy), max(1, mr - 1))
+                                dot = hires.entity_effect(
+                                    screen, (sx - mr - 1, sy - mr - 1),
+                                    (mr * 2 + 2, mr * 2 + 2))
+                                dot.circle((int(205 + 50 * glow), 66, 80),
+                                           (sx, sy), mr)
+                                dot.circle((255, 178, 182), (sx, sy),
+                                           max(1, mr - 1))
+                                dot.commit()
                             else:
                                 mr = max(1, int(2 + 1.2 * glow))
-                                pygame.draw.circle(
-                                    screen,
-                                    (int(112 + 118 * strength), int(30 + 20 * strength), 52),
-                                    (sx, sy), mr)
-                                pygame.draw.circle(
-                                    screen,
-                                    (int(196 + 56 * strength), 100, 112),
-                                    (sx, sy), max(1, mr - 1))
+                                dot = hires.entity_effect(
+                                    screen, (sx - mr - 1, sy - mr - 1),
+                                    (mr * 2 + 2, mr * 2 + 2))
+                                dot.circle((int(112 + 118 * strength),
+                                            int(30 + 20 * strength), 52),
+                                           (sx, sy), mr)
+                                dot.circle((int(196 + 56 * strength), 100, 112),
+                                           (sx, sy), max(1, mr - 1))
+                                dot.commit()
                         d += 26.0
                 continue
             if t < _SLASH_WARN + _SLASH_EXTEND:
@@ -3168,10 +3471,20 @@ class Stage6_FinalApproach(Stage):
                 rim = tuple(int(c * a) for c in (140, 20, 34))
                 hot = tuple(int(c * a) for c in (255, 82, 96))
                 core = (int(180 + 75 * wm * a), int(150 + 76 * wm * a), int(150 + 78 * wm * a))
-                pygame.draw.lines(screen, dark, False, draw_pts, max(1, int(16 * wm)))
-                pygame.draw.lines(screen, rim, False, draw_pts, max(1, int(9 * wm)))
-                pygame.draw.lines(screen, hot, False, draw_pts, max(1, int(5 * wm)))
-                pygame.draw.lines(screen, core, False, draw_pts, max(1, int(1 + 5 * wm)))
+                # 一条斩击的四层描边共用一块面板：它们是同一条折线由粗到细的叠加，
+                # 一起提交才不会把后画的层跟先画的层混色
+                w_in = max(1, int(16 * wm))
+                pad = w_in // 2 + 1
+                xs = [p[0] for p in draw_pts]
+                ys = [p[1] for p in draw_pts]
+                fx = hires.entity_effect(
+                    screen, (min(xs) - pad, min(ys) - pad),
+                    (max(xs) - min(xs) + pad * 2, max(ys) - min(ys) + pad * 2))
+                fx.lines(dark, draw_pts, w_in)
+                fx.lines(rim, draw_pts, max(1, int(9 * wm)))
+                fx.lines(hot, draw_pts, max(1, int(5 * wm)))
+                fx.lines(core, draw_pts, max(1, int(1 + 5 * wm)))
+                fx.commit()
 
     def _draw_kaeman_tentacle(self, overlay, st):
         """裂符：触手预警 / 拉拽特效（绘制在子弹与自机之上）。"""
@@ -3205,22 +3518,22 @@ class Stage6_FinalApproach(Stage):
                 iy = (1 - f) ** 2 * y0 + 2 * (1 - f) * f * my + f * f * ty
                 pts.append((int(ix), int(iy)))
             if phase == "pull":
-                pygame.draw.lines(overlay, (70, 8, 20, 205), False, pts, 5)
-                pygame.draw.lines(overlay, (195, 42, 62, 235), False, pts, 2)
+                overlay.hi_lines((70, 8, 20, 205), pts, 5)
+                overlay.hi_lines((195, 42, 62, 235), pts, 2)
             else:
-                pygame.draw.lines(overlay, (80, 12, 24, 175), False, pts, 3)
-                pygame.draw.lines(overlay, (200, 70, 84, 205), False, pts, 1)
+                overlay.hi_lines((80, 12, 24, 175), pts, 3)
+                overlay.hi_lines((200, 70, 84, 205), pts, 1)
 
         # 玩家周围的红色结界圈
         pr = int(42 - prog * (24 if phase == "warn" else 30))
         if phase == "warn":
             alpha = 60 + int(150 * (0.5 + 0.5 * math.sin(now * 0.03)))
-            pygame.draw.circle(overlay, (255, 60, 74, alpha), (int(x1), int(y1)), max(8, pr), 2)
-            pygame.draw.circle(overlay, (255, 130, 140, alpha // 2), (int(x1), int(y1)), max(8, pr + 8), 1)
+            overlay.hi_circle((255, 60, 74, alpha), (int(x1), int(y1)), max(8, pr), 2)
+            overlay.hi_circle((255, 130, 140, alpha // 2), (int(x1), int(y1)), max(8, pr + 8), 1)
         elif phase == "pull":
-            pygame.draw.circle(overlay, (255, 46, 60, 235), (int(x1), int(y1)), max(6, pr), 2)
+            overlay.hi_circle((255, 46, 60, 235), (int(x1), int(y1)), max(6, pr), 2)
         else:
-            pygame.draw.circle(overlay, (255, 90, 100, 120), (int(x1), int(y1)), 22, 1)
+            overlay.hi_circle((255, 90, 100, 120), (int(x1), int(y1)), 22, 1)
 
     # ------------------------------------------------------------------
     # 王符「Atomizing Ray」绘制：扫过扇区提示（子弹之下）+ 预警线/光束（子弹之上）
@@ -3230,8 +3543,7 @@ class Stage6_FinalApproach(Stage):
         st = getattr(self.boss, "kaeman_atomize", None)
         if st is None or st["phase"] != "sweep" or st["swept"] <= 0.08:
             return
-        overlay = self._fg_overlay
-        overlay.fill((0, 0, 0, 0))
+        overlay = _hi_battle_panel(screen)
         bx, by = st["bx"], st["by"]
         radius = st["length"]
         swept = st["swept"]
@@ -3248,14 +3560,14 @@ class Stage6_FinalApproach(Stage):
             for i in range(n + 1):
                 a = a0 + (a1 - a0) * i / float(n)
                 pts.append((bx + math.cos(a) * radius, by + math.sin(a) * radius))
-            pygame.draw.polygon(overlay, (150, 10, 22, wedge_alpha), pts)
+            overlay.hi_polygon((150, 10, 22, wedge_alpha), pts)
             # 扫描前沿：刚被光束扫过、残留弹最密集的一带稍亮
             epts = [(bx, by)]
             for i in range(m + 1):
                 a = a1 - st["dir"] * edge * (1.0 - i / float(m))
                 epts.append((bx + math.cos(a) * radius, by + math.sin(a) * radius))
-            pygame.draw.polygon(overlay, (232, 30, 44, edge_alpha), epts)
-        screen.blit(overlay, (offset_x, offset_y))
+            overlay.hi_polygon((232, 30, 44, edge_alpha), epts)
+        hires.blit_entity(screen, overlay, (offset_x, offset_y))
 
     def _draw_kaeman_atomize_foreground(self, overlay):
         """王符：首轮蓄力预警线 / 扫射光束（绘制在子弹与自机之上）。"""
@@ -3281,8 +3593,8 @@ class Stage6_FinalApproach(Stage):
                 for ang in st["angles"]:
                     ex = bx + math.cos(ang) * st["length"]
                     ey = by + math.sin(ang) * st["length"]
-                    pygame.draw.line(overlay, (255, 255, 255, int(150 * k)),
-                                     (bx, by), (ex, ey), 3)
+                    overlay.hi_line((255, 255, 255, int(150 * k)),
+                                    (bx, by), (ex, ey), 3)
 
     def _atomize_draw_warning(self, overlay, bx, by, angle, length, prog):
         """王符：激光预警线（虚线，随蓄力/预告进度变亮变粗）。"""
@@ -3300,15 +3612,14 @@ class Stage6_FinalApproach(Stage):
             y1 = by + math.sin(angle) * d
             x2 = bx + math.cos(angle) * d2
             y2 = by + math.sin(angle) * d2
-            pygame.draw.line(overlay, (r, g, 70, alpha),
-                             (x1, y1), (x2, y2), width)
+            overlay.hi_line((r, g, 70, alpha), (x1, y1), (x2, y2), width)
             d = d2 + gap
         # 起点脉冲光球
         glow = 24 + int(18 * pulse)
-        pygame.draw.circle(overlay, (255, 70 + int(130 * prog), 80,
-                                     int(120 + 110 * prog)), (bx, by), glow, 2)
-        pygame.draw.circle(overlay, (255, 190, 180, int(160 * prog + 40)),
-                           (bx, by), max(2, glow - 12), 1)
+        overlay.hi_circle((255, 70 + int(130 * prog), 80,
+                           int(120 + 110 * prog)), (bx, by), glow, 2)
+        overlay.hi_circle((255, 190, 180, int(160 * prog + 40)),
+                          (bx, by), max(2, glow - 12), 1)
 
     def _atomize_draw_charge_ring(self, overlay, bx, by, prog):
         """王符：蓄力时 Kaeman 胸前能量聚集环（随进度收紧变亮）。"""
@@ -3317,13 +3628,13 @@ class Stage6_FinalApproach(Stage):
         alpha = int(70 + 120 * prog)
         for k in range(2):
             rr = max(2, ring_r + int(6 * math.sin(now * 0.03 + k * 2.1)))
-            pygame.draw.circle(overlay, (255, 60 + int(160 * prog), 70, alpha),
-                               (bx, by), rr, 2)
-            pygame.draw.circle(overlay, (255, 140, 130, alpha // 2),
-                               (bx, by), max(2, rr - 12), 1)
+            overlay.hi_circle((255, 60 + int(160 * prog), 70, alpha),
+                              (bx, by), rr, 2)
+            overlay.hi_circle((255, 140, 130, alpha // 2),
+                              (bx, by), max(2, rr - 12), 1)
         core_r = int(3 + 6 * prog)
-        pygame.draw.circle(overlay, (255, 240, 225, 220), (bx, by), core_r)
-        pygame.draw.circle(overlay, (255, 90, 90, 180), (bx, by), core_r + 5, 1)
+        overlay.hi_circle((255, 240, 225, 220), (bx, by), core_r)
+        overlay.hi_circle((255, 90, 90, 180), (bx, by), core_r + 5, 1)
 
     def _atomize_draw_beam(self, overlay, bx, by, angle, length, alpha):
         """王符：扫射中的原子化激光光束（多层描边 + 边界冲击光）。"""
@@ -3333,17 +3644,17 @@ class Stage6_FinalApproach(Stage):
         ex = bx + math.cos(angle) * length
         ey = by + math.sin(angle) * length
         # 外圈暗红光晕 -> 红色主体 -> 亮红内芯 -> 白热芯
-        pygame.draw.line(overlay, (70, 4, 14, int(a * 0.55)), (bx, by), (ex, ey), 18)
-        pygame.draw.line(overlay, (218, 28, 46, a), (bx, by), (ex, ey), 9)
-        pygame.draw.line(overlay, (255, 100, 100, a), (bx, by), (ex, ey), 4)
-        pygame.draw.line(overlay, (255, 240, 236, a), (bx, by), (ex, ey), 2)
+        overlay.hi_line((70, 4, 14, int(a * 0.55)), (bx, by), (ex, ey), 18)
+        overlay.hi_line((218, 28, 46, a), (bx, by), (ex, ey), 9)
+        overlay.hi_line((255, 100, 100, a), (bx, by), (ex, ey), 4)
+        overlay.hi_line((255, 240, 236, a), (bx, by), (ex, ey), 2)
         # 光束击中战场边界处的冲击光斑
         hx, hy = _atomize_ray_exit(bx, by, angle, length)
-        pygame.draw.circle(overlay, (255, 210, 200, int(a * 0.85)), (hx, hy), 7)
-        pygame.draw.circle(overlay, (255, 90, 90, int(a * 0.7)), (hx, hy), 13, 2)
+        overlay.hi_circle((255, 210, 200, int(a * 0.85)), (hx, hy), 7)
+        overlay.hi_circle((255, 90, 90, int(a * 0.7)), (hx, hy), 13, 2)
         # 原点光源
-        pygame.draw.circle(overlay, (255, 235, 225, a), (bx, by), 6)
-        pygame.draw.circle(overlay, (255, 96, 96, int(a * 0.85)), (bx, by), 11, 2)
+        overlay.hi_circle((255, 235, 225, a), (bx, by), 6)
+        overlay.hi_circle((255, 96, 96, int(a * 0.85)), (bx, by), 11, 2)
 
 
     def _draw_kaeman_slumber(self, screen, offset_x=0, offset_y=0):
@@ -3356,11 +3667,7 @@ class Stage6_FinalApproach(Stage):
         st = getattr(boss, "kaeman_slumber", None)
         if st is None or not boss.alive:
             return
-        if self._slumber_overlay is None:
-            self._slumber_overlay = pygame.Surface(
-                (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), pygame.SRCALPHA)
-        overlay = self._slumber_overlay
-        overlay.fill((0, 0, 0, 0))
+        overlay = _hi_battle_panel(screen)
         now = pygame.time.get_ticks()
         cx = int(boss.x)
         cy = int(boss.y)
@@ -3371,33 +3678,31 @@ class Stage6_FinalApproach(Stage):
             prog = min(1.0, st["absorbed"] / 120.0)
             core = int(26 + 30 * prog)
             alpha = int(70 + 150 * prog)
-            pygame.draw.circle(overlay, (60, 18, 110, int(alpha * 0.5)),
-                               (cx, cy), core)
-            pygame.draw.circle(overlay, (150, 70, 220, alpha),
-                               (cx, cy), core + int(4 + 3 * pulse), 2)
-            pygame.draw.circle(overlay, (215, 150, 255, int(alpha * 0.8)),
-                               (cx, cy), max(2, core - 8), 1)
+            overlay.hi_circle((60, 18, 110, int(alpha * 0.5)), (cx, cy), core)
+            overlay.hi_circle((150, 70, 220, alpha),
+                              (cx, cy), core + int(4 + 3 * pulse), 2)
+            overlay.hi_circle((215, 150, 255, int(alpha * 0.8)),
+                              (cx, cy), max(2, core - 8), 1)
             # 旋转吸能法阵：四枚小光点绕核心旋转
             for k in range(4):
                 a = now * 0.006 + k * math.tau / 4
                 r = core + 16 + int(3 * pulse)
                 px = int(cx + math.cos(a) * r)
                 py = int(cy + math.sin(a) * r)
-                pygame.draw.circle(overlay, (235, 195, 255, alpha), (px, py), 3)
+                overlay.hi_circle((235, 195, 255, alpha), (px, py), 3)
         else:
             # 放出阶段：核心剧烈脉动 + 扩散冲击环
             t = st["t"]
             core = int(20 + 8 * pulse + min(20, t * 0.4))
-            pygame.draw.circle(overlay, (80, 24, 150, 140), (cx, cy), core)
-            pygame.draw.circle(overlay, (225, 170, 255, 190),
-                               (cx, cy), core + 4, 2)
+            overlay.hi_circle((80, 24, 150, 140), (cx, cy), core)
+            overlay.hi_circle((225, 170, 255, 190), (cx, cy), core + 4, 2)
             if t < 46:
                 f = t / 46.0
                 ring_r = int(16 + f * 300)
                 ring_a = int(255 * (1.0 - f))
-                pygame.draw.circle(overlay, (255, 210, 255, ring_a),
-                                   (cx, cy), ring_r, 3)
-                pygame.draw.circle(overlay, (170, 80, 230, ring_a // 2),
-                                   (cx, cy), max(2, ring_r - 10), 2)
+                overlay.hi_circle((255, 210, 255, ring_a),
+                                  (cx, cy), ring_r, 3)
+                overlay.hi_circle((170, 80, 230, ring_a // 2),
+                                  (cx, cy), max(2, ring_r - 10), 2)
 
-        screen.blit(overlay, (offset_x, offset_y))
+        hires.blit_entity(screen, overlay, (offset_x, offset_y))

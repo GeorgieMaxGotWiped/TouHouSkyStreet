@@ -10,7 +10,12 @@ from src.engine import settings as cfg
 from src.entities.bullet import BulletManager
 
 pygame.init()
-screen = pygame.display.set_mode((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
+pygame.display.set_mode((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
+# 预览用的画布：PlayingState.draw 调的是画布的显卡/高分辨率接口（blit_gpu_bg 等），
+# 普通 Surface 上会 AttributeError，所以这里建一块 Painter 画布（没有显卡路径时
+# 它自己落回普通绘制，预览图与旧版一致）。
+from src.engine.painter import Painter
+screen = Painter.create((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
 os.makedirs("previews", exist_ok=True)
 
 from src.stages import get_stage_class, get_next_stage_class

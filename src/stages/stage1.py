@@ -31,6 +31,8 @@ class Stage:
         self.bg_color = bg_color or (8, 8, 24)
         self.background = None          # 伪3D背景渲染器（可空）
         self.background_darkness = 0    # 背景压暗（0-255，越大越暗，让弹幕更清晰）
+        self._dark_layer = None         # 压暗层的常驻表面（整块黑色，按当前压暗值调制
+                                        # 整层 alpha）：每帧重建要白花一次整幅分配 + 填充
         self.enemy_manager = EnemyManager()
         self.mid_boss = None          # 道中Boss（47s出场）
         self.boss = None              # 1面Boss（对话后登场，暂未接入）
@@ -42,6 +44,9 @@ class Stage:
         self.dialogue_portraits = {}   # {角色名: 立绘贴图路径}
         self.dialogue_portrait_sides = {}   # {角色名: "left"/"right"}，默认右侧
         self.dialogue_active = False
+        # 对话立绘是否套用取景补偿（头高对齐，见 settings.DIALOGUE_PORTRAIT_HEAD_RATIO）：
+        # 默认开启；立绘本来就是全身同框、要按原样显示的关卡把这里置 False
+        self.dialogue_portrait_harmonize = True
         # 战后对话（Boss 被击破后、通关结算前）：Boss 留在场上完成对话
         self.dialogue_is_defeat = False
         self.defeat_dialogue_lines = []
@@ -79,6 +84,15 @@ class Stage:
         """子类重写：道中Boss击破后追加的小怪波次"""
         pass
 
+    def _begin_mid_boss(self):
+        """道中Boss登场：默认直接进场开打。
+
+        Ex 面（The Rift）覆写成「先来一段对话再开打」，其余各面行为不变。
+        """
+        self.setup_mid_boss()
+        self._ramp_background_speed(BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)
+        self.phase = "mid_boss"
+
     def _ramp_background_speed(self, multiplier, duration):
         # Boss出场时让背景滚动速度平滑加速（无背景渲染器时忽略）
         if self.background is not None and hasattr(self.background, "ramp_speed"):
@@ -93,9 +107,7 @@ class Stage:
             self.enemy_manager.update(dt, bullet_manager, player_x, player_y,
                                       stage_time=self.timer)
             if self.timer >= MID_BOSS_APPEAR_TIME:
-                self.setup_mid_boss()
-                self._ramp_background_speed(BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)
-                self.phase = "mid_boss"
+                self._begin_mid_boss()
 
         elif self.phase == "mid_boss":
             self.enemy_manager.update(dt, bullet_manager, player_x, player_y,
@@ -148,24 +160,24 @@ class Stage:
         self.dialogue_lines = [
             ("蜘蛛女王 Arachne", "哎呀，今天还真是稀客。"),
             ("蜘蛛女王 Arachne", "居然有人会主动跑到蜘蛛巢穴里来。"),
-            ("魔法使 Mage", "最近到处都在谈论地下城的异常。"),
-            ("魔法使 Mage", "总得有人过来看看。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "最近到处都在谈论地下城的异常。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "总得有人过来看看。"),
             ("蜘蛛女王 Arachne", "地下城？"),
             ("蜘蛛女王 Arachne", "呵呵，你们这些冒险者还真喜欢给一切都找个理由。"),
-            ("魔法使 Mage", "所以，你知道些什么吗？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "所以，你知道些什么吗？"),
             ("蜘蛛女王 Arachne", "我只知道一件事。"),
             ("蜘蛛女王 Arachne", "最近，有不少不属于这里的家伙正在往地下城深处聚集。"),
-            ("魔法使 Mage", "听起来可不像是什么好兆头。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "听起来可不像是什么好兆头。"),
             ("蜘蛛女王 Arachne", "既然这么好奇，不如亲自下去看看？"),
             ("蜘蛛女王 Arachne", "当然，前提是你能先穿过我的蛛网。"),
         ]
         # 说话角色的立绘：自机 Mage 在左侧，Arachne 在右侧
         self.dialogue_portraits = {
-            "魔法使 Mage": cfg.SELF_SPRITE,
+            cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             "蜘蛛女王 Arachne": cfg.ARACHNE_BOSS_SPRITE,
         }
         self.dialogue_portrait_sides = {
-            "魔法使 Mage": "left",
+            cfg.PLAYER_DIALOGUE_NAME: "left",
         }
         # 对话开始即让Boss入场：在场但不攻击、不显示血条
         self.setup_boss()
@@ -214,19 +226,23 @@ class Stage:
         pass
 
     def iter_floors(self):
-        """本关用到的伪3D 地面渲染器（引擎据此统一设置渲染倍率）"""
-        floors = []
-        for name in ("background", "background_fortress"):
-            floor = getattr(self, name, None)
-            if floor is not None:
-                floors.append(floor)
-        return floors
+        """本关用到的伪3D 地面渲染器（引擎据此统一设置渲染倍率）
 
-    def draw(self, screen, offset_x=0, offset_y=0):
-        # 符卡背景已完全覆盖时跳过伪3D背景绘制（省性能）
-        hide_floor = any(
-            b is not None and b.spell_bg is not None and not b.spell_bg.done and b.spell_bg.is_opaque
-            for b in (self.mid_boss, self.boss))
+        关卡若另有独立的伪3D 地面（历史上六面进要塞时切过一套），可覆写本方法一并列出。
+        """
+        floor = getattr(self, "background", None)
+        return [floor] if floor is not None else []
+
+    def draw_battle_backdrop(self, screen, offset_x, offset_y, hide_floor):
+        """战斗区底衬：伪3D地面 + 压暗层。hide_floor = 符卡背景已完全不透明地盖住战斗区。
+
+        三种情形画法不同，放出来的像素却完全一致：
+        - 地面走显卡直绘时，战斗区在 CPU 画布上是空的（(0,0,0,0)），压暗层这一整块
+          恒定半透明色直接 fill 出来就够了 —— blit 的结果本来就是 (0,0,0,darkness)，
+          省掉的是 576x670 的整幅 alpha 混合（实测 0.55ms/帧）；
+        - 地面还画在画布上时，压暗层必须真盖在那些像素上，只能照旧 blit；
+        - 符卡背景已经完全盖住战斗区时，底衬与压暗层画了也看不见，整段跳过。
+        """
         floor = self.background
         if floor is not None and floor.gpu_active and not hide_floor:
             # 地面改由显卡原生绘制：战斗区在 CPU 帧上抠空，让下层的高分辨率
@@ -234,18 +250,39 @@ class Stage:
             screen.fill((0, 0, 0, 0),
                         (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
             register_gpu_floor(floor)
-        else:
+        elif not hide_floor:
             # 背景（仅战斗区域）
             pygame.draw.rect(screen, self.bg_color,
                              (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH,
                               cfg.BATTLE_AREA_HEIGHT))
-            if floor is not None and not hide_floor:
+            if floor is not None:
                 floor.draw(screen, offset_x, offset_y)
-        if floor is not None and not hide_floor and self.background_darkness:
+        if floor is None or hide_floor or not self.background_darkness:
+            return
+        darkness = int(self.background_darkness)
+        if floor.gpu_active:
+            # 画布上这片还是 (0,0,0,0)：直接写色即可，省掉一次整幅 alpha 混合
+            screen.fill((0, 0, 0, darkness),
+                        (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
+            return
+        # 压暗层是恒定的一整块黑色：常驻一份表面，按当前压暗值调制整层 alpha
+        # （逐像素 alpha 255 x 表面 alpha = 原先那张「半透明黑」，像素完全一致）。
+        # 不按压暗值缓存：六面的压暗值是逐帧渐变的，按值缓存会攒出上百张整幅表面
+        dark = self._dark_layer
+        if dark is None:
             dark = pygame.Surface(
                 (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), pygame.SRCALPHA)
-            dark.fill((0, 0, 0, self.background_darkness))
-            screen.blit(dark, (offset_x, offset_y))
+            dark.fill((0, 0, 0, 255))
+            self._dark_layer = dark
+        dark.set_alpha(darkness)
+        screen.blit(dark, (offset_x, offset_y))
+
+    def draw(self, screen, offset_x=0, offset_y=0):
+        # 符卡背景已完全覆盖时跳过伪3D背景绘制（省性能）
+        hide_floor = any(
+            b is not None and b.spell_bg is not None and not b.spell_bg.done and b.spell_bg.is_opaque
+            for b in (self.mid_boss, self.boss))
+        self.draw_battle_backdrop(screen, offset_x, offset_y, hide_floor)
 
         # 符卡特殊背景（Boss 展开符卡时覆盖在关卡背景之上、弹幕之下）
         for boss_ref in (self.mid_boss, self.boss):
@@ -268,6 +305,14 @@ class Stage:
         """子弹与自机之后的战斗区前景层，供关卡/符卡绘制覆盖特效。"""
         pass
 
+    def warm_spell_effects(self):
+        """子类可覆写：把「开符之后才第一次现算」的符卡演出资源提前建好
+
+        载入界面会调这个方法（见 ui/loading.py 的「符卡演出特效」一步）。
+        返回预热成功的条数，仅用于载入界面的进度提示。
+        """
+        return 0
+
     def is_cleared(self):
         return self.phase == "cleared"
 
@@ -280,6 +325,14 @@ class Stage:
         elif self.boss and self.boss.alive and self.boss.combat_enabled:
             enemies.append(self.boss)
         return enemies
+
+    def enemy_death_clear_radius(self, enemy):
+        """小怪被击破时炸掉周围这个半径内的敌弹（0 = 不清弹，基类默认不炸）。
+
+        半径按体型由各面自己给（六面 = 判定半径 × CLEAR_RADIUS_PER_SIZE），
+        越大的怪炸得越大；Boss 是否参与也由各面决定。
+        """
+        return 0.0
 
 
 class Stage1_SkyblockHub(Stage):
@@ -299,20 +352,20 @@ class Stage1_SkyblockHub(Stage):
         self.defeat_dialogue_lines = [
             ("蜘蛛女王 Arachne", "真是厉害。"),
             ("蜘蛛女王 Arachne", "看来这些蛛丝还拦不住你。"),
-            ("魔法使 Mage", "所以，到底发生了什么？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "所以，到底发生了什么？"),
             ("蜘蛛女王 Arachne", "谁知道呢？"),
             ("蜘蛛女王 Arachne", "我只是一只守着巢穴的蜘蛛而已。"),
             ("蜘蛛女王 Arachne", "不过，最近的末地可比这里热闹多了。"),
-            ("魔法使 Mage", "末地吗？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "末地吗？"),
             ("蜘蛛女王 Arachne", "去看看吧。"),
             ("蜘蛛女王 Arachne", "说不定，你能在那里找到想要的答案。"),
         ]
         self.defeat_dialogue_portraits = {
-            "魔法使 Mage": cfg.SELF_SPRITE,
+            cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             "蜘蛛女王 Arachne": cfg.ARACHNE_BOSS_SPRITE,
         }
         self.defeat_dialogue_portrait_sides = {
-            "魔法使 Mage": "left",
+            cfg.PLAYER_DIALOGUE_NAME: "left",
         }
 
     def setup_waves(self):

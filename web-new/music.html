@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>音乐室 | 東方天空街 Touhou Sky Street</title>
+<meta name="description" content="東方天空街的曲目一览：七段舞台的道中曲与关底曲。">
+<meta name="theme-color" content="#04060e">
+<script>try{if(sessionStorage.getItem("warp-card")){document.documentElement.classList.add("warp-in");setTimeout(function(){document.documentElement.classList.remove("warp-in")},3000)}}catch(e){}</script>
+<link rel="icon" href="assets/img/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+<link rel="stylesheet" href="css/site.css">
+</head>
+<body data-page="music">
+<canvas id="danmaku" aria-hidden="true"></canvas>
+
+<header class="site-nav">
+  <div class="wrap">
+    <a class="brand" href="index.html">
+      <span class="cn">東方天空街</span>
+      <span class="en">Touhou Sky Street</span>
+    </a>
+    <nav class="nav-list" aria-label="主导航">
+      <a href="download.html" data-card-no="Start Game" data-card-cn="下载与运行" data-card-en="Download &amp; Run">Start Game<span class="cn">下载</span></a>
+      <a href="gameplay.html" data-card-no="How to Play" data-card-cn="玩法" data-card-en="Keys &middot; Systems &middot; Practice">How to Play<span class="cn">玩法</span></a>
+      <a href="characters.html" data-card-no="Characters" data-card-cn="自机与对手" data-card-en="4 Players &middot; 17 Bosses">Characters<span class="cn">人物</span></a>
+      <a href="stages.html" data-card-no="Stages" data-card-cn="七段上升的路" data-card-en="01 &ndash; EX">Stages<span class="cn">舞台</span></a>
+      <a href="items.html" data-card-no="Item Index" data-card-cn="物品图鉴" data-card-en="61 Items">Items<span class="cn">图鉴</span></a>
+      <a href="music.html" data-card-no="Music Room" data-card-cn="音乐室" data-card-en="Sound Track">Music Room<span class="cn">曲目</span></a>
+      <a href="about.html" data-card-no="About" data-card-cn="关于本作" data-card-en="Touhou Sky Street">About<span class="cn">关于</span></a>
+    </nav>
+  </div>
+</header>
+
+<main class="deck">
+  <div class="page-head">
+    <div class="bg" style="background-image:url('assets/img/shot/stage3.webp')"></div>
+    <div class="wrap">
+      <div class="tag kicker">Music Room</div>
+      <h1>音乐室</h1>
+      <span class="en">Sound Track</span>
+      <p class="lead">每一面的道中与关底各有自己的曲名；开打时曲名会以横幅的形式压在战斗画面上。</p>
+    </div>
+  </div>
+  <section class="section">
+    <div class="wrap">
+      <p class="tag is-dim" id="trackNote"></p>
+      <div class="tracks" id="trackList"></div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <span>&copy; <span data-year>2026</span> 東方天空街 Touhou Sky Street 制作组</span>
+    <span>东方 Project 同人二次创作 · 非商业作品</span>
+    <span class="copy"><a href="about.html">关于与素材许可</a></span>
+  </div>
+</footer>
+
+<div class="title-card" id="warp" aria-hidden="true">
+  <div class="inner">
+    <div class="no"></div>
+    <div class="cn"></div>
+    <div class="en"></div>
+  </div>
+</div>
+<script src="js/warp-in.js"></script>
+
+<script src="js/danmaku.js"></script>
+<script src="js/site.js"></script>
+<script src="js/render.js"></script>
+</body>
+</html>

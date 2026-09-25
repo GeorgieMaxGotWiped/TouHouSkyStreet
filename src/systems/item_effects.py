@@ -35,7 +35,7 @@ def _empty_effects():
         "tracking_damage_pct": 0.0,       # 追踪弹伤害%
         "non_tracking_damage_pct": 0.0,   # 非追踪弹伤害%
         "tracking_high_speed_damage_pct": 0.0,  # 高速态追踪弹伤害%
-        "fixed_bullet_speed_pct": 0.0,    # 低速态固定弹射速%
+        "fixed_double_damage_chance": 0.0,  # 低速态固定弹双倍伤害概率%
         "graze_slow_pct": 0.0,            # 低速态擦弹范围内敌弹减速%
         "fixed_bullet_add": 0,            # 固定弹道调整（负=减少）
         "tracking_bullet_add": 0,         # 追踪弹道调整

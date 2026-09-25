@@ -1,0 +1,130 @@
+{
+ "stages": [
+  {
+   "key": "stage1", "no": "01", "cn": "蜘蛛巢穴的圣所", "en": "Spider's Den",
+   "art": "assets/img/stage/stage1.webp",
+   "desc": "挂在天空街最下面的一张网。蛛丝把岩壁连成一片，风从网眼里穿过去。守卫这里的蜘蛛女王并不急着动手——她先想看看你有没有资格往下走。",
+   "bosses": [
+    {"id": "arachne", "en": "Arachne", "name": "蜘蛛女王 Arachne", "title": "巢穴中的妖怪蜘蛛", "role": "道中 / 关底", "art": "assets/boss/arachne.webp"}
+   ],
+   "spells": [
+    {"name": "罠符「Luxurious Spool」", "by": "Arachne", "where": "道中"},
+    {"name": "丝符「Soul String」", "by": "Arachne", "where": "关底"},
+    {"name": "蛛符「Tarantula's Tornado」", "by": "Arachne", "where": "关底"},
+    {"name": "魂符「Dark Queen's Soul」", "by": "Arachne", "where": "关底"}
+   ],
+   "music": {"route": "巢穴深处 ~ Deep into the Den", "boss": "蛛丝马迹！~ Spider's Fragments"}
+  },
+  {
+   "key": "stage2", "no": "02", "cn": "末地最底层", "en": "Dragon's Nest",
+   "art": "assets/img/stage/stage2.webp",
+   "desc": "天空街下面垂着一条通向末地的口子。黑曜石柱一根根立着，末影石在地上发亮。这里的道中守卫只是看门的，真正的主人还在更下面盘旋。",
+   "bosses": [
+    {"id": "end_stone_protector", "en": "End Stone Protector", "name": "末影石守卫", "title": "守在龙巢门口的构装体", "role": "道中", "art": "assets/boss/end_stone_protector.webp"},
+    {"id": "ender_dragon", "en": "Ender Dragon", "name": "末影龙", "title": "栖息于末地的龙", "role": "关底", "art": "assets/boss/ender_dragon.webp"}
+   ],
+   "spells": [
+    {"name": "石符「Immobile Protector's Wraith」", "by": "End Stone Protector", "where": "道中"},
+    {"name": "燃符「Fireball Barrage」", "by": "Ender Dragon", "where": "关底"},
+    {"name": "电光「Directional Lightning」", "by": "Ender Dragon", "where": "关底"},
+    {"name": "龙符「One with the Dragons」", "by": "Ender Dragon", "where": "关底"},
+    {"name": "超符「Superiority」", "by": "Ender Dragon", "where": "Last Spell"}
+   ],
+   "music": {"route": "末影之底 ~ Depths of the End", "boss": "龙之怒号 ~ Dragon's Wrath"}
+  },
+  {
+   "key": "stage3", "no": "03", "cn": "地下墓穴", "en": "The Catacombs Floor 1",
+   "art": "assets/img/stage/stage3.webp",
+   "desc": "从末地往北，落到墓穴的第一层。石砖走廊两侧封着亡灵，一只眼睛挂在暗处看着你走完全程。这一层的钥匙握在小丑手里。",
+   "bosses": [
+    {"id": "the_watcher", "en": "The Watcher", "name": "The Watcher", "title": "注视深渊之人", "role": "道中", "art": "assets/boss/the_watcher.webp"},
+    {"id": "bonzo", "en": "Bonzo", "name": "邦佐 Bonzo", "title": "地下城小丑", "role": "关底", "art": "assets/boss/bonzo.webp"}
+   ],
+   "spells": [
+    {"name": "展符「Undead Exhibition」", "by": "The Watcher", "where": "道中"},
+    {"name": "死符「Undead Revival」", "by": "Bonzo", "where": "关底"},
+    {"name": "骸符「Skull Dreadlord」", "by": "Bonzo", "where": "关底"},
+    {"name": "戏符「Grand Illusion」", "by": "Bonzo", "where": "关底"},
+    {"name": "气符「Balloon Barrage」", "by": "Bonzo", "where": "关底"},
+    {"name": "秘仪「Showtime」", "by": "Bonzo", "where": "Last Spell"}
+   ],
+   "music": {"route": "墓穴回响 ~ Echoes of the Catacombs", "boss": "小丑嘉年华 ~ Bonzo's Carnival"}
+  },
+  {
+   "key": "stage4", "no": "04", "cn": "地下墓穴深处", "en": "The Catacombs",
+   "art": "assets/img/stage/stage4.webp",
+   "desc": "再往下，墓穴开始变得不像墓穴。陶土兵排队站好，先驱者的机械还在转。学徒死灵术士守在半路，尽头坐着一位巨人王。",
+   "bosses": [
+    {"id": "scarf", "en": "Scarf", "name": "Scarf", "title": "学徒死灵术士", "role": "道中", "art": "assets/boss/scarf.webp"},
+    {"id": "sadan", "en": "Sadan", "name": "萨丹 Sadan", "title": "守卫墓穴的巨人王", "role": "关底", "art": "assets/boss/sadan.webp"}
+   ],
+   "spells": [
+    {"name": "队符「Necrotic Squad」", "by": "Scarf", "where": "道中"},
+    {"name": "兵符「Terracotta Army」", "by": "Sadan", "where": "关底"},
+    {"name": "巨符「Precursors' Return」", "by": "Sadan", "where": "关底"},
+    {"name": "王符「The Giant One」", "by": "Sadan", "where": "关底"},
+    {"name": "终符神代「Bridge Between Worlds」", "by": "Sadan", "where": "Last Spell"}
+   ],
+   "music": {"route": "墓穴深处 ~ The Catacombs", "boss": "死灵王的狂宴 ~ Necromancer's Feast"}
+  },
+  {
+   "key": "stage5", "no": "05", "cn": "凋零之厅", "en": "Hall of the Wither Lords",
+   "art": "assets/img/stage/stage5.webp",
+   "desc": "一整面墙的冠军陈列。八位凋零领主排在这里，没有道中，从头到尾都是 Boss 连战——打倒一个，下一个立刻上位。",
+   "bosses": [
+    {"id": "the_watcher", "en": "The Watcher", "name": "The Watcher", "title": "注视深渊之人", "role": "开场", "art": "assets/boss/the_watcher.webp"},
+    {"id": "the_professor", "en": "The Professor", "name": "The Professor", "title": "把实验做进墓穴的学者", "role": "连战 1", "art": "assets/boss/the_professor.webp"},
+    {"id": "thorn", "en": "Thorn", "name": "Thorn", "title": "灵兽园的看守", "role": "连战 2", "art": "assets/boss/thorn.webp"},
+    {"id": "livid", "en": "Livid", "name": "Livid", "title": "八重存在的影武者", "role": "连战 3", "art": "assets/boss/livid.webp"},
+    {"id": "maxor", "en": "Maxor", "name": "Maxor", "title": "爆炸凋零", "role": "凋零领主", "art": "assets/boss/maxor.webp"},
+    {"id": "storm", "en": "Storm", "name": "Storm", "title": "掌管雷霆的凋零", "role": "凋零领主", "art": "assets/boss/storm.webp"},
+    {"id": "goldor", "en": "Goldor", "name": "Goldor", "title": "机械与剑盾的凋零", "role": "凋零领主", "art": "assets/boss/goldor.webp"},
+    {"id": "necron", "en": "Necron", "name": "Necron", "title": "王座之前的死灵", "role": "关底", "art": "assets/boss/necron.webp"}
+   ],
+   "spells": [
+    {"name": "展符「Undead Exhibition」", "by": "The Watcher", "where": "开场"},
+    {"name": "实验「Professor's Experiment」", "by": "The Professor", "where": "连战 1"},
+    {"name": "灵符「Spirit Zoo」", "by": "Thorn", "where": "连战 2"},
+    {"name": "影符「八重存在」", "by": "Livid", "where": "连战 3"},
+    {"name": "Phase1「Maxor's Frenzy」", "by": "Maxor", "where": "凋零领主"},
+    {"name": "雷符「Giga Lightning」", "by": "Storm", "where": "凋零领主"},
+    {"name": "机械符「Terminal Pursuit」", "by": "Goldor", "where": "凋零领主"},
+    {"name": "Phase3「Infinite Rage」", "by": "Goldor", "where": "凋零领主"},
+    {"name": "焚符「Nuclear Frenzy」", "by": "Necron", "where": "关底"},
+    {"name": "终符「Necron's Frenzy」", "by": "Necron", "where": "关底"}
+   ],
+   "music": {"route": "凋零之厅 ~ Hall of the Wither Lords", "boss": "凋零之厅 ~ Hall of the Wither Lords"}
+  },
+  {
+   "key": "stage6", "no": "06", "cn": "最终进军", "en": "Final Approach",
+   "art": "assets/img/stage/stage6.webp",
+   "desc": "通往王座的最后一段。亡灵军队在城下排队，巨大的头颅在半空注视并锁定你的位置。走到尽头，是凋零之王 Kaeman，和他六张没有留手的符卡。",
+   "bosses": [
+    {"id": "wither_king", "en": "The Wither King", "name": "凋零之王 Kaeman", "title": "追逐死亡尽头的大魔法使", "role": "关底", "art": "assets/boss/wither_king.webp"}
+   ],
+   "spells": [
+    {"name": "王符「Wither King's Dominion」", "by": "Kaeman", "where": "关底"},
+    {"name": "冥符「Five Corrupted Relics」", "by": "Kaeman", "where": "关底"},
+    {"name": "龙符「Withered Dragon」", "by": "Kaeman", "where": "关底"},
+    {"name": "裂符「Dimensional Slash」", "by": "Kaeman", "where": "关底"},
+    {"name": "王符「Atomizing Ray」", "by": "Kaeman", "where": "关底"},
+    {"name": "终仪「The Wither King's Final Slumber」", "by": "Kaeman", "where": "Last Spell"}
+   ],
+   "music": {"route": "最终进军 ~ Final Approach", "boss": "凋零之王的王座 ~ Throne of the Wither King"}
+  },
+  {
+   "key": "ex", "no": "EX", "cn": "裂隙", "en": "The Rift",
+   "art": "assets/img/stage/ex.webp",
+   "desc": "天空街之外的一条缝。自称多元宇宙救世主的人在里面设了三项试炼，落选的前市长在里面继续竞选。Ex 面不经仓库出征，也不结算物品——走进去，就只是打一场。",
+   "bosses": [
+    {"id": "wizardman", "en": "Wizardman", "name": "Wizardman", "title": "自称多元宇宙的救世主", "role": "道中", "art": "assets/boss/wizardman.webp"},
+    {"id": "barry", "en": "Barry", "name": "前市长 Barry", "title": "落选之后仍在竞选", "role": "关底", "art": "assets/boss/barry.webp"}
+   ],
+   "spells": [
+    {"name": "三项试炼：竞速 / 交锋 / 四子连线", "by": "Wizardman", "where": "道中（非符弹幕）"},
+    {"name": "竞选纲领：五级税率 / 强调手势 / 翻转世界 / 抗议标语", "by": "Barry", "where": "关底（非符弹幕）"}
+   ],
+   "music": {"route": "裂隙彼端 ~ Beyond the Rift", "boss": "竞选者的狂想 ~ The Candidate's Fantasy"}
+  }
+ ]
+}

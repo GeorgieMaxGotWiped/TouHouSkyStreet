@@ -23,6 +23,17 @@ EFFECT_CENTER = (AREA_W / 2.0, AREA_H * 0.42)
 
 FADE_IN = 20        # 开符淡入帧数
 ROT_CACHE_STEP = 4.0    # 旋转层缓存角度步长（度），小于此步长的旋转直接复用上一帧结果
+# 旋转层缓存容量：按「最近最少使用」逐出，而不是满了就整锅倒掉（见 _draw_sprite）
+SPRITE_CACHE_MAX = 32
+# 旋转层分桶相位用的黄金分割常数（低差异序列，任意两层都不容易周期性同步）
+_SPRITE_PHASE_GOLDEN = 0.6180339887498949
+# 单帧最多重算几个「大」旋转层；旋转结果面积超过 SPRITE_HEAVY_PIXELS 才算大层
+SPRITE_HEAVY_PER_FRAME = 1
+SPRITE_HEAVY_PIXELS = 40000
+# 旋转层缓存改成「所有符卡背景共享」：同一张图案在同一角度桶 / 缩放桶下算出来的
+# rotozoom 结果逐位相同，没有理由每开一张符卡都从零开始。共享之后，载入界面预热
+# 出来的「开符第一帧」在真正开符时仍然命中（见 preheat / _warm_opening_frames）。
+_sprite_cache = {}
 FADE_OUT = 36       # 结符淡出帧数
 BURST_FRAMES = 45   # 开符瞬间扩散光环时长（帧）
 FLASH_FRAMES = 14   # 开符瞬间的轻微闪光时长（帧）
@@ -73,6 +84,9 @@ IMAGE_TEXTURES = {
     "maxor": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "maxor", "bg.png"),
     "storm": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "storm", "bg.png"),
     "goldor": os.path.join(cfg.BACKGROUNDS_DIR, "stage5", "goldor", "bg.png"),
+    # 六面道中 Necron 残影专用：五面那套 necron 是全景纸条（3328x480，配环形投影），
+    # 而六面这张是全屏整幅图（2874x1736），因此单独登记一个 key / 风格。
+    "necron_p": os.path.join(cfg.BACKGROUNDS_DIR, "stage6", "NecronP.png"),
 }
 
 # Kaeman 六符专用背景目录（assets/backgrounds/stage6/spells/）：
@@ -497,6 +511,26 @@ def _make_glow(w, h, cx, cy, radius, color):
 # 源图 2700~2834 宽，实测 67~85ms 全花在解码上），按路径缓存后只付一次。
 _image_cache = {}
 
+# 开符闪光层缓存：key = (亮度, 画面尺寸)。亮度只有十几档，整场战斗反复用到。
+_flash_cache = {}
+
+
+def _flash_layer(value, size):
+    """预烤一张「整幅加色」表面（开符瞬间的闪光用）
+
+    canvas.fill(color, BLEND_RGB_ADD) 走的是 pygame 的逐像素慢路径（576x670 实测
+    1.9ms/帧），换成预烤表面 + blit 后是 0.06ms/帧 —— 闪光那 14 帧省下约 26ms。
+    """
+    key = (max(1, min(255, int(value))), size)
+    surf = _flash_cache.get(key)
+    if surf is None:
+        if len(_flash_cache) > 32:
+            _flash_cache.clear()
+        surf = pygame.Surface(size)
+        surf.fill((key[0], key[0], key[0]))
+        _flash_cache[key] = surf
+    return surf
+
 
 def _get_image_layer(path):
     """取（并缓存）铺满战斗区域的整幅背景贴图；失败返回 None"""
@@ -806,6 +840,18 @@ STYLES = {
             _Layer(None, image="goldor"),
         ],
     },
+    "necron_p": {  # 六面道中 Necron 残影专用：整幅贴图取自六面自己的 NecronP.png
+        # 与 maxor / storm / goldor 同属「整幅竞技场贴图」一族，配色沿用 Necron 的绿。
+        # dim 比其余三张略低：这张源图本身偏亮（cover 后平均灰阶 73，其余 58~68）。
+        "base": (7, 9, 8),
+        "glow": (18, 26, 16),
+        "ring": (150, 230, 120),
+        "warp": False,
+        "dim": 0.70,
+        "layers": [
+            _Layer(None, image="necron_p"),
+        ],
+    },
     # --- Kaeman 六符专用（复制自共享样式，资源指向 stage6/spells/ 便于独立修改） ---
     "kaeman_dominion": {  # Kaeman ① 王符「Wither King's Dominion」（复制自 undead）
         "base": (7, 9, 8),
@@ -944,6 +990,16 @@ class SpellBackground:
         self.layers = conf["layers"]
         self.ring_color = conf["ring"]
         self.warp = conf.get("warp", True)
+        # 旋转层缓存的分桶相位：每一层按序号错开不到一个步长的相位，让各层换桶的
+        # 帧彼此错开。相位只决定「哪一帧重新算」，不影响算子本身（重新算的那一帧
+        # 仍然是按真实角度 rotozoom），所以画面没有任何变化 —— 但少了「同一帧里
+        # 好几层一起重新旋转」的叠加，符卡进行中的偶发掉帧随之消失。
+        # 角度与缩放各用一条低差异序列（黄金分割）错开，避免任意两层周期性同步
+        # —— 例如冥符那张符卡里两层转速正好是 2:1，用固定间隔的相位仍会周期性撞上。
+        n_layers = max(1, len(self.layers))
+        self._layer_phase = [((i + 1) * _SPRITE_PHASE_GOLDEN) % 1.0 for i in range(n_layers)]
+        self._layer_scale_phase = [((i + 1) * _SPRITE_PHASE_GOLDEN ** 2) % 1.0
+                                   for i in range(n_layers)]
 
         # 伪3D环形全景层：为带 panorama 配置的层创建渲染器（贴图缺失时回退普通层）
         self.panoramas = []
@@ -999,8 +1055,12 @@ class SpellBackground:
         self._burst_r = burst_r
 
         self.canvas = pygame.Surface((AREA_W, AREA_H))
-        # 旋转层缓存：角度/缩放分桶后复用 rotozoom 结果，避免每帧全量旋转
-        self._sprite_cache = {}
+        # 旋转层缓存：角度/缩放分桶后复用 rotozoom 结果，避免每帧全量旋转。
+        # 字典本身按插入顺序迭代，可直接当 LRU 用（命中时把 key 挪到末尾）。
+        # 用模块级的那一份（跨符卡共享，见文件头的 _sprite_cache 说明）。
+        self._sprite_cache = _sprite_cache
+        self._sprite_last = {}      # 每个旋转层最近一次算出来的图（顶帧用）
+        self._heavy_budget = SPRITE_HEAVY_PER_FRAME
         self.timer = 0
         self.fading = False
         self.fade_out_t = 0
@@ -1050,7 +1110,7 @@ class SpellBackground:
             else:
                 pan.set_speed(speed)
 
-    def _draw_sprite(self, canvas, layer, t, cx, cy):
+    def _draw_sprite(self, canvas, layer, t, cx, cy, index=0):
         pat = _get_pattern(layer.pattern)
         angle = (t * layer.rot_speed) % 360.0
         pulse = 1.0 + layer.pulse * math.sin(t * 0.01 * layer.freq * 6.28)
@@ -1064,13 +1124,45 @@ class SpellBackground:
         if layer.pos is not None:
             px, py = layer.pos
         # 旋转/缩放分桶：视觉上不可感知的微小变化直接复用缓存，大幅降低开销
-        key = (layer.pattern, int(angle // ROT_CACHE_STEP), int(scale / 0.04))
+        phase = self._layer_phase[index] if index < len(self._layer_phase) else 0.0
+        scale_phase = (self._layer_scale_phase[index]
+                       if index < len(self._layer_scale_phase) else 0.0)
+        key = (layer.pattern, int(angle / ROT_CACHE_STEP + phase),
+               int(scale / 0.04 + scale_phase))
         img = self._sprite_cache.get(key)
-        if img is None:
-            img = pygame.transform.rotozoom(pat, angle, scale)
-            if len(self._sprite_cache) > 24:
-                self._sprite_cache.clear()
+        if img is not None:
+            # 命中即刷新「最近使用」次序
+            del self._sprite_cache[key]
             self._sprite_cache[key] = img
+        else:
+            pw, ph = pat.get_size()
+            heavy = pw * ph * scale * scale >= SPRITE_HEAVY_PIXELS
+            if heavy and self._heavy_budget <= 0:
+                # 本帧的「大层重算」额度已经被别的大层用掉：这一帧先用该层上一张图
+                # 顶上（最多比真实角度差不到一个分桶 = 4°，看不出来），把重算留到
+                # 下一帧。开符第一帧所有旋转层都是冷的，没有这一步就会在同一帧里
+                # 叠加 3~4 次 rotozoom —— 那正是「开符那一下」的顿挫。
+                img = self._sprite_last.get(index)
+                if img is None:
+                    # 本实例还没算过这一层（例如共享缓存里的开场帧被别的层挤掉了）：
+                    # 退而求其次，拿共享缓存里同一张图案最近的一次结果顶上 —— 角度
+                    # 可能差几十度，但至少缩放/形状是对的。若这也拿不到才用原图。
+                    img = next((v for k, v in reversed(self._sprite_cache.items())
+                                if k[0] == layer.pattern), None) or pat
+            else:
+                img = pygame.transform.rotozoom(pat, angle, scale)
+                if heavy:
+                    self._heavy_budget -= 1
+                self._sprite_last[index] = img
+                # 旋转是单调的：某一层离开一个角度桶后，这个桶再也不会被用到，而它
+                # 当前所在的桶每一帧都要用。原本「超过容量就 clear()」会在超容的那一帧
+                # 把每一层的热点桶一起扔掉，于是同一帧里所有旋转层同时重新 rotozoom
+                # （实测 4 层 x ~1.5ms 合成 6~7ms 的掉帧，正好卡在符卡进行中）。改成
+                # 只逐出最久没用过的那一条后，未命中被摊到各层各自换桶的那一帧上。
+                cache = self._sprite_cache
+                while len(cache) >= SPRITE_CACHE_MAX:
+                    cache.pop(next(iter(cache)))
+                cache[key] = img
         flags = pygame.BLEND_RGB_ADD if layer.blend == "add" else 0
         canvas.blit(img, (px - img.get_width() / 2.0, py - img.get_height() / 2.0),
                     special_flags=flags)
@@ -1123,6 +1215,7 @@ class SpellBackground:
         canvas.fill(self.base_color)
 
         cx, cy = EFFECT_CENTER
+        self._heavy_budget = SPRITE_HEAVY_PER_FRAME
         for i, layer in enumerate(self.layers):
             if layer.panorama is not None:
                 pan = self.panoramas[i] if i < len(self.panoramas) else None
@@ -1135,12 +1228,14 @@ class SpellBackground:
             elif layer.scroll is not None:
                 self._draw_tiled(canvas, layer, t)
             else:
-                self._draw_sprite(canvas, layer, t, cx, cy)
+                self._draw_sprite(canvas, layer, t, cx, cy, i)
 
         # 开符瞬间：轻微闪光 + 扩散光环
         if t < FLASH_FRAMES:
             f = int(38 * (1.0 - t / float(FLASH_FRAMES)))
-            canvas.fill((f, f, f), special_flags=pygame.BLEND_RGB_ADD)
+            if f > 0:
+                canvas.blit(_flash_layer(f, canvas.get_size()), (0, 0),
+                            special_flags=pygame.BLEND_RGB_ADD)
         self._draw_burst(canvas, t, cx, cy)
 
         # 正弦扭曲（旋转/缩放/流动之上再加一层波浪位移）；部分老板风格关闭
@@ -1155,7 +1250,13 @@ class SpellBackground:
         if self.dim < 1.0:
             canvas.blit(self.dim_surf, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
 
-        canvas.set_alpha(alpha)
+        # 整幅上屏：完全不透明时按「无表面 alpha」贴（普通拷贝），只在淡入 / 淡出
+        # 那几十帧才开逐像素调制 —— set_alpha 在这张 576x670 画布上实测 2.5ms/帧，
+        # 不开则 0.08ms/帧。
+        if alpha >= 255:
+            canvas.set_alpha(None)
+        else:
+            canvas.set_alpha(alpha)
         screen.blit(canvas, (offset_x, offset_y))
 
 
@@ -1163,12 +1264,34 @@ class SpellBackground:
 
 _heated_entries = set()
 
+# 开符头几帧的旋转结果也一并烤出来。大层（面积 >= SPRITE_HEAVY_PIXELS）的
+# rotozoom 实测 2.4ms，而每张符卡的第一帧所有旋转层都是冷的 —— 那一帧又正好
+# 是「开符那一下」。这里在载入界面把开符第 1 帧的分桶结果先算进共享缓存，
+# 真正开符时直接命中（只是少算一次同样的 rotozoom，画面逐位相同）。
+_OPEN_WARM_FRAMES = 1
+_open_scratch = None
+
+
+def _warm_opening_frames(bg):
+    """把 bg 开符头几帧要用的旋转结果算进共享缓存（绘制到一张丢弃用的画布）"""
+    global _open_scratch
+    if _open_scratch is None:
+        _open_scratch = pygame.Surface((AREA_W, AREA_H))
+    saved = bg.timer
+    try:
+        for t in range(1, _OPEN_WARM_FRAMES + 1):
+            bg.timer = t
+            bg.draw(_open_scratch)
+    finally:
+        bg.timer = saved
+
 
 def preheat(entries):
     """按 [(符卡名, bg_style)] 预热符卡背景的静态资源。
 
-    只把静态部分算进缓存（图案 / 暗角 / 微光 / 整幅贴图 / 全景贴图），
-    不保留 SpellBackground 实例本身（它带每帧动画状态）。返回预热条数。
+    把静态部分算进缓存（图案 / 暗角 / 微光 / 整幅贴图 / 全景贴图），再空跑
+    开符头几帧把旋转层缓存也填上；不保留 SpellBackground 实例本身（它带每帧
+    动画状态）。返回预热条数。
     """
     done = 0
     for name, style in entries or ():
@@ -1178,7 +1301,8 @@ def preheat(entries):
         if style not in STYLES:
             continue
         try:
-            SpellBackground(name or "", style)
+            bg = SpellBackground(name or "", style)
+            _warm_opening_frames(bg)
         except Exception as exc:
             print(f"[SpellBG] preheat {style} failed: {exc}")
             continue

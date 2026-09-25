@@ -38,7 +38,6 @@ PORTRAIT_HEIGHT = 560
 HYPERION_HEIGHT = 88
 
 HYPERION_PATH = os.path.join(cfg.ASSETS_DIR, "sprites", "self", "Hyperion.png")
-PORTRAIT_PATH = os.path.join(cfg.ASSETS_DIR, "sprites", "self", "self1.png")
 
 
 _image_cache = {}
@@ -120,8 +119,9 @@ class PlayerSpellCard:
         self.done = False
         self.strikes = []
         self.hyperion_sprite = _load_image(HYPERION_PATH, HYPERION_HEIGHT)
+        # 立绘跟随当前自机（见 cfg.set_player_character）
         self.portrait = _load_image(
-            PORTRAIT_PATH, PORTRAIT_HEIGHT, max_width=cfg.BATTLE_AREA_WIDTH - 80)
+            cfg.SELF_SPRITE, PORTRAIT_HEIGHT, max_width=cfg.BATTLE_AREA_WIDTH - 80)
 
     def update(self, dt):
         """Advance the card state machine. Frame-based to match the rest of the game."""

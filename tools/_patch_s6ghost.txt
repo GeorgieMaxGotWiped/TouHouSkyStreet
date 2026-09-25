@@ -1,0 +1,33 @@
+*** Begin Patch
+*** Update File: src/stages/stage6.py
+@@
+-        for ghost in self.ghosts[:]:
+-            # 一小段削弱版符卡：登场那一帧就起手（窗口外直接返回）
+-            _ghost_spell(ghost, bullet_manager, player_x, player_y)
+-            ghost["age"] += 1
+-            if ghost["age"] >= ghost["max_age"]:
+-                self.ghosts.remove(ghost)
+-                if not self.ghosts and self.ghost_bg is not None:
+-                    self.ghost_bg.begin_fade_out()
++        for ghost in self.ghosts[:]:
++            # 一小段削弱版符卡：登场那一帧就起手（窗口外直接返回）
++            _ghost_spell(ghost, bullet_manager, player_x, player_y)
++            ghost["age"] += 1
++            if ghost["age"] >= ghost["max_age"]:
++                self.ghosts.remove(ghost)
++                # 离场清弹：这么大的一位门徒退场，把它周围一圈弹幕一起炸掉
++                burst_cancel_bullets(bullet_manager, ghost["x"], ghost["y"],
++                                     GHOST_CLEAR_RADIUS, GHOST_GLOWS[ghost["id"]])
++                if not self.ghosts and self.ghost_bg is not None:
++                    self.ghost_bg.begin_fade_out()
++
++    def enemy_death_clear_radius(self, enemy):
++        """六面：小怪被击破时炸掉周围的敌弹，半径按体型给（判定半径 × 3）
++
++        凋零游魂 42 / 矿工 48 / 骑士 57 / 守卫与兵马俑 60 / Skeleton Lord 66 /
++        巨像 90；Boss（Kaeman）不走这条 —— 击破 Boss 的那一下不清屏。
++        """
++        if isinstance(enemy, Boss):
++            return 0.0
++        return enemy.size * CLEAR_RADIUS_PER_SIZE
+*** End Patch

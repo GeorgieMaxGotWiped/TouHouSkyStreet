@@ -1,0 +1,9 @@
+*** Begin Patch
+*** Update File: src/stages/stage6.py
+@@
+-HUSK_FORMATION_STEP = 40.0      # 队形里每往里 / 往下走一档就低这么多
++HUSK_FORMATION_STEP = 40.0      # 队形里每往里 / 往下走一档就低这么多
++
++# 击破清弹：小怪被击破时炸掉周围这个半径内的敌弹，半径按体型给（判定半径 × 3）
++CLEAR_RADIUS_PER_SIZE = 3.0
+*** End Patch

@@ -13,6 +13,7 @@ import pygame
 
 from src.engine import settings as cfg
 from src.engine import boss_art
+from src.engine import hires
 from src.engine.collision import point_segment_distance
 from src.engine.pseudo3d import Pseudo3DFloor
 from src.entities.boss import Boss, SpellCard
@@ -1077,8 +1078,8 @@ def _spirit_zoo_draw_trail(screen, trail, color, offset_x, offset_y):
     """Wolf/Rabbit 的幽魂拖尾，直接用同心圆表现残影。"""
     for i, (x, y) in enumerate(trail):
         r = 2 + i * 1.1
-        pygame.draw.circle(screen, color,
-                           (int(x + offset_x), int(y + offset_y)), int(r), 1)
+        hires.entity_circle(screen, color,
+                            (int(x + offset_x), int(y + offset_y)), int(r), 1)
 
 
 def _spirit_zoo_draw_bear(screen, bear, offset_x, offset_y):
@@ -1129,22 +1130,27 @@ def _spirit_zoo_draw_hazards(screen, boss, offset_x=0, offset_y=0):
         y = int(mine["y"] + offset_y)
         age = mine["age"]
         if age < mine_spec["warn"]:
+            warn_r = int(10 + age * 0.55)
+            mine_fx = hires.entity_effect(screen, (x - warn_r - 2, y - warn_r - 2),
+                                          (warn_r * 2 + 4, warn_r * 2 + 4))
             if (age // 6) % 2 == 0:
-                pygame.draw.circle(screen, (190, 110, 255), (x, y), 3, 0)
-            pygame.draw.circle(screen, (190, 110, 255), (x, y),
-                               int(10 + age * 0.55), 1)
+                mine_fx.circle((190, 110, 255), (x, y), 3, 0)
+            mine_fx.circle((190, 110, 255), (x, y), warn_r, 1)
+            mine_fx.commit()
         else:
             color = (225, 120, 255) if mine.get("fuse", -1) >= 0 else (150, 90, 235)
             base_r = 15 + math.sin(age * 0.06) * 2
+            mine_fx = hires.entity_effect(screen, (x - base_r - 10, y - base_r - 10),
+                                          (base_r * 2 + 20, base_r * 2 + 20))
             for ring in range(3):
-                pygame.draw.circle(screen, color, (x, y),
-                                   int(base_r + ring * 4), 1)
+                mine_fx.circle(color, (x, y), int(base_r + ring * 4), 1)
             pts = []
             for i in range(6):
                 ang = age * 0.05 + i * math.tau / 6 - math.pi / 2
                 pts.append((x + math.cos(ang) * base_r,
                             y + math.sin(ang) * base_r))
-            pygame.draw.polygon(screen, (185, 125, 255), pts, 1)
+            mine_fx.polygon((185, 125, 255), pts, 1)
+            mine_fx.commit()
 
     rabbit_spec = _SPIRIT_ZOO["rabbit"]
     for rec in state["animals"]:
@@ -1155,9 +1161,12 @@ def _spirit_zoo_draw_hazards(screen, boss, offset_x=0, offset_y=0):
             y1 = int(rec["lane_y"] + offset_y)
             x2 = int(rec["end_x"] + offset_x)
             y2 = int(rec["lane_y"] + offset_y)
-            pygame.draw.line(screen, (95, 62, 135), (x1, y1), (x2, y2), 7)
-            pygame.draw.line(screen, (205, 170, 255), (x1, y1), (x2, y2), 2)
-            pygame.draw.circle(screen, (225, 190, 255), (x2, y2), 5, 1)
+            dash = hires.entity_effect(screen, (min(x1, x2) - 5, y1 - 5),
+                                       (abs(x2 - x1) + 10, 10))
+            dash.line((95, 62, 135), (x1, y1), (x2, y2), 7)
+            dash.line((205, 170, 255), (x1, y1), (x2, y2), 2)
+            dash.circle((225, 190, 255), (x2, y2), 5, 1)
+            dash.commit()
 
     sheep_spec = _SPIRIT_ZOO["sheep"]
     for rec in state["animals"]:
@@ -1168,25 +1177,30 @@ def _spirit_zoo_draw_hazards(screen, boss, offset_x=0, offset_y=0):
             y = int(rec["y"] + offset_y)
             pulse = int(sheep_spec["explode_distance"]
                         + math.sin(rec["age"] * 0.25) * 6)
-            pygame.draw.circle(screen, (220, 125, 255), (x, y), pulse, 2)
-            pygame.draw.circle(screen, (130, 90, 220), (x, y), pulse, 1)
+            sheep_fx = hires.entity_effect(screen, (x - pulse - 3, y - pulse - 3),
+                                           (pulse * 2 + 6, pulse * 2 + 6))
+            sheep_fx.circle((220, 125, 255), (x, y), pulse, 2)
+            sheep_fx.circle((130, 90, 220), (x, y), pulse, 1)
+            sheep_fx.commit()
 
     bear = state.get("bear")
     if bear is not None and bear["phase"] == "aim":
         x = int(bear["x"] + offset_x)
         top = int(bear["y"] + 34 + offset_y)
         bottom = int(cfg.BATTLE_AREA_HEIGHT - 10 + offset_y)
-        pygame.draw.line(screen, (95, 65, 145), (x, top), (x, bottom), 9)
-        pygame.draw.line(screen, (235, 210, 255), (x, top), (x, bottom), 3)
+        aim = hires.entity_effect(screen, (x - 5, top), (10, bottom - top))
+        aim.line((95, 65, 145), (x, top), (x, bottom), 9)
+        aim.line((235, 210, 255), (x, top), (x, bottom), 3)
         for yy in range(top, bottom, 18):
-            pygame.draw.circle(screen, (240, 220, 255), (x, yy), 2, 0)
+            aim.circle((240, 220, 255), (x, yy), 2, 0)
+        aim.commit()
 
     for fx in state.get("fx", []):
         t = fx["age"] / float(max(1, fx["max_age"]))
         radius = int(fx["radius"] + t * 20)
-        pygame.draw.circle(screen, fx["color"],
-                           (int(fx["x"] + offset_x), int(fx["y"] + offset_y)),
-                           max(1, radius), 2)
+        hires.entity_circle(screen, fx["color"],
+                            (int(fx["x"] + offset_x), int(fx["y"] + offset_y)),
+                            max(1, radius), 2)
 
 
 def spell_livid_shadowstep(boss, bullet_manager, timer, dt, player_x=0, player_y=0):
@@ -1241,9 +1255,16 @@ _LIVID_ITEM_FILES = {
 _livid_clone_sprite_cache = {}
 
 
-def _get_livid_clone_sprite(height):
-    if height in _livid_clone_sprite_cache:
-        return _livid_clone_sprite_cache[height]
+def _get_livid_clone_sprite(height, sharp=False):
+    """加载 Livid 分身贴图（按目标高度等比缩放并缓存）
+
+    sharp=True 时按渲染倍率加载：分身是与 Boss 本体同级的战斗区实体，贴图若留在
+    1x，站在本体旁边会明显发糊。缓存键带上倍率，另一种倍率下各留一份。
+    """
+    factor = hires.scale() if sharp else 1
+    key = (height, factor)
+    if key in _livid_clone_sprite_cache:
+        return _livid_clone_sprite_cache[key]
     sprite = None
     try:
         image = boss_art.load_sprite(cfg.STAGE5_LIVID_BOSS_SPRITE)
@@ -1251,18 +1272,23 @@ def _get_livid_clone_sprite(height):
             raise ValueError("Livid sprite unavailable")
         w, h = image.get_size()
         new_w = max(1, int(round(w * height / h)))
-        sprite = pygame.transform.smoothscale(image, (new_w, height))
+        if factor > 1:
+            sprite = hires.scaled_image(image, (new_w, height), factor)
+        else:
+            sprite = pygame.transform.smoothscale(image, (new_w, height))
     except Exception as exc:
         print(f"[Stage5] Failed to load Livid clone sprite: {exc}")
-    _livid_clone_sprite_cache[height] = sprite
+    _livid_clone_sprite_cache[key] = sprite
     return sprite
 
 
 _livid_item_sprite_cache = {}
 
 
-def _get_livid_item_sprite(item_name, height=30):
-    key = (item_name, height)
+def _get_livid_item_sprite(item_name, height=30, sharp=False):
+    """加载分身脚下那件道具的贴图（sharp 同 _get_livid_clone_sprite）"""
+    factor = hires.scale() if sharp else 1
+    key = (item_name, height, factor)
     if key in _livid_item_sprite_cache:
         return _livid_item_sprite_cache[key]
     sprite = None
@@ -1272,7 +1298,10 @@ def _get_livid_item_sprite(item_name, height=30):
         image = pygame.image.load(path).convert_alpha()
         w, h = image.get_size()
         new_w = max(1, int(round(w * height / h)))
-        sprite = pygame.transform.smoothscale(image, (new_w, height))
+        if factor > 1:
+            sprite = hires.scaled_image(image, (new_w, height), factor)
+        else:
+            sprite = pygame.transform.smoothscale(image, (new_w, height))
     except Exception as exc:
         print(f"[Stage5] Failed to load Livid item sprite {path}: {exc}")
     _livid_item_sprite_cache[key] = sprite
@@ -1282,18 +1311,23 @@ def _get_livid_item_sprite(item_name, height=30):
 _livid_glow_cache = {}
 
 
-def _get_livid_glow(color, radius):
-    key = (color, radius)
+def _get_livid_glow(color, radius, sharp=False):
+    """分身 / 本体的柔光圆（按渲染倍率作画并缓存，缓存键带倍率）
+
+    同名次同心圆叠出来的柔光在 3x 下放大成 3px 一级的台阶，所以照样按倍率画。
+    """
+    factor = hires.scale() if sharp else 1
+    key = (color, radius, factor)
     if key in _livid_glow_cache:
         return _livid_glow_cache[key]
     outer = max(4, int(radius * 2))
     size = outer * 2 + 12
-    surf = pygame.Surface((size, size), pygame.SRCALPHA)
+    surf = hires.panel((size, size), factor)
     cx = cy = size // 2
     for r in range(outer, 0, -1):
         t = r / float(outer)
         alpha = int(120 * ((1.0 - t) ** 1.35))
-        pygame.draw.circle(surf, (color[0], color[1], color[2], alpha), (cx, cy), r)
+        surf.hi_circle((color[0], color[1], color[2], alpha), (cx, cy), r)
     _livid_glow_cache[key] = surf
     return surf
 
@@ -1301,12 +1335,15 @@ def _get_livid_glow(color, radius):
 _livid_top_glow_cache = {}
 
 
-def _get_livid_top_glow(color):
-    if color in _livid_top_glow_cache:
-        return _livid_top_glow_cache[color]
+def _get_livid_top_glow(color, sharp=False):
+    """场地顶端那层椭圆光罩（按渲染倍率作画并缓存）"""
+    factor = hires.scale() if sharp else 1
+    key = (color, factor)
+    if key in _livid_top_glow_cache:
+        return _livid_top_glow_cache[key]
     width = cfg.BATTLE_AREA_WIDTH
     height = 118
-    layer = pygame.Surface((width, height), pygame.SRCALPHA)
+    layer = hires.panel((width, height), factor)
     cx = width // 2
     cy = 24
     for r in range(120, 0, -1):
@@ -1314,8 +1351,8 @@ def _get_livid_top_glow(color):
         alpha = int(115 * ((1.0 - t) ** 1.35))
         rect = (cx - int(r * 3.0), cy - int(r * 0.85),
                 int(r * 6.0), int(r * 1.7))
-        pygame.draw.ellipse(layer, (color[0], color[1], color[2], alpha), rect)
-    _livid_top_glow_cache[color] = layer
+        layer.hi_ellipse((color[0], color[1], color[2], alpha), rect)
+    _livid_top_glow_cache[key] = layer
     return layer
 
 
@@ -1369,7 +1406,9 @@ class _LividClone:
             return False
         self.hp -= damage * self.boss.spell_resistance
         if self.hp <= 0:
+            self.hp = 0.0
             self.alive = False
+            self.state["alive"] = False
             _livid_heal_from_fake(self.boss)
         return False
 
@@ -1377,16 +1416,21 @@ class _LividClone:
         px = int(self.x + offset_x)
         py = int(self.y + offset_y)
         state = self.state
-        glow = _get_livid_glow(state["color"], 40)
-        screen.blit(glow, (px - glow.get_width() // 2, py - glow.get_height() // 2))
-        sprite = _get_livid_clone_sprite(_LIVID_CLONE_SPRITE_HEIGHT)
+        sharp = hires.entity_factor(screen) > 1
+        glow = _get_livid_glow(state["color"], 40, sharp)
+        hires.blit_entity(screen, glow,
+                          (px - glow.get_width() // 2, py - glow.get_height() // 2))
+        sprite = _get_livid_clone_sprite(_LIVID_CLONE_SPRITE_HEIGHT, sharp)
         if sprite is not None:
-            screen.blit(sprite, (px - sprite.get_width() // 2, py - sprite.get_height() // 2))
-        item_sprite = _get_livid_item_sprite(state["item"], 30)
+            hires.blit_entity(screen, sprite,
+                              (px - sprite.get_width() // 2,
+                               py - sprite.get_height() // 2))
+        item_sprite = _get_livid_item_sprite(state["item"], 30, sharp)
         if item_sprite is not None:
             bob = int(math.sin(self.age * 0.10) * 3)
             foot_y = py + int(_LIVID_CLONE_SPRITE_HEIGHT * 0.55)
-            screen.blit(item_sprite, (px - item_sprite.get_width() // 2, foot_y + bob))
+            hires.blit_entity(screen, item_sprite,
+                              (px - item_sprite.get_width() // 2, foot_y + bob))
 
 
 def _livid_eightfold_init(boss):
@@ -1429,6 +1473,7 @@ def _livid_eightfold_init(boss):
             "fire_seed": random.randrange(0, 240),
             "shadow_steps": 0,
             "shadow_tick": 0,
+            "alive": True,
         })
     boss.livid_states = states
     boss.livid_clones = []
@@ -1577,6 +1622,8 @@ def spell_livid_eightfold_existence(boss, bullet_manager, timer, dt, player_x=0,
         return
 
     for state in boss.livid_states:
+        if not state.get("alive", True):
+            continue
         _livid_update_position(state, timer, dt)
         _livid_entity_attack(boss, bullet_manager, state, timer, dt, player_x, player_y)
     _livid_sync_clones(boss)
@@ -1623,9 +1670,13 @@ _frenzy_crystal_sprite_cache = {}
 _frenzy_crystal_sprite_attempted = set()
 
 
-def _get_frenzy_crystal_sprite(target_height=40):
-    """加载 power crystal 贴图（缩放并缓存）；失败返回 None。"""
-    key = target_height
+def _get_frenzy_crystal_sprite(target_height=40, sharp=False):
+    """加载 power crystal 贴图（缩放并缓存）；失败返回 None。
+
+    sharp=True 时按渲染倍率加载：水晶是与 Boss 同级的战斗区实体。
+    """
+    factor = hires.scale() if sharp else 1
+    key = (target_height, factor)
     if key in _frenzy_crystal_sprite_attempted:
         return _frenzy_crystal_sprite_cache.get(key)
     _frenzy_crystal_sprite_attempted.add(key)
@@ -1635,11 +1686,21 @@ def _get_frenzy_crystal_sprite(target_height=40):
         w, h = img.get_size()
         if h > 0:
             new_w = max(1, round(w * target_height / h))
-            sprite = pygame.transform.smoothscale(img, (new_w, target_height))
+            if factor > 1:
+                sprite = hires.scaled_image(img, (new_w, target_height), factor)
+            else:
+                sprite = pygame.transform.smoothscale(img, (new_w, target_height))
     except Exception as exc:
         print(f"[Stage5] Failed to load frenzy crystal sprite: {exc}")
     _frenzy_crystal_sprite_cache[key] = sprite
     return sprite
+
+
+def _bake_crystal_glow(target, k):
+    """power crystal 的柔光（预烤面板：一块 52x52 的径向光斑，逐帧只贴一次）"""
+    glow_r = 26
+    target.hi_circle((150, 235, 255, 70), (glow_r, glow_r), glow_r)
+    target.hi_circle((215, 250, 255, 150), (glow_r, glow_r), max(4, glow_r - 12))
 
 
 def _frenzy_init(boss):
@@ -2492,6 +2553,12 @@ def spell_necron_nuclear_frenzy(boss, bullet_manager, timer, dt, player_x=0, pla
 
 
 _NUKE_SUN_BASE_CACHE = None
+# 太阳每帧要从 1024 底色 smoothscale 到当前直径（3x 下 600~1500px，实测 2ms/帧）。
+# 半径增长很慢（0.1~0.33px/帧），取整后的直径常常连续好几帧不变 —— 记住最近几个
+# 直径就够了，不必每帧重算，画面逐像素相同。
+_NUKE_SUN_SCALE_CACHE = {}
+_NUKE_SUN_SCALE_MAX = 4
+_NUKE_SUN_SCALE_STEP = 6        # 倍率打开时直径量化到几逻辑像素一档（见 _draw_necron_nuclear）
 
 
 def _get_necron_sun_base():
@@ -2533,6 +2600,57 @@ def _get_necron_sun_base():
 # ---------------------------------------------------------------------------
 # Stage 5：BOSS RUSH 状态机
 # ---------------------------------------------------------------------------
+
+def _draw_lightning_warning(screen, color, x, top, height, bottom, alpha):
+    """一条雷电预警：15px 一段的虚线车道 + 地面落点椭圆标记
+
+    虚线面板只有 7xheight 宽（不随倍率放大面积），比整屏面板省得多；落点标记单独
+    一小块。两者都按渲染倍率作画，预警线不再是一排 3 像素宽的锯齿。
+    """
+    lane = hires.entity_effect(screen, (x - 3, top), (7, height))
+    for yy in range(0, height, 15):
+        seg = min(9, height - yy)
+        lane.line((color[0], color[1], color[2], alpha), (x, top + yy),
+                  (x, top + yy + seg), 2)
+    lane.commit()
+    marker = hires.entity_effect(screen, (x - 14, bottom - 5), (28, 12))
+    marker.ellipse((color[0], color[1], color[2], alpha // 3),
+                   (x - 11, bottom - 4, 22, 10), 0)
+    marker.ellipse((color[0], color[1], color[2], alpha),
+                   (x - 11, bottom - 4, 22, 10), 2)
+    marker.commit()
+
+
+def _bake_charge_shade(safe_r, holes):
+    """预烤「全屏压暗 + 安全区镂空」的遮罩（镂空处 alpha=0，其余不透明）
+
+    遮罩成型后与蓄力进度无关（进度只是整体透明度，贴图时用显卡调制），所以只按
+    「存活柱子集合」预烤一次。镂空直接用 alpha=0 的圆写掉 —— pygame.draw 是覆写
+    而不是混合，正好当橡皮用，不必像旧代码那样再拼一张 RGB_SUB 的孔位图。
+    没有预烤缓存时（关掉显卡路径的对比模式）退回 1x 临时面板逐帧重画。
+    """
+    def build(target, k):
+        target.fill((8, 6, 26, 255))
+        for hx, hy in holes:
+            target.hi_circle((0, 0, 0, 0), (hx, hy), safe_r)
+    return build
+
+
+def _draw_charge_shade(screen, giga, safe_r, origin, alpha):
+    """Giga Lightning 蓄力期的全屏压暗（存活避雷柱下方保持通透）"""
+    holes = tuple((int(p["x"]), int(p["y"]))
+                  for p in giga["pillars"] if p["alive"])
+    full = (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT)
+    baked = getattr(screen, "baked", None)
+    if baked is not None and hires.entity_factor(screen) > 1:
+        shade = baked(("storm_charge_shade", safe_r, holes), full,
+                      _bake_charge_shade(safe_r, holes))
+    else:
+        shade = hires.panel(full, 1)
+        _bake_charge_shade(safe_r, holes)(shade, 1)
+    if shade is not None:
+        hires.blit_fg(screen, shade, origin, alpha=alpha)
+
 
 class Stage5_WitherLords(Stage):
     """Stage 5: The Catacombs - The Wither Lords（BOSS RUSH）"""
@@ -2586,6 +2704,14 @@ class Stage5_WitherLords(Stage):
 
     def setup_mid_boss(self):
         pass
+
+    def warm_spell_effects(self):
+        """焚符「Nuclear Frenzy」的白热太阳底图（1024×1024 程序化径向渐变）
+
+        原本等到开符后第 2 帧才第一次现算：网格运算 + 4 次 numpy.interp 实测 44ms，
+        是一整帧的卡顿。载入界面提前建好，开符帧只剩一次缩放。
+        """
+        return 1 if _get_necron_sun_base() is not None else 0
 
     def setup_boss(self):
         pass
@@ -2933,19 +3059,22 @@ class Stage5_WitherLords(Stage):
             if guardian.alive:
                 guardian.draw(screen, offset_x, offset_y)
         if getattr(boss, "livid_active", False):
+            sharp = hires.entity_factor(screen) > 1
             for clone in getattr(boss, "livid_clones", []):
                 if clone.alive:
                     clone.draw(screen, offset_x, offset_y)
             real_state = boss.livid_states[boss.livid_real_index]
-            glow = _get_livid_glow(real_state["color"], 44)
-            screen.blit(glow, (int(boss.x + offset_x) - glow.get_width() // 2,
+            glow = _get_livid_glow(real_state["color"], 44, sharp)
+            hires.blit_entity(screen, glow,
+                              (int(boss.x + offset_x) - glow.get_width() // 2,
                                int(boss.y + offset_y) - glow.get_height() // 2))
-            real_item = _get_livid_item_sprite(real_state["item"], 30)
+            real_item = _get_livid_item_sprite(real_state["item"], 30, sharp)
             if real_item is not None:
                 bob = int(math.sin(self.timer * 0.10) * 3)
                 foot_y = int(boss.y + offset_y + _LIVID_CLONE_SPRITE_HEIGHT * 0.55)
-                screen.blit(real_item, (int(boss.x + offset_x) - real_item.get_width() // 2,
-                                        foot_y + bob))
+                hires.blit_entity(screen, real_item,
+                                  (int(boss.x + offset_x) - real_item.get_width() // 2,
+                                   foot_y + bob))
         self._draw_professor_lightning_warnings(screen, offset_x, offset_y)
         _spirit_zoo_draw_animals(screen, boss, offset_x, offset_y)
         _spirit_zoo_draw_hazards(screen, boss, offset_x, offset_y)
@@ -2982,19 +3111,41 @@ class Stage5_WitherLords(Stage):
 
         base = _get_necron_sun_base()
         if base is None:
-            pygame.draw.circle(screen, cfg.COLOR_WHITE, (cx, cy), int(sun_r))
-            pygame.draw.circle(screen, (255, 120, 40), (cx, cy), int(sun_r), 3)
+            hires.entity_circle(screen, cfg.COLOR_WHITE, (cx, cy), int(sun_r),
+                                fg=True)
+            hires.entity_circle(screen, (255, 120, 40), (cx, cy), int(sun_r), 3,
+                                fg=True)
             return
-        sprite = pygame.transform.smoothscale(base, (diameter, diameter))
-        screen.blit(sprite, (int(cx - diameter / 2), int(cy - diameter / 2)))
+        # 太阳按渲染倍率出图（否则 1024 底色缩出来的贴图会被画布放大成糊团）。代价是
+        # 每换一个直径就要重采样一次：3x、直径 600 时一次约 7.7ms，而直径每帧都在涨。
+        # 所以倍率打开时把直径量化到 _NUKE_SUN_SCALE_STEP 一格 —— 柔和辉光上 6 逻辑
+        # 像素的台阶看不出来，重采样频率却降到十几帧一次。1x 时量化会改动旧画面，故
+        # 只在有倍率时启用。倍率图很大，只留当前这一档（太阳半径单调增长，回不到更小
+        # 的档位，留着旧档只会白占几十 MB）。
+        factor = hires.entity_factor(screen)
+        step = _NUKE_SUN_SCALE_STEP if factor > 1 else 1
+        key_d = ((diameter + step - 1) // step) * step
+        cache_key = (key_d, factor)
+        sprite = _NUKE_SUN_SCALE_CACHE.get(cache_key)
+        if sprite is None:
+            if factor > 1:
+                sprite = hires.scaled_image(base, (key_d, key_d), factor)
+                _NUKE_SUN_SCALE_CACHE.clear()
+            else:
+                sprite = pygame.transform.smoothscale(base, (key_d, key_d))
+            if len(_NUKE_SUN_SCALE_CACHE) >= _NUKE_SUN_SCALE_MAX:
+                _NUKE_SUN_SCALE_CACHE.pop(next(iter(_NUKE_SUN_SCALE_CACHE)))
+            _NUKE_SUN_SCALE_CACHE[cache_key] = sprite
+        hires.blit_fg(screen, sprite,
+                      (int(cx - key_d / 2), int(cy - key_d / 2)))
 
     def _draw_livid_top_glow(self, screen, offset_x=0, offset_y=0):
         boss = self.boss
         if boss is None or not getattr(boss, "livid_active", False):
             return
         color = boss.livid_states[boss.livid_real_index]["color"]
-        layer = _get_livid_top_glow(color)
-        screen.blit(layer, (offset_x, offset_y))
+        layer = _get_livid_top_glow(color, hires.entity_factor(screen) > 1)
+        hires.blit_fg(screen, layer, (offset_x, offset_y))
 
 
     def _draw_frenzy_effects(self, screen, offset_x=0, offset_y=0):
@@ -3018,6 +3169,8 @@ class Stage5_WitherLords(Stage):
         rot = now * 0.0022
         pulse = 0.82 + 0.18 * math.sin(now * 0.006)
         rr = int(r * pulse)
+        fx = hires.entity_effect(screen, (px - rr - 4, py - rr - 4),
+                                 (rr * 2 + 8, rr * 2 + 8))
         for i in range(6):
             a0 = rot + i * math.tau / 6
             a1 = rot + (i + 1) * math.tau / 6
@@ -3025,10 +3178,10 @@ class Stage5_WitherLords(Stage):
             y0 = py + math.sin(a0) * rr
             x1 = px + math.cos(a1) * rr
             y1 = py + math.sin(a1) * rr
-            pygame.draw.line(screen, (255, 205, 130),
-                             (int(x0), int(y0)), (int(x1), int(y1)), 2)
-        pygame.draw.circle(screen, (255, 178, 96), (px, py), rr, 1)
-        pygame.draw.circle(screen, (255, 232, 190), (px, py), max(3, rr - 8), 1)
+            fx.line((255, 205, 130), (int(x0), int(y0)), (int(x1), int(y1)), 2)
+        fx.circle((255, 178, 96), (px, py), rr, 1)
+        fx.circle((255, 232, 190), (px, py), max(3, rr - 8), 1)
+        fx.commit()
 
     def _draw_frenzy_tnts(self, screen, boss, offset_x, offset_y):
         """TNT 标记：红砖方块 + 引信火花，引信末期闪光预告爆炸。"""
@@ -3037,25 +3190,28 @@ class Stage5_WitherLords(Stage):
             py = int(tnt["y"] + offset_y)
             prog = tnt["age"] / max(1, tnt["delay"])
             s = 16
-            rect = pygame.Rect(px - s // 2, py - s // 2, s, s)
-            pygame.draw.rect(screen, (168, 60, 42), rect)
-            pygame.draw.rect(screen, (110, 32, 24), rect, 2)
-            pygame.draw.line(screen, (215, 88, 62), (px - s // 2 + 3, py - s // 2 + 2),
-                             (px + s // 2 - 3, py - s // 2 + 2), 2)
-            pygame.draw.line(screen, (215, 88, 62), (px - s // 2 + 3, py + s // 2 - 2),
-                             (px + s // 2 - 3, py + s // 2 - 2), 2)
+            rect = (px - s // 2, py - s // 2, s, s)
+            # 一整块 TNT 画进同一块面板：方块 / 边框 / 引信火花 / 引信末期脉冲圈
+            fx = hires.entity_effect(screen, (px - 22, py - 22), (44, 44))
+            fx.rect((168, 60, 42), rect)
+            fx.rect((110, 32, 24), rect, 2)
+            fx.line((215, 88, 62), (px - s // 2 + 3, py - s // 2 + 2),
+                    (px + s // 2 - 3, py - s // 2 + 2), 2)
+            fx.line((215, 88, 62), (px - s // 2 + 3, py + s // 2 - 2),
+                    (px + s // 2 - 3, py + s // 2 - 2), 2)
             # 引信火花
             if (pygame.time.get_ticks() * 0.05) % 4 < 2:
-                pygame.draw.circle(screen, (255, 214, 100), (px, py - 8), 2)
+                fx.circle((255, 214, 100), (px, py - 8), 2)
             for k in range(2):
                 a = tnt["seed"] + k * math.pi + tnt["age"] * 0.35
                 sx = px + math.cos(a) * 9
                 sy = py - 7 + math.sin(a) * 3
-                pygame.draw.circle(screen, (255, 190, 80), (int(sx), int(sy)), 1)
+                fx.circle((255, 190, 80), (int(sx), int(sy)), 1)
             # 引信末期：白色脉冲圈预告爆炸
             if prog > 0.72:
                 blink = 0.5 + 0.5 * math.sin(pygame.time.get_ticks() * 0.03)
-                pygame.draw.circle(screen, (255, 240, 200), (px, py), int(12 + blink * 8), 1)
+                fx.circle((255, 240, 200), (px, py), int(12 + blink * 8), 1)
+            fx.commit()
 
     def _draw_frenzy_crystals(self, screen, boss, offset_x, offset_y):
         """power crystal：发光晶簇 + 拾取圈，引导玩家收集。"""
@@ -3068,15 +3224,18 @@ class Stage5_WitherLords(Stage):
             t = now * 0.004
             pulse = 0.75 + 0.25 * math.sin(t + crystal["sway_phase"])
             glow_r = 26
-            glow = pygame.Surface((glow_r * 2, glow_r * 2), pygame.SRCALPHA)
-            pygame.draw.circle(glow, (150, 235, 255, 70), (glow_r, glow_r), glow_r)
-            pygame.draw.circle(glow, (215, 250, 255, 150), (glow_r, glow_r), max(4, glow_r - 12))
-            screen.blit(glow, (px - glow_r, py - glow_r))
-            sprite = _get_frenzy_crystal_sprite()
+            sharp = hires.entity_factor(screen) > 1
+            hires.baked_entity(screen, ("frenzy_crystal_glow", glow_r),
+                               (px - glow_r, py - glow_r),
+                               (glow_r * 2, glow_r * 2), _bake_crystal_glow)
+            sprite = _get_frenzy_crystal_sprite(sharp=sharp)
             if sprite is not None:
-                img = pygame.transform.rotate(sprite, math.sin(t * 0.9 + crystal["sway_phase"]) * 12)
-                screen.blit(img, (px - img.get_width() // 2, py - img.get_height() // 2))
-            pygame.draw.circle(screen, (190, 240, 255), (px, py), int(18 * pulse), 1)
+                img = hires.rotate(sprite, math.sin(t * 0.9 + crystal["sway_phase"]) * 12)
+                hires.blit_entity(screen, img,
+                                  (px - img.get_width() // 2,
+                                   py - img.get_height() // 2))
+            hires.entity_circle(screen, (190, 240, 255), (px, py),
+                                int(18 * pulse), 1)
 
     def _draw_frenzy_shockwaves(self, screen, boss, offset_x, offset_y):
         """冲击波视觉环：TNT 爆炸 / 大型冲击波 / 水晶拾取闪光。"""
@@ -3086,8 +3245,12 @@ class Stage5_WitherLords(Stage):
             col = wave["color"]
             cx = int(wave["x"] + offset_x)
             cy = int(wave["y"] + offset_y)
-            pygame.draw.circle(screen, col, (cx, cy), r, wave["width"])
-            pygame.draw.circle(screen, col, (cx, cy), max(2, r - 8), 1)
+            ink = max(1, int(wave["width"]))
+            fx = hires.entity_effect(screen, (cx - r - ink, cy - r - ink),
+                                     (r * 2 + ink * 2, r * 2 + ink * 2))
+            fx.circle(col, (cx, cy), r, ink)
+            fx.circle(col, (cx, cy), max(2, r - 8), 1)
+            fx.commit()
 
     def _draw_frenzy_laser(self, screen, offset_x=0, offset_y=0):
         """解封激光：回中时的预警线 + 命中后贯穿中央的竖直红色激光。"""
@@ -3103,9 +3266,10 @@ class Stage5_WitherLords(Stage):
             x = int(cx + offset_x)
             top = int(offset_y + 6)
             bottom = int(offset_y + 116)
-            layer = pygame.Surface((4, bottom - top), pygame.SRCALPHA)
-            pygame.draw.line(layer, (255, 90, 70, alpha), (2, 0), (2, bottom - top), 2)
-            screen.blit(layer, (x - 2, top))
+            fx = hires.entity_effect(screen, (x - 2, top), (4, bottom - top),
+                                     fg=True)
+            fx.line((255, 90, 70), (x, top), (x, bottom), 2)
+            fx.commit(alpha=alpha)
             return
         if laser is None:
             return
@@ -3121,10 +3285,10 @@ class Stage5_WitherLords(Stage):
             fade = max(0.0, (max_age - age) / 12.0)
         height = max(2, bottom - top)
         for w, alpha in ((16, 56), (8, 110), (3, 230)):
-            layer = pygame.Surface((w * 2, height), pygame.SRCALPHA)
-            pygame.draw.line(layer, (255, 64, 48, int(alpha * fade)),
-                             (w, 0), (w, height), w)
-            screen.blit(layer, (x - w, top))
+            fx = hires.entity_effect(screen, (x - w, top), (w * 2, height),
+                                     fg=True)
+            fx.line((255, 64, 48), (x, top), (x, top + height), w)
+            fx.commit(alpha=int(alpha * fade))
 
     def draw_foreground(self, screen, offset_x=0, offset_y=0):
         boss = self.boss
@@ -3141,10 +3305,11 @@ class Stage5_WitherLords(Stage):
         self._draw_necron_nuclear(screen, offset_x, offset_y)
         if getattr(boss, "livid_blackout_frames", 0) <= 0:
             return
-        overlay = pygame.Surface((cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
-                                 pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 255))
-        screen.blit(overlay, (offset_x, offset_y))
+        # 纯色黑幕与倍率无关，缺的只是顺序：要盖住弹幕、也要盖住同一前景层的
+        # 柔光 / 激光 / 太阳，所以走前景层的纯色填充。
+        hires.fg_rect(screen, (0, 0, 0, 255),
+                      (offset_x, offset_y, cfg.BATTLE_AREA_WIDTH,
+                       cfg.BATTLE_AREA_HEIGHT))
         boss.livid_blackout_frames -= 1
         if boss.livid_blackout_frames == 0 and getattr(boss, "livid_swap_pending", False):
             _livid_swap_positions(boss)
@@ -3166,19 +3331,8 @@ class Stage5_WitherLords(Stage):
             alpha = max(80, min(150, alpha))
             x = int(warning["x"] + offset_x)
 
-            layer = pygame.Surface((7, height), pygame.SRCALPHA)
-            for yy in range(0, height, 15):
-                seg = min(9, height - yy)
-                pygame.draw.line(layer, (165, 238, 214, alpha),
-                                 (3, yy), (3, yy + seg), 2)
-            screen.blit(layer, (x - 3, top))
-
-            marker = pygame.Surface((28, 12), pygame.SRCALPHA)
-            pygame.draw.ellipse(marker, (165, 238, 214, alpha // 3),
-                                (3, 1, 22, 10), 0)
-            pygame.draw.ellipse(marker, (165, 238, 214, alpha),
-                                (3, 1, 22, 10), 2)
-            screen.blit(marker, (x - 14, bottom - 5))
+            _draw_lightning_warning(screen, (165, 238, 214), x, top, height,
+                                    bottom, alpha)
 
 
     def _draw_storm_giga(self, screen, offset_x=0, offset_y=0):
@@ -3195,26 +3349,32 @@ class Stage5_WitherLords(Stage):
             py = int(p["y"] + offset_y)
             if p["alive"]:
                 # 地面避雷安全区：浅蓝脉冲光环
-                ring = pygame.Surface((safe_r * 2 + 6, safe_r * 2 + 6), pygame.SRCALPHA)
-                c = safe_r + 3
                 pulse = 0.86 + 0.14 * math.sin(now * 0.012 + p["x"] * 0.05)
-                pygame.draw.circle(ring, (70, 190, 255, 42), (c, c), int(safe_r * pulse), 0)
-                pygame.draw.circle(ring, (140, 220, 255, 150), (c, c), safe_r, 2)
-                pygame.draw.circle(ring, (225, 248, 255, 90), (c, c), safe_r - 5, 1)
-                screen.blit(ring, (px - c, py - c))
+                ring = hires.entity_effect(screen, (px - safe_r - 3, py - safe_r - 3),
+                                           (safe_r * 2 + 6, safe_r * 2 + 6))
+                ring.circle((70, 190, 255, 42), (px, py), int(safe_r * pulse), 0)
+                ring.circle((140, 220, 255, 150), (px, py), safe_r, 2)
+                ring.circle((225, 248, 255, 90), (px, py), safe_r - 5, 1)
+                ring.commit()
                 # 金属避雷杆与顶端雷球
                 pole_top = py - 78
-                pygame.draw.line(screen, (96, 116, 148), (px - 3, pole_top), (px - 3, py), 2)
-                pygame.draw.line(screen, (170, 195, 225), (px, pole_top), (px, py), 3)
-                pygame.draw.line(screen, (120, 140, 170), (px + 2, pole_top), (px + 2, py), 2)
                 glow_r = 9 + int(2 * math.sin(now * 0.011 + p["x"] * 0.06))
-                pygame.draw.circle(screen, (150, 210, 255), (px, pole_top), glow_r, 2)
-                pygame.draw.circle(screen, (225, 248, 255), (px, pole_top), 4, 0)
+                pole = hires.entity_effect(screen, (px - glow_r - 2, pole_top - glow_r - 2),
+                                           (glow_r * 2 + 4, py - pole_top + glow_r + 4))
+                pole.line((96, 116, 148), (px - 3, pole_top), (px - 3, py), 2)
+                pole.line((170, 195, 225), (px, pole_top), (px, py), 3)
+                pole.line((120, 140, 170), (px + 2, pole_top), (px + 2, py), 2)
+                pole.circle((150, 210, 255), (px, pole_top), glow_r, 2)
+                pole.circle((225, 248, 255), (px, pole_top), 4, 0)
+                pole.commit()
             else:
                 # 被破坏：焦黑残桩 + 地面焦痕
-                pygame.draw.rect(screen, (46, 50, 60), (px - 3, py - 14, 6, 14))
-                pygame.draw.ellipse(screen, (34, 38, 46), (px - 17, py - 7, 34, 12))
-                pygame.draw.ellipse(screen, (20, 22, 28), (px - 12, py - 4, 24, 8))
+                stump = hires.entity_effect(screen, (px - 18, py - 15),
+                                            (36, 22))
+                stump.rect((46, 50, 60), (px - 3, py - 14, 6, 14))
+                stump.ellipse((34, 38, 46), (px - 17, py - 7, 34, 12))
+                stump.ellipse((20, 22, 28), (px - 12, py - 4, 24, 8))
+                stump.commit()
 
         # 柱子被破坏瞬间的电光
         if giga.get("pillar_flash", 0) > 0:
@@ -3224,10 +3384,10 @@ class Stage5_WitherLords(Stage):
                 px = int(p["x"] + offset_x)
                 py = int(p["y"] + offset_y) - 78
                 alpha = int(150 * giga["pillar_flash"] / float(STORM_GIGA_PILLAR_FLASH))
-                flash = pygame.Surface((46, 46), pygame.SRCALPHA)
-                pygame.draw.circle(flash, (210, 240, 255, alpha), (23, 23), 22, 0)
-                pygame.draw.circle(flash, (255, 255, 255, alpha), (23, 23), 14, 3)
-                screen.blit(flash, (px - 23, py - 23))
+                flash = hires.entity_effect(screen, (px - 23, py - 23), (46, 46))
+                flash.circle((210, 240, 255, alpha), (px, py), 22, 0)
+                flash.circle((255, 255, 255, alpha), (px, py), 14, 3)
+                flash.commit()
 
         # 普通雷击预警：浅蓝虚线车道
         top = offset_y + 14
@@ -3240,15 +3400,8 @@ class Stage5_WitherLords(Stage):
             alpha = int(90 + 50 * fade + 10 * math.sin(age * 0.22))
             alpha = max(80, min(160, alpha))
             x = int(warning["x"] + offset_x)
-            layer = pygame.Surface((7, height), pygame.SRCALPHA)
-            for yy in range(0, height, 15):
-                seg = min(9, height - yy)
-                pygame.draw.line(layer, (150, 220, 255, alpha), (3, yy), (3, yy + seg), 2)
-            screen.blit(layer, (x - 3, top))
-            marker = pygame.Surface((28, 12), pygame.SRCALPHA)
-            pygame.draw.ellipse(marker, (150, 220, 255, alpha // 3), (3, 1, 22, 10), 0)
-            pygame.draw.ellipse(marker, (150, 220, 255, alpha), (3, 1, 22, 10), 2)
-            screen.blit(marker, (x - 14, bottom - 5))
+            _draw_lightning_warning(screen, (150, 220, 255), x, top, height,
+                                    bottom, alpha)
 
         # 无敌电盾：普通雷击 / 蓄力 / 全屏雷击阶段包裹 Storm
         sub = giga.get("sub")
@@ -3256,14 +3409,17 @@ class Stage5_WitherLords(Stage):
             px = int(boss.x + offset_x)
             py = int(boss.y + offset_y)
             r = 30 + int(2 * math.sin(now * 0.02))
+            shield = hires.entity_effect(screen, (px - r - 9, py - r - 9),
+                                         (r * 2 + 18, r * 2 + 18))
             for k in range(10):
                 a0 = now * 0.0032 + k * math.tau / 10
                 x0 = px + math.cos(a0) * r
                 y0 = py + math.sin(a0) * r
                 x1 = px + math.cos(a0 + 0.45) * (r + 7)
                 y1 = py + math.sin(a0 + 0.45) * (r + 7)
-                pygame.draw.line(screen, (140, 220, 255), (x0, y0), (x1, y1), 2)
-                pygame.draw.line(screen, (220, 245, 255), (px, py), (x0, y0), 1)
+                shield.line((140, 220, 255), (x0, y0), (x1, y1), 2)
+                shield.line((220, 245, 255), (px, py), (x0, y0), 1)
+            shield.commit()
 
     def _draw_storm_giga_foreground(self, screen, offset_x=0, offset_y=0):
         """Giga Lightning 蓄力阴影 / 全屏雷击闪光 / 狂暴红环，绘制在弹幕之上。"""
@@ -3280,31 +3436,27 @@ class Stage5_WitherLords(Stage):
             progress = min(1.0, t / float(STORM_GIGA_CHARGE_DURATION))
             # 危险区阴影：全屏压暗，存活避雷柱下方保持通透
             alpha = int(60 + 120 * progress)
-            overlay = pygame.Surface((cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
-                                     pygame.SRCALPHA)
-            overlay.fill((8, 6, 26, alpha))
-            holes = pygame.Surface((cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
-                                   pygame.SRCALPHA)
-            for p in giga["pillars"]:
-                if p["alive"]:
-                    pygame.draw.circle(holes, (0, 0, 0, 255),
-                                       (int(p["x"]), int(p["y"])), safe_r)
-            overlay.blit(holes, (0, 0), special_flags=pygame.BLEND_RGBA_SUB)
-            screen.blit(overlay, (offset_x, offset_y))
+            _draw_charge_shade(screen, giga, safe_r, (offset_x, offset_y), alpha)
             # 顶部蓄力读条
             bar_w = cfg.BATTLE_AREA_WIDTH - 80
             bx = offset_x + 40
             by = offset_y + 10
-            pygame.draw.rect(screen, (30, 40, 60), (bx, by, bar_w, 8))
             fill_w = int(bar_w * progress)
+            bar = hires.entity_effect(screen, (bx - 1, by - 1), (bar_w + 2, 10),
+                                      fg=True)
+            bar.rect((30, 40, 60), (bx, by, bar_w, 8))
             if fill_w > 0:
-                pygame.draw.rect(screen, (120, 210, 255), (bx, by, fill_w, 8))
+                bar.rect((120, 210, 255), (bx, by, fill_w, 8))
+            bar.commit()
             # Storm 蓄力电弧
             px = int(boss.x + offset_x)
             py = int(boss.y + offset_y)
+            arc = hires.entity_effect(screen, (px - 54, py - 54), (108, 108),
+                                      fg=True)
             for k in range(3):
                 r = 34 + k * 8 + int(2 * math.sin(now * 0.02))
-                pygame.draw.circle(screen, (130, 210, 255), (px, py), r, 2)
+                arc.circle((130, 210, 255), (px, py), r, 2)
+            arc.commit()
             # 目标柱子标记（破坏前）
             target = giga.get("target_pillar")
             if (target is not None and 0 <= target < len(giga["pillars"])
@@ -3312,8 +3464,11 @@ class Stage5_WitherLords(Stage):
                 p = giga["pillars"][target]
                 mx = int(p["x"] + offset_x)
                 my = int(p["y"] + offset_y) - 92
-                pygame.draw.line(screen, (255, 120, 90), (mx - 8, my), (mx + 8, my), 3)
-                pygame.draw.line(screen, (255, 120, 90), (mx, my - 8), (mx, my + 8), 3)
+                mark = hires.entity_effect(screen, (mx - 10, my - 10), (20, 20),
+                                           fg=True)
+                mark.line((255, 120, 90), (mx - 8, my), (mx + 8, my), 3)
+                mark.line((255, 120, 90), (mx, my - 8), (mx, my + 8), 3)
+                mark.commit()
 
         elif sub == "strike":
             t = giga["sub_timer"]
@@ -3324,22 +3479,35 @@ class Stage5_WitherLords(Stage):
             screen.blit(overlay, (offset_x, offset_y))
             bolts = giga.get("strike_bolts", [])
             for pts in bolts:
+                if len(pts) < 2:
+                    continue
+                xs = [pt[0] + offset_x for pt in pts]
+                ys = [pt[1] + offset_y for pt in pts]
+                bolt = hires.entity_effect(screen, (min(xs) - 3, min(ys) - 3),
+                                           (max(xs) - min(xs) + 6,
+                                            max(ys) - min(ys) + 6), fg=True)
                 for i in range(len(pts) - 1):
-                    pygame.draw.line(screen, (240, 250, 255),
-                                     (pts[i][0] + offset_x, pts[i][1] + offset_y),
-                                     (pts[i + 1][0] + offset_x, pts[i + 1][1] + offset_y), 3)
-                    pygame.draw.line(screen, (150, 210, 255),
-                                     (pts[i][0] + offset_x, pts[i][1] + offset_y),
-                                     (pts[i + 1][0] + offset_x, pts[i + 1][1] + offset_y), 1)
+                    bolt.line((240, 250, 255),
+                              (pts[i][0] + offset_x, pts[i][1] + offset_y),
+                              (pts[i + 1][0] + offset_x, pts[i + 1][1] + offset_y),
+                              3)
+                    bolt.line((150, 210, 255),
+                              (pts[i][0] + offset_x, pts[i][1] + offset_y),
+                              (pts[i + 1][0] + offset_x, pts[i + 1][1] + offset_y),
+                              1)
+                bolt.commit()
 
         elif sub == "frenzy":
             # 狂暴状态：红色脉冲光环
             px = int(boss.x + offset_x)
             py = int(boss.y + offset_y)
             pulse = 0.8 + 0.2 * math.sin(now * 0.02)
+            frenzy = hires.entity_effect(screen, (px - 44, py - 44), (88, 88),
+                                         fg=True)
             for r, col in ((30, (255, 90, 70)), (42, (255, 150, 90))):
-                pygame.draw.circle(screen, col, (px, py), int(r * pulse), 2)
-            pygame.draw.circle(screen, (255, 60, 50), (px, py), 3, 0)
+                frenzy.circle(col, (px, py), int(r * pulse), 2)
+            frenzy.circle((255, 60, 50), (px, py), 3, 0)
+            frenzy.commit()
 
 
     def _on_current_boss_defeated(self):
@@ -3378,19 +3546,19 @@ class Stage5_WitherLords(Stage):
         self._set_dialogue(
             [
                 ("The Watcher", "终于来了。"),
-                ("魔法使 Mage", "你就是一直在观察我的人？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "你就是一直在观察我的人？"),
                 ("The Watcher", "从你踏入地下城的那一刻起。"),
-                ("魔法使 Mage", "看来，你知道我要找什么。"),
+                (cfg.PLAYER_DIALOGUE_NAME, "看来，你知道我要找什么。"),
                 ("The Watcher", "知道。"),
                 ("The Watcher", "但答案不是靠询问得到的。"),
-                ("魔法使 Mage", "所以？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "所以？"),
                 ("The Watcher", "先证明自己吧。"),
             ],
             {
                 "The Watcher": cfg.STAGE5_WATCHER_BOSS_SPRITE,
-                "魔法使 Mage": cfg.SELF_SPRITE,
+                cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             },
-            {"魔法使 Mage": "left", "The Watcher": "right"},
+            {cfg.PLAYER_DIALOGUE_NAME: "left", "The Watcher": "right"},
             "watcher")
         self.phase = "dialogue"
         self._ramp_background_speed(FINAL_BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)
@@ -3416,7 +3584,7 @@ class Stage5_WitherLords(Stage):
         else:
             lines = [
                 ("The Watcher", "最后一个试炼。"),
-                ("魔法使 Mage", "敏捷？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "敏捷？"),
                 ("The Watcher", "不。"),
                 ("The Watcher", "欺骗。"),
                 ("Livid", "呵。"),
@@ -3427,8 +3595,8 @@ class Stage5_WitherLords(Stage):
             boss_name: boss_portrait,
         }
         if boss_id == "livid":
-            portraits["魔法使 Mage"] = cfg.SELF_SPRITE
-            sides = {"魔法使 Mage": "left", "The Watcher": "right"}
+            portraits[cfg.PLAYER_DIALOGUE_NAME] = cfg.SELF_SPRITE
+            sides = {cfg.PLAYER_DIALOGUE_NAME: "left", "The Watcher": "right"}
         else:
             sides = {"The Watcher": "left"}
         self._set_dialogue(
@@ -3444,17 +3612,17 @@ class Stage5_WitherLords(Stage):
         self._set_dialogue(
             [
                 ("The Watcher", "看来，我已经没有继续观察的必要了。"),
-                ("魔法使 Mage", "这就结束了？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "这就结束了？"),
                 ("The Watcher", "不。"),
                 ("The Watcher", "真正的守门人正在等你。"),
-                ("魔法使 Mage", "Necron？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "Necron？"),
                 ("The Watcher", "去寻找答案吧。"),
             ],
             {
                 "The Watcher": cfg.STAGE5_WATCHER_BOSS_SPRITE,
-                "魔法使 Mage": cfg.SELF_SPRITE,
+                cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             },
-            {"魔法使 Mage": "left", "The Watcher": "right"},
+            {cfg.PLAYER_DIALOGUE_NAME: "left", "The Watcher": "right"},
             "watcher_exit")
         self.phase = "dialogue"
         self._ramp_background_speed(FINAL_BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)
@@ -3465,22 +3633,22 @@ class Stage5_WitherLords(Stage):
             [
                 ("Maxor", "哈哈！"),
                 ("Maxor", "终于来了个有意思的家伙！"),
-                ("魔法使 Mage", "看来，你们已经等我很久了。"),
+                (cfg.PLAYER_DIALOGUE_NAME, "看来，你们已经等我很久了。"),
                 ("Maxor", "不。"),
                 ("Maxor", "是他等你很久了。"),
-                ("魔法使 Mage", "他？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "他？"),
                 ("Maxor", "真奇怪。"),
                 ("Maxor", "走到这里，你居然还不知道自己为什么会来到这里。"),
-                ("魔法使 Mage", "我只是来调查地下城的异常。"),
+                (cfg.PLAYER_DIALOGUE_NAME, "我只是来调查地下城的异常。"),
                 ("Maxor", "是吗？"),
-                ("魔法使 Mage", "什么意思？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "什么意思？"),
                 ("Maxor", "自己去寻找答案吧。"),
             ],
             {
                 "Maxor": cfg.STAGE5_MAXOR_BOSS_SPRITE,
-                "魔法使 Mage": cfg.SELF_SPRITE,
+                cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             },
-            {"魔法使 Mage": "left", "Maxor": "right"},
+            {cfg.PLAYER_DIALOGUE_NAME: "left", "Maxor": "right"},
             "maxor")
         self.phase = "dialogue"
         self._ramp_background_speed(FINAL_BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)
@@ -3502,22 +3670,22 @@ class Stage5_WitherLords(Stage):
         self._set_dialogue(
             [
                 ("Necron", "看来，我们输了。"),
-                ("魔法使 Mage", "所以，一切都是因为 Kaeman？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "所以，一切都是因为 Kaeman？"),
                 ("Necron", "是。"),
                 ("Necron", "也不是。"),
-                ("魔法使 Mage", "什么意思？"),
+                (cfg.PLAYER_DIALOGUE_NAME, "什么意思？"),
                 ("Necron", "没有人能够改变已经发生的事情。"),
-                ("魔法使 Mage", "但他还在试图这么做。"),
+                (cfg.PLAYER_DIALOGUE_NAME, "但他还在试图这么做。"),
                 ("Necron", "正因如此，你才会来到这里。"),
-                ("魔法使 Mage", "看来，最后的答案就在前面。"),
+                (cfg.PLAYER_DIALOGUE_NAME, "看来，最后的答案就在前面。"),
                 ("Necron", "去吧。"),
                 ("Necron", "他就在王座之间等着你。"),
             ],
             {
-                "魔法使 Mage": cfg.SELF_SPRITE,
+                cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
                 "Necron": cfg.STAGE5_NECRON_BOSS_SPRITE,
             },
-            {"魔法使 Mage": "left", "Necron": "right"},
+            {cfg.PLAYER_DIALOGUE_NAME: "left", "Necron": "right"},
             None,
             is_defeat=True)
         self.phase = "defeat_dialogue"

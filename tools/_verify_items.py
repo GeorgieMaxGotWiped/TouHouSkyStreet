@@ -16,13 +16,18 @@ cfg.WAREHOUSE_PATH = os.path.join(tmpdir, "warehouse.json")
 
 from src.systems.item_system import (
     SKYBLOCK_ITEMS, C_SKILLS, REFORGE_STONES, REFORGES,
-    BOSS_REWARD_POOLS, ItemInventory, ItemDropManager,
+    BOSS_REWARD_POOLS, SHOP_CATEGORY_ORDER, ItemInventory, ItemDropManager,
     init_default_drop_table, init_stage_drop_table, parse_price,
 )
 from src.systems.item_effects import aggregate_effects
 
 pygame.init()
-screen = pygame.display.set_mode((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
+# 预览用的画布：PlayingState.draw 调的是画布的显卡/高分辨率接口（blit_gpu_bg 等），
+# 普通 Surface 上会 AttributeError，所以这里建一块 Painter 画布（没有显卡路径时
+# 它自己落回普通绘制，预览图与旧版一致）。
+pygame.display.set_mode((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
+from src.engine.painter import Painter
+screen = Painter.create((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
 os.makedirs("previews", exist_ok=True)
 
 # --- 1. 表格 56 个物品全部存在且价格正确 ---
@@ -302,8 +307,12 @@ from src.ui.boss_reward import BossRewardState
 it = IntermissionState(g, 1)
 it.page_idx = 2  # 商店
 entries = it._current_shop_entries()
-assert any(e.get("header") for e in entries), "shop has no category headers"
-assert entries[0].get("header") == "武器"
+# 购买页按物品类型分组但不插表头（组间表头已去掉，网格更简洁），
+# 所以只核对条目齐全且分类顺序符合 SHOP_CATEGORY_ORDER
+assert entries, "shop buy page is empty"
+_order = {t: i for i, t in enumerate(SHOP_CATEGORY_ORDER)}
+_types = [_order[e["item"].item_type] for e in entries]
+assert _types == sorted(_types), "shop entries are not ordered by category"
 it.draw(screen)
 pygame.image.save(screen, os.path.join("previews", "_intermission_shop_preview.png"))
 

@@ -5,9 +5,12 @@
 #   after  = 打开开关（背景 / 面板 / 图标按渲染倍率由显卡原生绘制）
 #
 # 运行：
-#   python tools\_ui_gpu_compare.py <menu|settings|storage> before [宽x高]
-#   python tools\_ui_gpu_compare.py <menu|settings|storage> after  [宽x高]
-#   python tools\_ui_gpu_compare.py <menu|settings|storage> combine
+#   界面名与 tools\_ui_gpu_smoke.py 共用一份（menu / settings / difficulty /
+#   storage / shop / forge / loadout / practice / boss_reward / reward_confirm /
+#   loading）：
+#   python tools\_ui_gpu_compare.py <界面> before [宽x高]
+#   python tools\_ui_gpu_compare.py <界面> after  [宽x高]
+#   python tools\_ui_gpu_compare.py <界面> combine [x,y,w,h]   # 逻辑坐标，默认取画面中偏上一块
 import os
 import sys
 
@@ -22,15 +25,10 @@ OUT_DIR = os.path.join(os.getcwd(), "previews", "ui_gpu")
 
 
 def build_state(game, name):
-    from src.ui.menu import MenuState, SettingsState
-    from src.ui.storage import StorageState
-    if name == "menu":
-        return MenuState(game)
-    if name == "settings":
-        return SettingsState(game)
-    if name == "storage":
-        return StorageState(game)
-    raise SystemExit(f"unknown screen: {name}")
+    # 界面清单与冒烟工具共用一份，免得两边各写一遍（支持 menu / settings /
+    # difficulty / storage / shop / forge / loadout / practice / boss_reward / loading）
+    from tools._ui_gpu_smoke import build
+    return build(game, name)
 
 
 def capture(name, mode, size):
@@ -50,6 +48,11 @@ def capture(name, mode, size):
 
     game = game_module.Game()
     game.push_state(build_state(game, name))
+    game.settle_ui()      # 黑场过渡 + 进场动效走完，与「改前」的落定画面才可比
+    if name == "reward_confirm":
+        # enter() 会把确认弹窗重置掉，只能在进入之后再打开
+        game.current_state.selected = 1
+        game.current_state.confirming = True
     if game.presenter is None:
         raise SystemExit("GPU presenter unavailable; cannot capture")
 
@@ -76,7 +79,7 @@ def capture(name, mode, size):
     game.running = False
 
 
-def combine(name):
+def combine(name, crop=None):
     before = os.path.join(OUT_DIR, f"{name}_before.png")
     after = os.path.join(OUT_DIR, f"{name}_after.png")
     for p in (before, after):
@@ -85,8 +88,12 @@ def combine(name):
     a = pygame.image.load(before)
     b = pygame.image.load(after)
     w, h = a.get_size()
-    cw, ch = min(880, w // 3), min(560, h // 3)
-    cx, cy = int(w * 0.28), int(h * 0.22)
+    if crop is not None:
+        # 逻辑坐标 -> 真实像素（渲染倍率取 3x，与实际采样一致）
+        cx, cy, cw, ch = (crop[0] * 3, crop[1] * 3, crop[2] * 3, crop[3] * 3)
+    else:
+        cw, ch = min(880, w // 3), min(560, h // 3)
+        cx, cy = int(w * 0.28), int(h * 0.22)
     pad, label_h = 12, 34
     out = pygame.Surface((cw * 2 + pad * 3, ch + label_h + pad * 2))
     out.fill((28, 28, 32))
@@ -107,7 +114,10 @@ def main():
     mode = sys.argv[2] if len(sys.argv) > 2 else "before"
     pygame.init()
     if mode == "combine":
-        combine(name)
+        crop = None
+        if len(sys.argv) > 3 and "," in sys.argv[3]:
+            crop = [int(v) for v in sys.argv[3].split(",")]
+        combine(name, crop)
     else:
         size = (2880, 2160)
         if len(sys.argv) > 3 and "x" in sys.argv[3]:

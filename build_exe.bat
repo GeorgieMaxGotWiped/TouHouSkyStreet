@@ -1,6 +1,6 @@
 @echo off
 REM 东方天空街 ~ Touhou Sky Street
-REM 打包为单文件 EXE（PyInstaller）
+REM 打包为一个文件夹（PyInstaller --onedir，启动更快，资源可替换）
 REM 自动检测用户电脑上的 Python 与 PyInstaller，无需手动配置
 
 cd /d "%~dp0"
@@ -81,13 +81,25 @@ if errorlevel 1 (
     if errorlevel 1 goto INSTALL_FAIL
 )
 
-REM ========== 第三步：打包 ==========
-echo Building TouHouSkyStreet.exe...
+REM ========== 第三步：清理上次产物（先把用户配置拿出来） ==========
+if exist "dist\TouHouSkyStreet\config.json" copy /y "dist\TouHouSkyStreet\config.json" "dist\_keep_config.json" >nul
+if exist "dist\TouHouSkyStreet\warehouse.json" copy /y "dist\TouHouSkyStreet\warehouse.json" "dist\_keep_warehouse.json" >nul
+if exist "dist\TouHouSkyStreet" rmdir /s /q "dist\TouHouSkyStreet"
+if exist "build\TouHouSkyStreet" rmdir /s /q "build\TouHouSkyStreet"
+
+REM ========== 第四步：打包（onedir：产物是一个文件夹） ==========
+echo Building TouHouSkyStreet...
 echo.
-%PY_CMD% -m PyInstaller --onefile --name "TouHouSkyStreet" --add-data "assets;assets" --noconsole main.py
+%PY_CMD% -m PyInstaller --onedir --noupx --name "TouHouSkyStreet" --add-data "assets;assets" --icon "assets\gui\icon.png" --noconsole main.py
+
+REM 用户配置放回产物目录（打包失败时会留在 dist 下，文件名带 _keep_ 前缀）
+if exist "dist\_keep_config.json" if exist "dist\TouHouSkyStreet" move /y "dist\_keep_config.json" "dist\TouHouSkyStreet\config.json" >nul
+if exist "dist\_keep_warehouse.json" if exist "dist\TouHouSkyStreet" move /y "dist\_keep_warehouse.json" "dist\TouHouSkyStreet\warehouse.json" >nul
 
 echo.
-echo Done! EXE is in dist\TouHouSkyStreet.exe
+echo Done! 运行 dist\TouHouSkyStreet\TouHouSkyStreet.exe
+echo 分发时把整个 dist\TouHouSkyStreet 文件夹打包发给别人即可，对方无需安装 Python。
+if exist "dist\TouHouSkyStreet.exe" echo [提示] dist\TouHouSkyStreet.exe 是旧版单文件产物，已不再使用，可手动删除。
 pause
 exit /b 0
 

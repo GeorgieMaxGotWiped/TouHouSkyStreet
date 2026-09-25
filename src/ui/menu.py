@@ -7,16 +7,21 @@ import pygame
 from src.engine import settings as cfg
 from src.engine import boss_art
 from src.engine import hires
+from src.engine import painter
 from src.engine.collision import circle_collision, point_segment_distance
 from src.engine.game import GameState
 from src.entities.player_spell import PlayerSpellCard
 from src.systems.item_system import BOSS_REWARD_POOLS, C_SKILLS
 from src.systems.item_effects import aggregate_effects
 from src.ui.loading import start_stage
+from src.ui.anim import Entrance
 
 WITHER_BOSS_NAMES = {"Maxor", "Storm", "Goldor", "Necron", "Kaeman"}
 
 DEATHBOMB_WINDOW_FRAMES = 24
+
+# 设置界面调节条的几何（预烤时按这块逻辑尺寸建图）
+BAR_X, BAR_W, BAR_H = 430, 180, 12
 
 
 # 背景图缓存：同一张图在不同渲染倍率下各备一份
@@ -48,23 +53,43 @@ def load_background(path, size, factor=None):
     return None
 
 
+def refresh_background(state, screen):
+    """按当前渲染倍率校正界面身上那张整幅背景（倍率没变就什么都不做）
+
+    背景是「按倍率出图」的，界面在构造时取一次就存住了：改渲染倍率以后那张仍是
+    旧倍率的，再画出去只能被缩放一次，细节比按新倍率重出要糊。绘制前校正一次即可
+    —— 命中缓存时只是一次查表（load_background 按倍率缓存）。
+    """
+    factor = screen.bake_factor()
+    if getattr(state.background, "hi_scale", 1) != factor:
+        state.background = load_background(cfg.MENU_BACKGROUND,
+                                           (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
+                                           factor)
+    return state.background
+
+
 class MenuState(GameState):
     """主菜单"""
     def __init__(self, game):
         super().__init__(game)
-        self.options = ["Start Game", "Practice", "Settings", "Storage", "Quit"]
+        self.options = ["Start Game", "Extra Stage", "Practice", "Settings",
+                        "Storage", "Quit"]
         self.selected = 0
         self._last_mouse_pos = (0, 0)
         # 背景图（按当前渲染倍率准备：有显卡时就是原生像素）
         self.background = load_background(cfg.MENU_BACKGROUND,
                                           (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
                                           game.screen.bake_factor())
+        # 进场动效：选项逐项淡入并自上而下落到位置（见 src/ui/anim.py）
+        self.intro = Entrance()
 
     def enter(self, game):
         self.selected = 0
         self.game.stop_music()
+        self.intro.reset()
 
     def update(self, dt):
+        self.intro.update(dt)
         # 隐藏调试：同时按住 D + 对应数字，直接跳到该面道中Boss战（满power）
         held = self.game.keys_held
         if held.get(pygame.K_d, False):
@@ -303,9 +328,13 @@ class MenuState(GameState):
 
     def _select(self):
         if self.options[self.selected] == "Start Game":
-            # 新游戏：先选难度，再进入仓库出征准备
-            from src.ui.difficulty import DifficultySelectState
-            self.game.switch_state(DifficultySelectState(self.game))
+            # 新游戏：先选自机、再选难度，然后进入仓库出征准备
+            from src.ui.character_select import CharacterSelectState
+            self.game.switch_state(CharacterSelectState(self.game))
+        elif self.options[self.selected] == "Extra Stage":
+            # Ex 面（裂隙 ~ The Rift）：同样先选自机、再选难度，但不经仓库出征
+            from src.ui.character_select import CharacterSelectState
+            self.game.switch_state(CharacterSelectState(self.game, extra=True))
         elif self.options[self.selected] == "Quit":
             self.game.play_sfx("cancel_menu")
             self.game.running = False
@@ -319,8 +348,9 @@ class MenuState(GameState):
             self.game.switch_state(StorageState(self.game))
 
     def draw(self, screen):
-        if self.background:
-            screen.blit_gpu(self.background, (0, 0))
+        background = refresh_background(self, screen)
+        if background:
+            screen.blit_gpu(background, (0, 0))
         else:
             screen.fill_gpu((4, 4, 16))
 
@@ -329,36 +359,43 @@ class MenuState(GameState):
         start_y = 380
         rects = self._menu_item_rects()
         for i, option in enumerate(self.options):
+            # 进场：每项比前一项晚 0.055s 淡入，并从上往下轻微落位
+            alpha, dy = self.intro.item(i)
+            if alpha <= 0:
+                continue
             color = cfg.COLOR_YELLOW if i == self.selected else cfg.COLOR_WHITE
             shadow = self.game.font_medium.render(option, True, cfg.COLOR_BLACK)
             text = self.game.font_medium.render(option, True, color)
 
             x = start_x
-            y = start_y + i * 44
+            y = start_y + i * 44 - dy
 
-            screen.blit(shadow, (x + 2, y + 3))
+            # 菜单项走显卡层（与背景同一层，顺序按登记先后）：文字本身在高分辨率
+            # 图层里已经是 1:1，这里只是把它并进显卡那条路径，不再落到 1x 画布上
+            screen.blit_gpu(shadow, (x + 2, y + 3), alpha=alpha)
 
             if i == self.selected:
                 indicator = "> "
                 ind_text = self.game.font_medium.render(indicator, True, cfg.COLOR_YELLOW)
-                screen.blit(ind_text, (x - 22, y))
-                pulse = math.sin(pygame.time.get_ticks() * 0.004) * 0.3 + 0.7
-                glow_color = tuple(int(c * pulse) for c in cfg.COLOR_YELLOW)
-                glow = self.game.font_medium.render(option, True, glow_color)
-                screen.blit(glow, (x, y))
+                screen.blit_gpu(ind_text, (x - 22, y), alpha=alpha)
+                glow = self.game.font_medium.render(
+                    option, True, hires.pulse_color(cfg.COLOR_YELLOW))
+                screen.blit_gpu(glow, (x, y), alpha=alpha)
 
-            screen.blit(text, (x, y))
+            screen.blit_gpu(text, (x, y), alpha=alpha)
 
         # 底部版本
+        alpha, dy = self.intro.item(len(self.options) + 0.4)
         version_text = self.game.font_small.render("v1.5.0 - Codex CLI Project", True, cfg.COLOR_DARK_GRAY)
-        screen.blit(version_text, (10, cfg.SCREEN_HEIGHT - 18))
+        screen.blit_gpu(version_text, (10, cfg.SCREEN_HEIGHT - 18 - dy), alpha=alpha)
 
         # 撤离 / 操作提示（一次性通知）
         notice = getattr(self.game, "notice", None)
         if notice:
             notice_text = self.game.font_small.render(notice, True, cfg.COLOR_GREEN)
-            screen.blit(notice_text, ((cfg.SCREEN_WIDTH - notice_text.get_width()) // 2,
-                                      cfg.SCREEN_HEIGHT - 64))
+            screen.blit_gpu(notice_text,
+                            ((cfg.SCREEN_WIDTH - notice_text.get_width()) // 2,
+                             cfg.SCREEN_HEIGHT - 64))
 
 
 
@@ -385,10 +422,12 @@ class SettingsState(GameState):
         self.volume_step = 0.1     # 每次按键调节的音量幅度
         self._repeat_timer = 0     # 按住方向键时连续调节的间隔计时
         self._last_mouse_pos = (0, 0)
+        self.intro = Entrance()
 
     def enter(self, game):
         self.selected = 0
         self._repeat_timer = 0
+        self.intro.reset()
         # 进入设置时播放一段背景音乐，方便即时听到音量变化
         self.game.play_music(cfg.STAGE1_MUSIC)
 
@@ -396,6 +435,7 @@ class SettingsState(GameState):
         self.game.stop_music()
 
     def update(self, dt):
+        self.intro.update(dt)
         keys = self.game.keys_just_pressed
         if keys.get(pygame.K_ESCAPE, False) or keys.get(pygame.K_x, False):
             self.game.play_sfx("cancel_menu")
@@ -593,80 +633,133 @@ class SettingsState(GameState):
             self._apply_choice(self.selected, values[(index + step) % len(values)])
             self.game.play_sfx("cursor")
 
-    def _draw_volume_row(self, screen, label, volume, selected, y):
+    def _draw_volume_row(self, screen, label, volume, selected, y, tint=None):
+        alpha, dy = tint if tint else (255, 0)
+        y -= dy
         color = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
         label_surf = self.game.font_medium.render(label, True, color)
         percent = self.game.font_medium.render(f"{int(round(volume * 100))}%", True, color)
-        screen.blit(label_surf, (300, y))
-        screen.blit(percent, (640, y))
+        self._intro_blit(screen, label_surf, (300, y), alpha)
+        self._intro_blit(screen, percent, (640, y), alpha)
 
-        bar_x, bar_y, bar_w, bar_h = 430, y + 8, 180, 12
-        pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, (bar_x, bar_y, bar_w, bar_h))
-        if volume > 0:
-            fill_w = max(4, int(bar_w * volume))
-            pygame.draw.rect(screen, cfg.COLOR_GREEN if selected else cfg.COLOR_GRAY,
-                             (bar_x, bar_y, fill_w, bar_h))
-        pygame.draw.rect(screen, color, (bar_x, bar_y, bar_w, bar_h), 1)
+        # 调节条走预烤 + 贴图：1x 画布上的矩形被放大时边缘会被线性过滤糊掉，
+        # 按渲染倍率烤成图后由显卡 1:1 贴出来，边框就是硬的
+        self._draw_bar(screen, "vol", volume, selected, y, alpha)
 
-    def _draw_speed_row(self, screen, selected, y):
+    def _draw_speed_row(self, screen, selected, y, tint=None):
+        alpha, dy = tint if tint else (255, 0)
+        y -= dy
         color = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
         label_surf = self.game.font_medium.render("游戏速度", True, color)
         value = self.game.game_speed
         text = self.game.font_medium.render(cfg.format_game_speed(value), True, color)
-        screen.blit(label_surf, (300, y))
-        screen.blit(text, (640, y))
+        self._intro_blit(screen, label_surf, (300, y), alpha)
+        self._intro_blit(screen, text, (640, y), alpha)
 
-        bar_x, bar_y, bar_w, bar_h = 430, y + 8, 180, 12
         frac = (value - cfg.GAME_SPEED_MIN) / (cfg.GAME_SPEED_MAX - cfg.GAME_SPEED_MIN)
-        pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, (bar_x, bar_y, bar_w, bar_h))
-        if frac > 0:
-            fill_w = max(4, int(bar_w * frac))
-            pygame.draw.rect(screen, cfg.COLOR_GREEN if selected else cfg.COLOR_GRAY,
-                             (bar_x, bar_y, fill_w, bar_h))
-        pygame.draw.rect(screen, color, (bar_x, bar_y, bar_w, bar_h), 1)
+        self._draw_bar(screen, "speed", frac, selected, y, alpha)
 
-    def _draw_choice_row(self, screen, label, row, selected):
+    def _draw_bar(self, screen, tag, frac, selected, y, alpha=255):
+        """音量 / 游戏速度调节条：底色 + 进度 + 外框烤成一张图再由显卡贴出"""
+        frac = max(0.0, min(1.0, frac))
+        fill_w = max(4, int(BAR_W * frac)) if frac > 0 else 0
+        fill_color = cfg.COLOR_GREEN if selected else cfg.COLOR_GRAY
+        border = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
+        # 进度量化到整像素，避免每帧都烤一张新图（滑块本来就按像素走）
+        key = ("bar", tag, selected, fill_w, fill_color, border)
+
+        def build(target, k):
+            painter.bake_rect(target, k, cfg.COLOR_DARK_GRAY, (0, 0, BAR_W, BAR_H))
+            if fill_w > 0:
+                painter.bake_rect(target, k, fill_color, (0, 0, fill_w, BAR_H))
+            painter.bake_rect(target, k, border, (0, 0, BAR_W, BAR_H), 1)
+
+        screen.blit_baked(key, (BAR_X, y + 8), (BAR_W, BAR_H), build, alpha)
+
+    def _draw_choice_row(self, screen, label, row, selected, tint=None):
         """分段选择行：左侧名称，右侧分段按钮显示当前选项"""
+        alpha, dy = tint if tint else (255, 0)
         color = cfg.COLOR_YELLOW if selected else cfg.COLOR_WHITE
-        y = self.ROW_Y[row]
-        screen.blit(self.game.font_medium.render(label, True, color), (300, y))
+        y = self.ROW_Y[row] - dy
+        self._intro_blit(screen, self.game.font_medium.render(label, True, color),
+                         (300, y), alpha)
         value_text = self._choice_value_text(row)
         if value_text:
-            screen.blit(self.game.font_medium.render(value_text, True, color), (640, y))
+            self._intro_blit(screen, self.game.font_medium.render(value_text, True, color),
+                             (640, y), alpha)
         current = self._choice_current(row)
         for value, text, rect in self._choice_segments(row):
             active = (value == current)
-            pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, rect)
-            if active:
-                pygame.draw.rect(screen, cfg.COLOR_GREEN if selected else cfg.COLOR_GRAY,
-                                 rect)
-            pygame.draw.rect(screen, cfg.COLOR_YELLOW if active else cfg.COLOR_GRAY, rect, 1)
+            seg_y = rect.y - dy
+            # 分段按钮同样是「预烤 + 贴图」：底色 / 高亮 / 外框先按渲染倍率画成一张图
+            # 缓存起来，之后每帧只贴图，边框不会被线性过滤糊掉
+            screen.blit_baked(("seg", rect.size, active, selected),
+                              (rect.x, seg_y), rect.size,
+                              self._build_segment(active, selected), alpha)
             text_surf = self.game.font_small.render(text, True,
                                                     cfg.COLOR_BLACK if active else color)
-            screen.blit(text_surf, (rect.x + (rect.width - text_surf.get_width()) // 2,
-                                    rect.y + (rect.height - text_surf.get_height()) // 2))
+            self._intro_blit(screen, text_surf,
+                             (rect.x + (rect.width - text_surf.get_width()) // 2,
+                              seg_y + (rect.height - text_surf.get_height()) // 2),
+                             alpha)
+
+    @staticmethod
+    def _intro_blit(screen, surf, pos, alpha):
+        """进场淡入期间走显卡层的 alpha 调制；落定后回到原来那次 blit。
+
+        落定后必须回到 canvas.blit：两条路径的取整时机不同（显卡指令按输出像素取整，
+        高分辨率图层按图层像素取整），同一行文字会挪不到一个逻辑像素，对比截图能看出
+        差别。走回原路，落定帧与「没有这套进场动效」时逐像素一致。
+        """
+        if alpha >= 255:
+            screen.blit(surf, pos)
+        else:
+            screen.blit_gpu(surf, pos, alpha=alpha)
+
+    @staticmethod
+    def _build_segment(active, selected):
+        """分段按钮的预烤画法（尺寸取自 blit_baked 建好的目标表面）"""
+        def build(target, k):
+            size = pygame.Surface.get_size(target)
+            rect = (0, 0, size[0], size[1])
+            painter.bake_rect(target, 1, cfg.COLOR_DARK_GRAY, rect)
+            if active:
+                painter.bake_rect(target, 1,
+                                  cfg.COLOR_GREEN if selected else cfg.COLOR_GRAY, rect)
+            painter.bake_rect(target, 1,
+                              cfg.COLOR_YELLOW if active else cfg.COLOR_GRAY, rect, 1)
+        return build
 
     def draw(self, screen):
-        if self.background:
-            screen.blit_gpu(self.background, (0, 0))
+        background = refresh_background(self, screen)
+        if background:
+            screen.blit_gpu(background, (0, 0))
         else:
             screen.fill_gpu((4, 4, 16))
 
         # 标题
         title = self.game.font_large.render("设置", True, cfg.COLOR_YELLOW)
-        screen.blit(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 72))
+        alpha, dy = self.intro.item(0)
+        self._intro_blit(screen, title,
+                         ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 72 - dy), alpha)
 
         # 调节行
         self._draw_volume_row(screen, "音乐音量", self.game.music_volume,
-                              self.selected == 0, self.ROW_Y[0])
+                              self.selected == 0, self.ROW_Y[0], self.intro.item(1.0))
         self._draw_volume_row(screen, "音效音量", self.game.sfx_volume,
-                              self.selected == 1, self.ROW_Y[1])
-        self._draw_speed_row(screen, self.selected == 2, self.ROW_Y[2])
-        self._draw_choice_row(screen, "Boss 立绘", 3, self.selected == 3)
-        self._draw_choice_row(screen, "输出分辨率", 4, self.selected == 4)
-        self._draw_choice_row(screen, "缩放模式", 5, self.selected == 5)
-        self._draw_choice_row(screen, "渲染倍率", 6, self.selected == 6)
-        self._draw_choice_row(screen, "窗口模式", 7, self.selected == 7)
+                              self.selected == 1, self.ROW_Y[1], self.intro.item(1.25))
+        self._draw_speed_row(screen, self.selected == 2, self.ROW_Y[2],
+                             self.intro.item(1.5))
+        self._draw_choice_row(screen, "Boss 立绘", 3, self.selected == 3,
+                              self.intro.item(1.75))
+        self._draw_choice_row(screen, "输出分辨率", 4, self.selected == 4,
+                              self.intro.item(2.0))
+        self._draw_choice_row(screen, "缩放模式", 5, self.selected == 5,
+                              self.intro.item(2.25))
+        self._draw_choice_row(screen, "渲染倍率", 6, self.selected == 6,
+                              self.intro.item(2.5))
+        self._draw_choice_row(screen, "窗口模式", 7, self.selected == 7,
+                              self.intro.item(2.75))
 
         # 当前生效的输出尺寸（内部逻辑分辨率始终为 960x720）
         status = self.game.font_small.render(self.game.display_status_text(), True,
@@ -679,18 +772,28 @@ class SettingsState(GameState):
         band_h = self.HINT_Y - self.STATUS_Y + hint.get_height() + 16
         band = hires.ui_panel(screen, (band_w, band_h))
         band.fill((0, 0, 0, 150))
-        screen.blit(band, ((cfg.SCREEN_WIDTH - band_w) // 2, self.STATUS_Y - 8))
-        screen.blit(status, ((cfg.SCREEN_WIDTH - status.get_width()) // 2, self.STATUS_Y))
-        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, self.HINT_Y))
+        alpha, dy = self.intro.item(4.0)
+        if alpha > 0:
+            screen.blit(band, ((cfg.SCREEN_WIDTH - band_w) // 2,
+                               self.STATUS_Y - 8 - dy))
+            self._intro_blit(screen, status,
+                             ((cfg.SCREEN_WIDTH - status.get_width()) // 2,
+                              self.STATUS_Y - dy), alpha)
+            self._intro_blit(screen, hint,
+                             ((cfg.SCREEN_WIDTH - hint.get_width()) // 2,
+                              self.HINT_Y - dy), alpha)
 
         # 返回行
+        alpha, dy = self.intro.item(4.6)
+        if alpha <= 0:
+            return
         back_color = cfg.COLOR_YELLOW if self.selected == self.ROW_COUNT else cfg.COLOR_WHITE
         back = self.game.font_medium.render("返回", True, back_color)
         back_x = (cfg.SCREEN_WIDTH - back.get_width()) // 2
         if self.selected == self.ROW_COUNT:
             ind = self.game.font_medium.render("> ", True, cfg.COLOR_YELLOW)
-            screen.blit(ind, (back_x - 26, self.BACK_Y))
-        screen.blit(back, (back_x, self.BACK_Y))
+            self._intro_blit(screen, ind, (back_x - 26, self.BACK_Y - dy), alpha)
+        self._intro_blit(screen, back, (back_x, self.BACK_Y - dy), alpha)
 
 
 class PlayingState(GameState):
@@ -721,10 +824,12 @@ class PlayingState(GameState):
         # 战斗区域偏移（绘制时使用）
         self.offset_x = cfg.BATTLE_OFFSET_X
         self.offset_y = cfg.BATTLE_OFFSET_Y
-        # 战斗区以外的界面背景（周围与右侧面板）使用 bg_0.png
+        # 战斗区以外的界面背景（周围与右侧面板）使用 bg_0.png：按渲染倍率准备成
+        # 一整幅「原生像素」的图，交给显卡直接贴（见 Painter.blit_gpu_bg）。原先是在
+        # 1x 画布上贴 960x720、再被整体放大 —— 每帧多付一次大 blit，画面还糊一次。
         self.background = load_background(cfg.MENU_BACKGROUND,
                                           (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
-                                          factor=1)
+                                          game.screen.bake_factor())
 
         # 分数与资源（从全局数据继承）
         self.score = self.game.global_data.get("score", 0)
@@ -741,9 +846,16 @@ class PlayingState(GameState):
         self.equipment_stats = self.item_inventory.get_equipped_stats()
         self.pending_boss_reward_pool = None
 
-        # 物品被动效果聚合（装备在休整期间才会变化，本关内保持不变）
-        self.item_effects = aggregate_effects(self.item_inventory, self.stage.stage_num)
-        self.c_skill_id = self.item_inventory.get_c_skill_equipped_id()
+        # Ex 面（items_disabled）：本面不经仓库出征，装备物品效果与 C 技能一律不生效，
+        # 也不产生掉落 —— 用空背包聚合出的「无效果」直接顶上去
+        self.item_free = bool(getattr(self.stage, "items_disabled", False))
+        if self.item_free:
+            self.item_effects = aggregate_effects(ItemInventory(), self.stage.stage_num)
+            self.c_skill_id = None
+        else:
+            # 物品被动效果聚合（装备在休整期间才会变化，本关内保持不变）
+            self.item_effects = aggregate_effects(self.item_inventory, self.stage.stage_num)
+            self.c_skill_id = self.item_inventory.get_c_skill_equipped_id()
         self.c_uses = {}
         self.c_skill_message = ""
         self.c_skill_message_timer = 0
@@ -776,12 +888,16 @@ class PlayingState(GameState):
         self.power_items = []  # 红色 Power 方块掉落物
         self.bonus_items = []  # Boss reward drops (+Bomb / +Life)
         self.homing_shot_skip = False  # 追踪弹射速为正常一半（零替发射）
+        # 爆炸箭（弓手中间那条）的发射节奏：<=0 时这一轮轮到一根，打出去后重新计时
+        self.explosive_shot_timer = 0
 
         # 状态
         self.paused = False
         self.game_over = False
         self.stage_clear = False
         self.clear_timer = 0
+        # Ex 面通关：等待玩家确认后回主菜单（None = 非 Ex 面的常规结算流程）
+        self.ex_clear_timer = None
         self.dialogue = None  # 对话框（非 None 时显示，玩法继续推进）
         self.boss_music_intro = False  # Boss战开场曲播放中（播完后切循环曲）
         self.stage_music_intro = False  # 道中开场曲播放中（播完后切循环曲）
@@ -1019,6 +1135,7 @@ class PlayingState(GameState):
             self.player.x, self.player.y = constrain(self.player.x, self.player.y)
 
         # 射击 / 弹幕
+        self._tick_shot_cadence()
         if self.player.can_shoot():
             self._player_shoot()
         self.bullet_manager.update(dt, self.player.x, self.player.y)
@@ -1098,6 +1215,7 @@ class PlayingState(GameState):
         self.power_items.clear()
         self.bonus_items.clear()
         self.homing_shot_skip = False
+        self.explosive_shot_timer = 0
         self.dialogue = None
         self.c_skill_message = ""
         self.c_skill_message_timer = 0
@@ -1272,7 +1390,9 @@ class PlayingState(GameState):
                     # 对话结束：停止道中曲，先播放一遍Boss战开场曲，再让Boss进场。
                     # 五面道中Boss（Watcher/Professor/Thorn/Livid）开战不重放音乐，
                     # 继续播放道中曲 5_1_start/loop。
-                    if not getattr(self.stage, "keep_stage_music_on_boss", False):
+                    # Ex 面的道中Boss对话同样不切曲：Boss战音乐留到关底对话结束时再播。
+                    if not (getattr(self.stage, "keep_stage_music_on_boss", False)
+                            or getattr(self.stage, "dialogue_keeps_music", False)):
                         self.game.stop_music()
                         # stop_music 也会触发一次音乐结束事件（pygame 行为），
                         # 若不清理，下一帧会误判开场曲播完而立即切到循环曲
@@ -1314,6 +1434,18 @@ class PlayingState(GameState):
             if keys.get(pygame.K_r, False):
                 self._restart()
             elif keys.get(pygame.K_ESCAPE, False):
+                self.game.switch_state(MenuState(self.game))
+            return
+
+        # Ex 面通关：显示结算画面，等玩家确认（或最多 8 秒）后回主菜单
+        if self.ex_clear_timer is not None:
+            self.ex_clear_timer += 1
+            confirm = (keys.get(pygame.K_RETURN, False)
+                       or keys.get(pygame.K_z, False)
+                       or keys.get(pygame.K_SPACE, False)
+                       or keys.get(pygame.K_ESCAPE, False))
+            if (self.ex_clear_timer >= 30 and confirm) or self.ex_clear_timer >= 8 * cfg.FPS:
+                self.game.notice = f"Ex 面「{self.stage.name}」通关！"
                 self.game.switch_state(MenuState(self.game))
             return
 
@@ -1391,6 +1523,7 @@ class PlayingState(GameState):
             self.player.x, self.player.y = constrain(self.player.x, self.player.y)
 
         # 射击
+        self._tick_shot_cadence()
         if (not getattr(self.stage, "player_input_locked", False)
                 and self.player.can_shoot()):
             self._player_shoot()
@@ -1436,7 +1569,11 @@ class PlayingState(GameState):
                                         portrait_sides=getattr(self.stage, "dialogue_portrait_sides", {}),
                                         portrait_scales=getattr(self.stage, "dialogue_portrait_scales", {}),
                                         portrait_offsets=getattr(self.stage, "dialogue_portrait_offsets", {}),
-                                        portrait_vertical_offsets=getattr(self.stage, "dialogue_portrait_vertical_offsets", {}))
+                                        portrait_vertical_offsets=getattr(self.stage, "dialogue_portrait_vertical_offsets", {}),
+                                        # 取景补偿（按「头高 ÷ 内容高」把同屏人物拉齐，见
+                                        # settings.DIALOGUE_PORTRAIT_HEAD_RATIO）：各面默认开启，
+                                        # 要按原样显示的关卡自行把 dialogue_portrait_harmonize 置 False
+                                        harmonize=getattr(self.stage, "dialogue_portrait_harmonize", True))
 
         # 碰撞检测
         self._check_collisions()
@@ -1451,6 +1588,10 @@ class PlayingState(GameState):
             self.stage_clear = True
             self.clear_timer = 0
             self.game.stop_music()   # Boss已击破：停止Boss战音乐
+            # Ex 面（不经仓库出征）：不结算物品、不进休整 / 奖励界面，回主菜单
+            if self.item_free:
+                self.ex_clear_timer = 0
+                return
             # 保存全部数据到全局
             self.game.global_data["score"] = self.score
             self.game.global_data["lives"] = self.lives
@@ -1487,62 +1628,69 @@ class PlayingState(GameState):
                 self.item_popups.remove(popup)
 
     def _player_shoot(self):
-        """玩家射击：按 power 升级弹幕形态（单线->两线->三线）+ 追踪弹
+        """玩家射击：按自机的弹幕参数（机体差分）发射固定弹 + 追踪弹
+
+        条数 / 扩散 / 穿透 / 追踪弹见 cfg.PLAYER_CHARACTER_SHOTS：FB（与旧版一致）
+        保持旧版 1/2/3 条扇形 + 追踪弹；Mage 1/3/5 条、扩散两倍、穿透、没有追踪弹；
+        Archer 与 Mage 同形（扩散相同、低速减半）但不穿透，所有箭从同一点射出，
+        中间那条每 240 帧有一根是命中爆炸的爆炸箭；Tank 1/2/3 条笔直向上 + 追踪弹。
 
         装备效果影响：散射夹角（Terminator）、固定/追踪弹道数（Loving）、
         追踪领域（Spirit Bow）、追踪/非追踪弹伤害加成。
         """
         from src.entities import bullet as bm
-        power_level = self.power // 100  # 0-4
+        spec = cfg.player_character_shot_spec()
         eff = self.item_effects
         spirit_active = self.spirit_bow_timer > 0
 
-        # 主射击：单线 -> 两线 -> 三线（Loving 减少1条固定弹）
+        # 主射击：弹条数随火力阶段提升（Loving 增减 1 条固定弹）
         px = self.player.x
         py = self.player.y - 8
-        lines = max(1, min(3, power_level + 1 + int(eff["fixed_bullet_add"])))
-        # 侧翼弹道向外倾斜（Terminator 修改夹角）
+        lines = cfg.player_shot_count(spec, self.power // 100,
+                                      int(eff["fixed_bullet_add"]))
+        # 散射夹角：机体基准 × 低速倍率；Terminator 直接覆盖夹角（旧版 9°/1°）
         if eff["terminator"]:
-            per_side_deg = 4.5 if not self.player.focused else 0.5
-        else:
-            per_side_deg = 2.25
-        tilt_vx = math.tan(math.radians(per_side_deg)) * 12.0
-        tilt_vy = -11.96
-        if lines >= 3:
-            # 三线：左倾、直射、右倾
-            b = bm.create_player_bullet(px - 10, py, -tilt_vx, tilt_vy)
+            spec = dict(spec, tilt_step=4.5 if not self.player.focused else 0.5,
+                        focus_tilt_mult=1.0)
+        pierce = bool(spec.get("pierce"))
+        # Necrotic（重铸前缀）：低速状态下每颗固定弹有概率造成双倍伤害
+        double_chance = (eff["fixed_double_damage_chance"]
+                         if self.player.focused else 0.0)
+        # 中间那条可换专属弹（弓手的爆炸箭）：命中敌人时炸掉小范围敌弹。
+        # 按帧数节流：只有 timer 走完的那一轮才换，其余时候中间那条也是普通箭
+        center = cfg.player_shot_center_spec(spec)
+        center_idx = -1
+        if center is not None:
+            interval = center["interval"]
+            if interval <= 0 or self.explosive_shot_timer <= 0:
+                center_idx = cfg.player_shot_center_index(spec, lines,
+                                                          self.player.focused)
+                if interval > 0:
+                    self.explosive_shot_timer = interval
+        for idx, (dx, tilt_deg) in enumerate(
+                cfg.player_shot_lines(spec, lines, self.player.focused)):
+            if abs(tilt_deg) < 1e-6:
+                b = bm.create_player_bullet(px + dx, py)
+            else:
+                vx, vy = cfg.player_shot_velocity(tilt_deg)
+                b = bm.create_player_bullet(px + dx, py, vx, vy)
+            b.manager = self.bullet_manager   # 命中爆炸要取敌弹列表
+            if idx == center_idx:
+                b.player_sprite_path = center["path"]
+                b.player_sprite_angle = center["angle"]
+                b.clear_radius_on_hit = center["clear_radius"]
             b.damage = self._bullet_damage(homing=spirit_active)
+            if double_chance > 0 and random.random() * 100.0 < double_chance:
+                b.damage *= 2.0
             b.homing = spirit_active
-            self.bullet_manager.add_player_bullet(b)
-            b = bm.create_player_bullet(px, py)
-            b.damage = self._bullet_damage(homing=spirit_active)
-            b.homing = spirit_active
-            self.bullet_manager.add_player_bullet(b)
-            b = bm.create_player_bullet(px + 10, py, tilt_vx, tilt_vy)
-            b.damage = self._bullet_damage(homing=spirit_active)
-            b.homing = spirit_active
-            self.bullet_manager.add_player_bullet(b)
-        elif lines == 2:
-            # 两线：左右向外倾斜
-            b = bm.create_player_bullet(px - 10, py, -tilt_vx, tilt_vy)
-            b.damage = self._bullet_damage(homing=spirit_active)
-            b.homing = spirit_active
-            self.bullet_manager.add_player_bullet(b)
-            b = bm.create_player_bullet(px + 10, py, tilt_vx, tilt_vy)
-            b.damage = self._bullet_damage(homing=spirit_active)
-            b.homing = spirit_active
-            self.bullet_manager.add_player_bullet(b)
-        else:
-            # 单线：中间一条
-            b = bm.create_player_bullet(px, py)
-            b.damage = self._bullet_damage(homing=spirit_active)
-            b.homing = spirit_active
+            b.pierce = pierce
             self.bullet_manager.add_player_bullet(b)
 
-        # 追踪弹：power>=15 开始产生，射速为正常一半（Loving 增加1条追踪弹）；
+        # 追踪弹（Mage / Archer 没有）：power>=15 开始产生，射速为正常一半
+        # （Loving 增加1条追踪弹）；
         # 伤害随 power 从正常 1/3 提升到 2/3；power 满（400）时射速恢复正常（每帧发射）
-        track_count = 1 + int(eff["tracking_bullet_add"])
-        if self.power >= 15:
+        if spec.get("tracking", True) and self.power >= 15:
+            track_count = 1 + int(eff["tracking_bullet_add"])
             full_power = self.power >= self.player.max_power
             if full_power or not self.homing_shot_skip:
                 base = self._bullet_damage(homing=True)
@@ -1556,6 +1704,15 @@ class PlayingState(GameState):
                 self.homing_shot_skip = not self.homing_shot_skip
 
         self.game.play_sfx("shot")
+
+    def _tick_shot_cadence(self):
+        """按帧推进与射击有关的计时（两处 update 路径共用）
+
+        目前只有爆炸箭：它的「每 interval 帧一根」按真实帧数算，不按开了几枪 ——
+        开火间隔随火力变，按枪数算的话节奏会跟着火力走。
+        """
+        if self.explosive_shot_timer > 0:
+            self.explosive_shot_timer -= 1
 
     def _bullet_damage(self, homing):
         """单发子弹伤害（含追踪/非追踪弹伤害加成）。"""
@@ -1730,13 +1887,34 @@ class PlayingState(GameState):
             pct += eff["arack_pct"]
         return cfg.BULLET_PLAYER_DAMAGE * (1.0 + pct / 100.0)
 
+    def _death_clear_bullets(self, enemy):
+        """击破清弹（各面自定义口径）：把被击破小怪周围一定范围内的敌弹炸掉
+
+        半径由关卡给（`Stage.enemy_death_clear_radius`，基类默认 0 = 不清弹），
+        因此「越大的怪炸得越大」是各面自己的事；与奖励结算无关，练习 / Ex 面同样生效。
+        """
+        radius = self.stage.enemy_death_clear_radius(enemy)
+        if radius <= 0:
+            return
+        from src.entities.bullet import burst_cancel_bullets
+        burst_cancel_bullets(self.bullet_manager, enemy.x, enemy.y, radius,
+                             getattr(enemy, "color", (235, 245, 255)))
+
     def _reward_enemy_kill(self, enemy):
         """敌人被击破后的奖励结算（分数/技能经验/掉落/击杀计数）"""
+        self._death_clear_bullets(enemy)
         if self.practice_info:
             return
         from src.entities.boss import Boss
         self.score += enemy.score
         self.skill_manager.add_xp("COMBAT", enemy.score // 10)
+        # Ex 面：无装备物品效果，也不产生任何掉落（只保留分数 / 技能经验 / 火力道具）
+        if self.item_free:
+            self.game.play_sfx("enemy_down_boss" if isinstance(enemy, Boss)
+                               else "enemy_down_small")
+            self._spawn_power_drops(enemy)
+            self._spawn_bonus_drops(enemy)
+            return
         eff = self.item_effects
         is_boss = isinstance(enemy, Boss)
         if is_boss:
@@ -2014,7 +2192,9 @@ class PlayingState(GameState):
                 if not enemy.alive:
                     continue
                 if enemy.collides_with_bullet(pb.x, pb.y, pb.collision_radius):
-                    pb.alive = False
+                    # 穿透弹（Mage）打中后不消失，只记下这个目标（同一目标只结算一次）
+                    if not pb.try_hit(enemy):
+                        continue
                     # 目标类型伤害加成：小怪（Undead Sword）/ 道中Boss（Catacombs）/
                     # 凋零（Wither Relic）
                     dmg = pb.damage * self._target_damage_mult(enemy)
@@ -2027,7 +2207,8 @@ class PlayingState(GameState):
                         killed = enemy.take_damage(dmg)
                     if killed:
                         self._reward_enemy_kill(enemy)
-                    break
+                    if not pb.pierce:
+                        break
 
         # 召唤小怪弹幕：可以抵消敌弹
         for pb in self.bullet_manager.player_bullets[:]:
@@ -2080,7 +2261,8 @@ class PlayingState(GameState):
                     continue
                 if circle_collision(eb.x, eb.y, eb.collision_radius,
                                     pb.x, pb.y, pb.collision_radius):
-                    pb.alive = False
+                    if not pb.try_hit(eb):
+                        continue
                     eb.hp -= pb.damage
                     if eb.hp <= 0:
                         self._explode_shootable_orb(eb)
@@ -2298,18 +2480,22 @@ class PlayingState(GameState):
         self.bombs = cfg.PLAYER_START_BOMBS
         self.power = 0
         self.graze = 0
+        if self.item_free:
+            # Ex 面：不经仓库出征，重开同样满火力，且不碰全局物品数据
+            self.power = cfg.EX_STAGE_START_POWER
         # 同步全局数据
         self.game.global_data["score"] = 0
         self.game.global_data["lives"] = cfg.PLAYER_START_LIVES
         self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
-        self.game.global_data["power"] = 0
+        self.game.global_data["power"] = self.power
         self.game.global_data["graze"] = 0
 
-        # 重置 Skyblock 物品数据
+        # 重置 Skyblock 物品数据（Ex 面不动仓库 / 全局物品数据）
         from src.systems.item_system import ItemInventory
-        self.item_inventory = ItemInventory()
-        self.item_inventory.save_to_global_data(self.game.global_data)
-        self.equipment_stats = {}
+        if not self.item_free:
+            self.item_inventory = ItemInventory()
+            self.item_inventory.save_to_global_data(self.game.global_data)
+            self.equipment_stats = {}
 
         # 重置状态
         self.game_over = False
@@ -2325,10 +2511,15 @@ class PlayingState(GameState):
         self.power_items.clear()
         self.bonus_items.clear()
         self.homing_shot_skip = False
+        self.explosive_shot_timer = 0
 
         # 重置物品效果与 C 技能状态（重开后背包已清空）
-        self.item_effects = aggregate_effects(self.item_inventory, self.stage.stage_num)
-        self.c_skill_id = self.item_inventory.get_c_skill_equipped_id()
+        if self.item_free:
+            self.item_effects = aggregate_effects(ItemInventory(), self.stage.stage_num)
+            self.c_skill_id = None
+        else:
+            self.item_effects = aggregate_effects(self.item_inventory, self.stage.stage_num)
+            self.c_skill_id = self.item_inventory.get_c_skill_equipped_id()
         self.c_uses = {}
         self.c_skill_message = ""
         self.c_skill_message_timer = 0
@@ -2794,16 +2985,18 @@ class PlayingState(GameState):
 
     def draw(self, screen):
         ox, oy = self.offset_x, self.offset_y
+        battle_rect = pygame.Rect(ox, oy, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT)
 
-        # 战斗区以外的背景（周围与右侧面板）使用 bg_0.png，加载失败时回退纯色
-        if self.background:
-            screen.blit(self.background, (0, 0))
+        # 战斗区以外的背景（周围与右侧面板）使用 bg_0.png，加载失败时回退纯色。
+        # 整幅交给显卡直贴，战斗区那一块除外（那里让给更下层的显卡地面）
+        background = refresh_background(self, screen)
+        if background:
+            screen.blit_gpu_bg(background, (0, 0), battle_rect)
         else:
             screen.fill(cfg.COLOR_BLACK)
 
         # 关卡绘制（战斗区域）
         # 裁剪到战斗框内：进场前的敌机/子弹等不会在框外（上下黑边）露出来
-        battle_rect = pygame.Rect(ox, oy, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT)
         screen.set_clip(battle_rect)
 
         self.stage.draw(screen, ox, oy)
@@ -2818,6 +3011,9 @@ class PlayingState(GameState):
         self.player.draw_sprite(screen, ox, oy)
 
         # Bullets
+        # 弹幕走显卡原生绘制：在这里给画布切一刀（前半 = 上面这些「弹幕之下」的内容，
+        # 后半 = 判定点/HUD/符卡前景）。没有显卡路径时是空操作，绘制顺序不变。
+        self.game.split_canvas_layer()
         self.bullet_manager.draw(screen, ox, oy)
 
         # Hitbox stays above bullet layers

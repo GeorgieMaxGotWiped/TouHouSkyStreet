@@ -116,6 +116,10 @@ class GpuPresenter:
         # 高分辨率图层纹理（文字/立绘/面板）与它的尺寸
         self._ui_texture = None
         self._ui_size = None
+        # 「弹幕之下」那一层：战斗区在弹幕之前切一刀，前半张画布先收到这里
+        self._lower_texture = None
+        self._lower_size = None
+        self._lower_ready = False
         # 地面/洞壁贴图纹理：id(地面) -> (weakref, 地面纹理, 洞壁纹理)。
         # 这些纹理属于当前 renderer，随 presenter 一起重建，因此不必单独失效。
         self._floor_tex = {}
@@ -171,14 +175,59 @@ class GpuPresenter:
         self._ui_size = size
         return texture
 
+    def warm_texture(self, surface):
+        """提前把一张静态贴图传成显卡纹理（载入界面预热用）
+
+        符卡宣言立绘有 1728x1728（11.9MB），第一次上屏时 Texture.from_surface
+        要花 3.5ms，正好落在开符那一帧上。纹理缓存按表面对象认人，载入界面与
+        战斗用同一份 renderer，所以在这里先传一次就够了。
+        """
+        cache = getattr(self, "_tex_cache", None)
+        if cache is None or surface is None:
+            return False
+        return cache.get(surface) is not None
+
+    def capture_lower(self, surface):
+        """把当前 1x 画布收成「弹幕之下」那一层（随后调用方会清空画布继续画上层）
+
+        做成「上传即收下」而不是「复制一张留到帧末」：少一次整幅 memcpy，画布上的
+        像素直接进纹理。没有显卡呈现时不会被调用。
+        """
+        size = surface.get_size()
+        if self._lower_texture is None or self._lower_size != size:
+            from pygame._sdl2 import video as video_module
+            texture = video_module.Texture(self.renderer, size, streaming=True)
+            texture.blend_mode = 1
+            self._lower_texture = texture
+            self._lower_size = size
+        self._lower_texture.update(surface)
+        self._lower_ready = True
+
     def present(self, surface, dst_rect, floor=None, battle_rect=None,
-                ui=None, ui_area=None, gpu_ops=None, layer_size=None):
+                ui=None, ui_area=None, gpu_ops=None, layer_size=None,
+                gpu_over_ops=None, gpu_top_ops=None, gpu_ui_ops=None,
+                gpu_entity_ops=None, gpu_fg_ops=None):
         """上传逻辑画面并用显卡缩放到 dst_rect（renderer 内部完成 present）。
 
         给了 floor 时先在 battle_rect 处用显卡原生绘制地面（分辨率无关图层），
         再叠加 1x 画面：战斗区已在 CPU 帧上抠空，地面就从这层透出来。
         给了 ui 时最后叠加高分辨率图层（文字/立绘/面板），它按渲染倍率原生绘制，
         与 1x 画面共用同一个目标矩形，因此不会再有放大模糊。
+
+        给了 gpu_ui_ops 时在 1x 画面与高分辨率图层之间再叠一层：HUD 面板底板这类
+        恒定的大色块，画在高分辨率图层上等于每帧重传一遍，交给显卡填更省。
+
+        给了 gpu_over_ops 时在「1x 画面」与「高分辨率图层」之间再叠一层：战斗区
+        的弹幕（画布前半 = 地面/敌机/自机，画布后半 = 符卡前景/HUD，弹幕夹在中间）。
+
+        给了 gpu_entity_ops 时在「画布前半」与弹幕之间再叠一层：战斗区的实体（敌机 /
+        Boss / 自机 / 掉落物）按渲染倍率原生绘制。它们原先画在 1x 画布前半上，与
+        弹幕、文字之间有清晰度落差；这一层的位置保证旧版的先后关系不变——整层压在
+        画布前半（关卡背景 / 符卡背景 / 关卡特效）之上，被弹幕与画布后半（判定点 /
+        C技能 / 符卡前景 / HUD）盖住。
+
+        给了 gpu_top_ops 时最后再叠一层：压在所有内容之上的贴图（符卡宣言立绘），
+        带逐指令 alpha 调制，所以淡入淡出不用在 CPU 上做。
         """
         if floor is not None and battle_rect is not None:
             tex_floor, tex_wall = self._floor_textures(floor)
@@ -190,20 +239,48 @@ class GpuPresenter:
         # 于高分辨率图层坐标系里按渲染倍率原样绘制
         if gpu_ops and layer_size:
             self._draw_ops(gpu_ops, dst_rect, layer_size)
+        # 画布前半（弹幕之下）：地面 / 敌机 / 自机 / 掉落物
+        if self._lower_ready:
+            self._lower_texture.draw(dstrect=dst_rect)
+            self._lower_ready = False
+        # 战斗区实体（敌机 / Boss / 自机 / 掉落物）：显卡按渲染倍率原生绘制
+        if gpu_entity_ops and layer_size:
+            self._draw_ops(gpu_entity_ops, dst_rect, layer_size)
+        # 弹幕
+        if gpu_over_ops and layer_size:
+            self._draw_ops(gpu_over_ops, dst_rect, layer_size)
         self.texture.update(surface)
         self.texture.draw(dstrect=dst_rect)
+        # 战斗区前景（弹幕之上的符卡遮挡 / 激光 / 压暗）：画布下半之后、HUD 之前
+        if gpu_fg_ops and layer_size:
+            self._draw_ops(gpu_fg_ops, dst_rect, layer_size)
+        # 高分辨率图层之下的常驻色块（HUD 面板底板）
+        if gpu_ui_ops and layer_size:
+            self._draw_ops(gpu_ui_ops, dst_rect, layer_size)
         # ui_area 为 None = 本帧高分辨率图层是空的（上一帧的残留已在 begin_frame 清掉），
         # 此时连上传都不必做
         if ui is not None and ui_area is not None:
-            area = ui_area.clip(ui.get_rect())
-            if area.width > 0 and area.height > 0:
-                texture = self._ui_texture_for(ui.get_size())
+            # ui_area 可能是矩形（整体上传）或矩形列表（逐块上传）：标脏点散在
+            # 屏幕四角时，包围盒等于整屏，逐块传才只付真正画过的像素
+            areas = ui_area if isinstance(ui_area, list) else (ui_area,)
+            full = ui.get_rect()
+            texture = None
+            for area in areas:
+                area = area.clip(full)
+                if area.width <= 0 or area.height <= 0:
+                    continue
+                if texture is None:
+                    texture = self._ui_texture_for(ui.get_size())
                 # 注意：Texture.update(surface, area) 会拿「源表面左上角」当区域原点，
                 # 所以这里传与区域同尺寸的子表面，让源原点与区域原点对齐
                 texture.update(ui.subsurface(area), area)
+            if texture is not None:
                 # 注意：这里必须整幅叠加，不能只叠加脏区那一块——脏区对应的目标矩形
                 # 只能取整，采样相位会跟着变，清晰文字会整体错开半个像素（实测可见）。
                 texture.draw(dstrect=dst_rect)
+        # 最上层：符卡宣言立绘这类要压住 HUD 的高清贴图（带显卡端 alpha 调制）
+        if gpu_top_ops and layer_size:
+            self._draw_ops(gpu_top_ops, dst_rect, layer_size)
         self.renderer.present()
 
 
@@ -215,26 +292,46 @@ class GpuPresenter:
         ops 里的坐标位于「高分辨率图层」空间（逻辑坐标 x 渲染倍率），dst_rect 是
         画面在窗口中的目标矩形，两者之间可能还有一次整体缩放（输出分辨率与渲染
         倍率不一定相等），因此按下式换算成窗口像素。
+
+        指令若带裁剪框（登记时画布上生效的 set_clip，例如战斗区那个框），改用渲染
+        视口来裁：SDL 的视口既是裁剪框、又是坐标系原点，所以设好视口以后，后续坐标
+        都要减去视口原点（见 _use_clip）。
         """
         lw, lh = layer_size
         if lw <= 0 or lh <= 0:
             return
         fx = dst_rect.width / float(lw)
         fy = dst_rect.height / float(lh)
+        active = None          # 当前已经设好的裁剪（None = 整窗视口，视口原点 0,0）
+        ox = oy = 0
+        blend = False          # 是否已把渲染器切到 alpha 混合（用完必须还原）
+        # 混合模式是纹理自己的属性：同一张纹理可能这帧走普通混合、下帧走加法混合
+        # （亡灵展品的发光贴图），所以按「纹理 + 模式」记，变了才写回去。
+        blend_tex = None
+        blend_mode = 1
         for op in ops:
+            clip = op[3] if len(op) > 3 else None
+            if clip != active:
+                active = clip
+                ox, oy = self._use_clip(clip, dst_rect, fx, fy)
             if op[0] == "fill":
-                _, color, rect = op
-                if len(color) >= 4:
-                    self.renderer.draw_color = (color[0], color[1], color[2], color[3])
-                else:
-                    self.renderer.draw_color = (color[0], color[1], color[2], 255)
-                target = pygame.Rect(dst_rect.x + int(round(rect[0] * fx)),
-                                     dst_rect.y + int(round(rect[1] * fy)),
+                color, rect = op[1], op[2]
+                alpha = color[3] if len(color) >= 4 else 255
+                # 半透明填充得显式打开混合：渲染器的 draw_blend_mode 默认是 NONE，
+                # 这时 fill_rect 会把 (r,g,b,a) 当成不透明色盖上去，a 被整个丢掉
+                # （HUD 面板底板那种 128 的底色就会糊成纯色）。
+                want_blend = alpha < 255
+                if want_blend != blend:
+                    blend = want_blend
+                    self.renderer.draw_blend_mode = 1 if want_blend else 0
+                self.renderer.draw_color = (color[0], color[1], color[2], alpha)
+                target = pygame.Rect(dst_rect.x + int(round(rect[0] * fx)) - ox,
+                                     dst_rect.y + int(round(rect[1] * fy)) - oy,
                                      max(1, int(round(rect[2] * fx))),
                                      max(1, int(round(rect[3] * fy))))
                 self.renderer.fill_rect(target)
-            elif op[0] == "tex":
-                _, surface, rect = op
+            elif op[0] in ("tex", "texa"):
+                surface, rect = op[1], op[2]
                 texture = self._tex_cache.get(surface)
                 if texture is None:
                     continue
@@ -242,9 +339,39 @@ class GpuPresenter:
                 # 与 rect 所在的图层空间一致，这里只需再做一次窗口换算
                 sw = pygame.Surface.get_width(surface)
                 sh = pygame.Surface.get_height(surface)
-                target = pygame.Rect(dst_rect.x + int(round(rect[0] * fx)),
-                                     dst_rect.y + int(round(rect[1] * fy)),
+                target = pygame.Rect(dst_rect.x + int(round(rect[0] * fx)) - ox,
+                                     dst_rect.y + int(round(rect[1] * fy)) - oy,
                                      max(1, int(round(sw * fx))),
                                      max(1, int(round(sh * fy))))
-                texture.alpha = 255
+                # texa 带整体透明度（符卡宣言立绘的淡入淡出、召唤物的淡入淡出）：
+                # 直接交给显卡调制，省掉 CPU 端逐帧抠半透明副本。tex 明确写回 255，
+                # 免得同一张纹理被上一条 texa 指令留下的 alpha 影响。
+                # op[5] 是混合模式（1 = 逐像素 alpha，2 = 加法），缺省按 alpha 混合。
+                mode = op[5] if len(op) > 5 else 1
+                if mode != blend_mode or texture is not blend_tex:
+                    texture.blend_mode = mode
+                    blend_tex, blend_mode = texture, mode
+                texture.alpha = op[4] if len(op) > 4 else 255
                 texture.draw(dstrect=target)
+        if blend:
+            self.renderer.draw_blend_mode = 0
+        if active is not None:
+            self._use_clip(None, dst_rect, fx, fy)
+
+    def _use_clip(self, clip, dst_rect, fx, fy):
+        """把「图层空间的裁剪框」设成渲染视口，返回视口原点（窗口像素）
+
+        没有裁剪时还原成整窗视口。SDL 的视口同时是裁剪框与坐标原点：设了它以后
+        texture.draw / fill_rect 的坐标都相对视口左上角，所以调用方要减去返回的
+        原点（否则整层会被平移出画面）。
+        """
+        if clip is None:
+            self.renderer.set_viewport(None)
+            return 0, 0
+        rect = pygame.Rect(dst_rect.x + int(round(clip[0] * fx)),
+                           dst_rect.y + int(round(clip[1] * fy)),
+                           max(1, int(round(clip[2] * fx))),
+                           max(1, int(round(clip[3] * fy))))
+        rect = rect.clip(dst_rect)
+        self.renderer.set_viewport(rect)
+        return rect.x, rect.y

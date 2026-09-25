@@ -1,0 +1,8 @@
+*** Begin Patch
+*** Update File: tools/_scratch_a.py
+@@
+-line1
+-
+-line3
++ok
+*** End Patch

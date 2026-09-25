@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>下载与运行 | 東方天空街 Touhou Sky Street</title>
+<meta name="description" content="下载与运行東方天空街 Touhou Sky Street：打包版与源码两种方式、系统要求、首次启动、config.json 与 warehouse.json 存档位置、找不到 Python 的处理办法。">
+<meta name="theme-color" content="#04060e">
+<script>try{if(sessionStorage.getItem("warp-card")){document.documentElement.classList.add("warp-in");setTimeout(function(){document.documentElement.classList.remove("warp-in")},3000)}}catch(e){}</script>
+<link rel="icon" href="assets/img/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+<link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+<canvas id="danmaku" aria-hidden="true"></canvas>
+
+<header class="site-nav">
+  <div class="wrap">
+    <a class="brand" href="index.html">
+      <span class="cn">東方天空街</span>
+      <span class="en">Touhou Sky Street</span>
+    </a>
+    <nav class="nav-list" aria-label="主导航">
+      <a href="download.html" data-card-no="Start Game" data-card-cn="下载与运行" data-card-en="Download &amp; Run">Start Game<span class="cn">下载</span></a>
+      <a href="gameplay.html" data-card-no="How to Play" data-card-cn="玩法" data-card-en="Keys &middot; Systems &middot; Practice">How to Play<span class="cn">玩法</span></a>
+      <a href="characters.html" data-card-no="Characters" data-card-cn="自机与对手" data-card-en="4 Players &middot; 17 Bosses">Characters<span class="cn">人物</span></a>
+      <a href="stages.html" data-card-no="Stages" data-card-cn="七段上升的路" data-card-en="01 &ndash; EX">Stages<span class="cn">舞台</span></a>
+      <a href="items.html" data-card-no="Item Index" data-card-cn="物品图鉴" data-card-en="61 Items">Items<span class="cn">图鉴</span></a>
+      <a href="music.html" data-card-no="Music Room" data-card-cn="音乐室" data-card-en="Sound Track">Music Room<span class="cn">曲目</span></a>
+      <a href="about.html" data-card-no="About" data-card-cn="关于本作" data-card-en="Touhou Sky Street">About<span class="cn">关于</span></a>
+    </nav>
+  </div>
+</header>
+
+<main class="deck">
+  <div class="page-head">
+    <div class="bg" style="background-image:url('assets/img/shot/title.webp')"></div>
+    <div class="wrap">
+      <div class="tag kicker">Start Game</div>
+      <h1>下载与运行</h1>
+      <span class="en">Windows 10 / 11</span>
+      <p class="lead">两条路：拿打包版直接双击，或者用源码跑。两条路都在 Windows 10 / 11 上验证过。</p>
+    </div>
+  </div>
+  <section class="section">
+    <div class="wrap">
+      <div class="dl-grid">
+        <div class="panel">
+          <h3><span class="tag">Route A</span>打包版（免 Python）</h3>
+          <ul>
+            <li>解压后得到 <code>TouHouSkyStreet</code> 文件夹，双击里面的 <code>TouHouSkyStreet.exe</code> 即可开打。</li>
+            <li>不需要装 Python，也不需要联网。</li>
+            <li>是 64 位产物，系统必须是 64 位 Windows 10 / 11。</li>
+            <li>资源约 470 MB，所以用文件夹版而不是单文件版——就地读资源，启动快，素材还能随时替换。</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3><span class="tag">Route B</span>源码运行</h3>
+          <ul>
+            <li>需要 Python 3.8 以上，安装时记得勾选 <b>Add Python to PATH</b>。</li>
+            <li>双击根目录的 <code>启动游戏.bat</code>，它会自动检测并安装缺失的依赖。</li>
+            <li>或者手动来：<code>pip install -r requirements.txt</code> 之后 <code>python main.py</code>。</li>
+            <li>想在命令行直接指定难度：<code>python main.py easy</code>。</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/GeorgieMaxGotWiped/TouHouSkyStreet/releases" target="_blank" rel="noopener">前往 Releases<span class="cn">GitHub</span></a>
+        <a class="btn" href="https://github.com/GeorgieMaxGotWiped/TouHouSkyStreet" target="_blank" rel="noopener">浏览源码仓库<span class="cn">GitHub</span></a>
+      </div>
+      <p style="margin-top:18px;color:var(--ink-mute);font-size:14px">如果 Releases 里还没有打包产物，可以直接克隆仓库用源码运行，或者按仓库里的说明自行打包。</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">要求</div>
+        <div>
+          <h2>系统要求</h2>
+          <span class="en">Requirements</span>
+        </div>
+      </div>
+      <div class="keys-table">
+        <div><span>操作系统</span><span>Windows 10 / 11（64 位）</span></div>
+        <div><span>运行时</span><span>打包版无需任何运行时；源码版需要 Python 3.8+</span></div>
+        <div><span>依赖库</span><span>Pygame（<code>requirements.txt</code> 里已列全，<code>启动游戏.bat</code> 会自动装）</span></div>
+        <div><span>磁盘</span><span>解压后约 470 MB</span></div>
+        <div><span>显示</span><span>支持 1x / 2x / 3x / 4x 输出分辨率与无边框全屏，高分屏上建议调高渲染倍率</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">首次</div>
+        <div>
+          <h2>第一次启动</h2>
+          <span class="en">First Run</span>
+        </div>
+      </div>
+      <ol class="steps">
+        <li>
+          <div>
+            <h4>让它自己检查依赖</h4>
+            <p>源码版第一次运行 <code>启动游戏.bat</code> 时，脚本会找本机的 Python 并安装缺的包，装完自动进游戏。</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h4>在主菜单按下第一项</h4>
+            <p>上下键移动光标，<kbd>Enter</kbd> 或 <kbd>Z</kbd> 确认。Start Game 之后是选自机、再选难度。</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h4>先把画面对清楚</h4>
+            <p>进设置把输出分辨率、缩放模式与渲染倍率调到你满意，再开打。这些值会存进 <code>config.json</code>。</p>
+          </div>
+        </li>
+        <li>
+          <div>
+            <h4>打不过就进 Practice</h4>
+            <p>符卡练习可以单独练任意一张符卡，不用从头再打一遍整面。</p>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">存档</div>
+        <div>
+          <h2>设置与仓库放在哪</h2>
+          <span class="en">Save Data</span>
+        </div>
+      </div>
+      <div class="dl-grid">
+        <div class="panel">
+          <h3><span class="tag">config.json</span>用户设置</h3>
+          <ul>
+            <li>音量、游戏速度、Boss 立绘版本、输出分辨率、缩放模式、全屏、默认自机与渲染倍率。</li>
+            <li>与游戏程序放在同一目录。</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3><span class="tag">warehouse.json</span>本地仓库</h3>
+          <ul>
+            <li>撤离时存进来的物资，跨局保留。</li>
+            <li>同样与游戏程序同目录；重装或换机器时，把这个文件一起带走就不会丢东西。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">排查</div>
+        <div>
+          <h2>找不到 Python 怎么办</h2>
+          <span class="en">Troubleshooting</span>
+        </div>
+      </div>
+      <div class="panel">
+        <ul>
+          <li>在项目根目录新建一个 <code>python_path.txt</code>，第一行写上 Python 可执行文件的完整路径，例如 <code>C:\Python313\python.exe</code>。</li>
+          <li>启动脚本会优先读这个文件，找不到就退回直接用 <code>python</code>。</li>
+          <li>仍然起不来时，在命令行手动执行 <code>python main.py</code>，把报错信息留下来便于定位。</li>
+          <li>部分音乐文件还在打磨中，缺失或播放失败会被自动跳过，不影响运行。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <span>&copy; <span data-year>2026</span> 東方天空街 Touhou Sky Street 制作组</span>
+    <span>东方 Project 同人二次创作 · 非商业作品</span>
+    <span class="copy"><a href="about.html">关于与素材许可</a></span>
+  </div>
+</footer>
+
+<div class="title-card" id="warp" aria-hidden="true">
+  <div class="inner">
+    <div class="no"></div>
+    <div class="cn"></div>
+    <div class="en"></div>
+  </div>
+</div>
+<script src="js/warp-in.js"></script>
+
+<script src="js/danmaku.js"></script>
+<script src="js/site.js"></script>
+
+</body>
+</html>

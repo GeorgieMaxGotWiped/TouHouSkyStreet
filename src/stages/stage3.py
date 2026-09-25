@@ -886,7 +886,9 @@ def _revival_check_hits(undeads, bullet_manager, P):
                 continue
             if circle_collision(u["x"], u["y"], P["hit_radius"],
                                 pb.x, pb.y, pb.collision_radius):
-                pb.alive = False
+                # 穿透弹（Mage）打中后不消失，只记下这个目标（同一目标只结算一次）
+                if not pb.try_hit(u):
+                    continue
                 u["hp"] -= pb.damage
                 if u["hp"] <= 0:
                     _revival_kill(u, bullet_manager, P)
@@ -1605,23 +1607,23 @@ class Stage3_CatacombsF1(Stage):
         self.defeat_dialogue_lines = [
             ("Bonzo", "真是精彩！"),
             ("Bonzo", "好久没有看到这么有趣的表演了！"),
-            ("魔法使 Mage", "你似乎一点也不在意最近发生的事情。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "你似乎一点也不在意最近发生的事情。"),
             ("Bonzo", "为什么要在意？"),
             ("Bonzo", "这里可是地下城。"),
             ("Bonzo", "奇怪的事情每天都在发生。"),
-            ("魔法使 Mage", "但最近的异常，绝对不仅仅是巧合。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "但最近的异常，绝对不仅仅是巧合。"),
             ("Bonzo", "也许吧。"),
             ("Bonzo", "不过，有个人应该会很乐意回答你的问题。"),
-            ("魔法使 Mage", "谁？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "谁？"),
             ("Bonzo", "继续往前走。"),
             ("Bonzo", "你很快就会见到他的。"),
         ]
         self.defeat_dialogue_portraits = {
-            "魔法使 Mage": cfg.SELF_SPRITE,
+            cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             "Bonzo": cfg.BONZO_BOSS_SPRITE,
         }
         self.defeat_dialogue_portrait_sides = {
-            "魔法使 Mage": "left",
+            cfg.PLAYER_DIALOGUE_NAME: "left",
         }   # 压暗背景，突出弹幕
 
     def setup_waves(self):
@@ -1829,24 +1831,24 @@ class Stage3_CatacombsF1(Stage):
         self.dialogue_lines = [
             ("Bonzo", "欢迎！欢迎！"),
             ("Bonzo", "今天的观众只有一位吗？"),
-            ("魔法使 Mage", "这里就是地下城？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "这里就是地下城？"),
             ("Bonzo", "答对了！"),
             ("Bonzo", "不过，很遗憾，没有奖品！"),
-            ("魔法使 Mage", "最近这里似乎不太平。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "最近这里似乎不太平。"),
             ("Bonzo", "哈哈哈哈！"),
             ("Bonzo", "地下城什么时候平静过？"),
-            ("魔法使 Mage", "看来，从你这里问不出什么。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "看来，从你这里问不出什么。"),
             ("Bonzo", "别这么心急嘛！"),
             ("Bonzo", "演出才刚刚开始呢！"),
-            ("魔法使 Mage", "那就让我看看，你准备了什么节目。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "那就让我看看，你准备了什么节目。"),
         ]
         # 说话角色的立绘：自机 Mage 在左侧，Bonzo 在右侧
         self.dialogue_portraits = {
-            "魔法使 Mage": cfg.SELF_SPRITE,
+            cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             "Bonzo": cfg.BONZO_BOSS_SPRITE,
         }
         self.dialogue_portrait_sides = {
-            "魔法使 Mage": "left",
+            cfg.PLAYER_DIALOGUE_NAME: "left",
         }
         # 对话开始即让Boss入场：在场但不攻击、不显示血条
         self.setup_boss()

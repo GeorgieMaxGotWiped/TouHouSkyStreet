@@ -1,0 +1,19 @@
+*** Begin Patch
+*** Update File: src/stages/stage6.py
+@@
+-        self.final_wave = EnemyWave([
+-            WitherColossusEnemy(288, -70, deploy_y=150),
+-            WitherTerracottaEnemy(110, -40, deploy_y=150),
+-            WitherTerracottaEnemy(466, -40, deploy_y=150),
+-            WitherGuardEnemy(150, _top_spawn(-50)),
+-            WitherGuardEnemy(430, _top_spawn(-50)),
+-            WitherKnightEnemy(220, -80),
+-            WitherKnightEnemy(360, -80),
+-        ], name="Final Defense")
++        self.final_wave = EnemyWave([
++            WitherColossusEnemy(288, -70, deploy_y=94),
++            SkeletonLordEnemy(side=-1, y=204), SkeletonLordEnemy(side=1, y=204),
++            WitherGuardEnemy(196, _top_spawn(-50)),
++            WitherGuardEnemy(380, _top_spawn(-50)),
++        ], name="Final Defense")
+*** End Patch

@@ -27,9 +27,9 @@
   <section class="hero">
     <span class="kicker">Download</span>
     <h1>下载游戏</h1>
-    <p class="lead">Windows 10/11 · 单文件可执行 · 即点即玩</p>
+    <p class="lead">64 位 Windows 10/11 · 免安装 Python · 解压即玩</p>
     <div class="btn-row">
-      <a class="btn btn-primary" href="https://github.com/GeorgieMaxGotWiped/TouHouSkyStreet/releases" target="_blank" rel="noopener">⬇ 下载 EXE 版</a>
+      <a class="btn btn-primary" href="https://github.com/GeorgieMaxGotWiped/TouHouSkyStreet/releases" target="_blank" rel="noopener">⬇ 下载游戏</a>
       <a class="btn btn-ghost" href="#source">源码运行</a>
     </div>
   </section>
@@ -40,14 +40,15 @@
       <table>
         <tr><th>项目</th><th>要求</th></tr>
         <tr><td>系统</td><td>Windows 10 / 11</td></tr>
-        <tr><td>运行方式</td><td>直接运行 EXE，或使用 Python 3.8+ 运行源码</td></tr>
+        <tr><td>运行方式</td><td>解压后双击文件夹内的 <code>TouHouSkyStreet.exe</code>，或使用 Python 3.8+ 运行源码</td></tr>
         <tr><td>显示</td><td>窗口 / 无边框全屏（<code>F11</code>），输出分辨率 960×720 ~ 3840×2880</td></tr>
         <tr><td>显卡 / 内存</td><td>普通集成显卡与 4GB 内存即可流畅运行；调高输出分辨率与渲染倍率会占用更多显存</td></tr>
       </table>
 
-      <h2>EXE 版</h2>
-      <p>游戏打包为单个 <code>TouHouSkyStreet.exe</code>，双击即可运行，无需安装 Python。EXE 将随 GitHub Releases 发布（构建命令见下）。</p>
-      <p>打包命令等价于：<code>pip install -r requirements-build.txt</code> 后执行 <code>python -m PyInstaller --onefile --name TouHouSkyStreet --add-data "assets;assets" --noconsole main.py</code>。</p>
+      <h2>下载版</h2>
+      <p>游戏打包为 <code>TouHouSkyStreet</code> 文件夹（<code>TouHouSkyStreet.exe</code> 与 <code>_internal</code>），解压后双击里面的 exe 即可运行，无需安装 Python。压缩包将随 GitHub Releases 发布。</p>
+      <p>请解压到桌面或任意可写目录再运行：程序需要在同目录写入 <code>config.json</code> 设置与 <code>warehouse.json</code> 仓库存档，所以不要放在 <code>C:\Program Files</code> 这类受保护目录下。</p>
+      <p>打包命令等价于：<code>pip install -r requirements-build.txt</code> 后执行 <code>python -m PyInstaller --onedir --noupx --name TouHouSkyStreet --add-data "assets;assets" --noconsole main.py</code>。</p>
       <div class="btn-row" style="justify-content:flex-start;">
         <a class="btn btn-ghost" href="https://github.com/GeorgieMaxGotWiped/TouHouSkyStreet/releases" target="_blank" rel="noopener">前往 GitHub Releases 下载</a>
       </div>

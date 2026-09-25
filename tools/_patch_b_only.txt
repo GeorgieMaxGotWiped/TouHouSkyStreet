@@ -1,0 +1,112 @@
+*** Begin Patch
+*** Update File: src/stages/stage6.py
+@@
+-def _ghost_spell_maxor(ghost, bullet_manager, player_x, player_y, t):
+-    """Phase1「Maxor's Frenzy」的穿梭骷髅排——只留「折返时撒一排 Wither Skull」。
+-
+-    原版 Maxor 以 6.6px/帧 在屏幕上方来回穿梭，每次折返在整个宽度上撒一排 Wither
+-    Skull（5.6px/帧，飞出 36 帧后逐渐减速）；这里削成三排、每排 3 发、弹速 3.0、
+-    左右方向交替，末尾补一对原版破防螺旋里的自机狙大玉。TNT / 冲击波 / 结晶 /
+-    红激光解除无敌那套机制全部去掉。
+-    """
+-    if t in (0, 22, 44):
+-        base = math.pi * (0.38 if (t // 22) % 2 == 0 else 0.62)
+-        for i in range(3):
+-            bullet = create_bullet_angle(
+-                cfg.BATTLE_AREA_WIDTH * (i + 1) / 4.0, ghost["y"] + 4,
+-                base + (i - 1) * 0.05, 3.0, Bullet.TYPE_CIRCLE,
+-                radius=4.0, color=(170, 215, 255), lifetime=420)
+-            bullet.custom_sprite_path = cfg.STAGE6_WITHER_SKULL_SPRITE
+-            bullet.custom_sprite_height = 30
+-            bullet.glow_color = (255, 245, 225)
+-            bullet.glow_padding = 6
+-            _add(bullet_manager, bullet)
+-    if t == 66:
+-        base = math.atan2(player_y - ghost["y"], player_x - ghost["x"])
+-        for offset in (-0.15, 0.15):
+-            _add(bullet_manager, create_bullet_angle(
+-                ghost["x"], ghost["y"] + 30, base + offset, 2.6,
+-                Bullet.TYPE_BIG, radius=4.0, color=(255, 90, 60)))
+-
+-
+-def _ghost_spell_storm(ghost, bullet_manager, player_x, player_y, t):
+-    """雷符「Giga Lightning」狂暴状态的四层弹幕——每层各取一点、全部削弱。
+-
+-    原版狂暴状态是「解封可被打（受伤翻 4 倍）后用弹幕铺场」：每 8 帧一圈八向圆弹
+-    （基准角随机）、每 20 帧一对自己狙刀弹、每 52 帧一圈十四发旋转箭环、每 150 帧
+-    六发随机大玉，期间 Storm 还会换位。这里只留弹幕本身并削一层：八向环改成每 20
+-    帧 6 发、自机狙双刀每 40 帧、旋转箭环 8 发、随机大玉 3 发；换位与「可被攻击 /
+-    受伤翻倍」那套机制都不带。
+-    """
+-    if t % 20 == 0:
+-        base = random.uniform(0.0, math.tau)
+-        for i in range(6):
+-            _add(bullet_manager, create_bullet_angle(
+-                ghost["x"], ghost["y"], base + i * math.tau / 6, 1.6,
+-                Bullet.TYPE_CIRCLE, radius=2.5, color=(130, 210, 255)))
+-    if t % 40 == 0:
+-        base = math.atan2(player_y - ghost["y"], player_x - ghost["x"])
+-        for offset in (-0.15, 0.15):
+-            _add(bullet_manager, create_bullet_angle(
+-                ghost["x"], ghost["y"], base + offset, 2.8,
+-                Bullet.TYPE_KNIFE, radius=2.5, color=(170, 225, 255)))
+-    if t == 52:
+-        for i in range(8):
+-            _add(bullet_manager, create_bullet_angle(
+-                ghost["x"], ghost["y"], t * 0.06 + i * math.tau / 8, 1.7,
+-                Bullet.TYPE_ARROW, radius=3, color=(90, 190, 255)))
+-    if t == 70:
+-        for _ in range(3):
+-            _add(bullet_manager, create_bullet_angle(
+-                ghost["x"], ghost["y"], random.uniform(0.0, math.tau), 2.4,
+-                Bullet.TYPE_BIG, radius=4, color=(200, 240, 255)))
+-
+-
+-def _ghost_spell_goldor(ghost, bullet_manager, player_x, player_y, t):
+-    """Phase3「Infinite Rage」的金环与米弹螺旋——去掉剑盾本体与剑隙机制。
+-
+-    原版 Goldor 中央悬停，4 把金色巨剑环绕成旋转剑盾，凋零骷髅从剑的间隙散射、
+-    金色圆弹环随剑盾角度旋转、再叠一层反向白环与米弹四臂螺旋（每 13~15 帧一波）。
+-    这里不要剑、也不要剑隙，只留弹幕形状且全部削弱：金环 8 发、反向白环 6 发各来
+-    一次，米弹改成三臂、每 12 帧一圈、共 4 圈。
+-    """
+-    gx, gy = ghost["x"], ghost["y"] + 30
+-    if t == 0:
+-        for i in range(8):
+-            _add(bullet_manager, create_bullet_angle(
+-                gx, gy, i * math.tau / 8, 1.6, Bullet.TYPE_CIRCLE,
+-                radius=3, color=(255, 210, 110)))
+-    if t == 18:
+-        for i in range(6):
+-            _add(bullet_manager, create_bullet_angle(
+-                gx, gy, 0.3 - i * math.tau / 6, 1.3, Bullet.TYPE_CIRCLE,
+-                radius=3, color=(245, 235, 200)))
+-    if 30 <= t <= 66 and (t - 30) % 12 == 0:
+-        for arm in range(3):
+-            _add(bullet_manager, create_bullet_angle(
+-                gx, gy, t * 0.08 + arm * math.tau / 3, 1.6, Bullet.TYPE_RICE,
+-                radius=2.5, color=(255, 200, 110), lifetime=300))
+-
+-
+-def _ghost_spell_necron(ghost, bullet_manager, player_x, player_y, t):
+-    """终符「Necron's Frenzy」的八臂螺旋与大玉环——去掉加速与烈焰上涌。
+-
+-    原版每 5 帧放一圈八臂螺旋（弹速随符卡时间由 1.55 涨到 7.0）、每 72 帧一圈大玉，
+-    屏幕底部还有不断上涌、蛇形摆动的地狱火逼玩家往场地上方退；这里削成六臂、每 15
+-    帧一圈、弹速固定 1.5，共 4 圈，末尾补一圈大玉，火焰与加速都不带。
+-    """
+-    gx, gy = ghost["x"], ghost["y"] + 42
+-    if t <= 45 and t % 15 == 0:
+-        for arm in range(6):
+-            _add(bullet_manager, create_bullet_angle(
+-                gx, gy, t * 0.35 + arm * math.tau / 6, 1.5,
+-                Bullet.TYPE_CIRCLE, radius=3.0, lifetime=320,
+-                color=(255, 92, 92) if arm % 2 == 0 else (206, 84, 255)))
+-    if t == 66:
+-        for i in range(10):
+-            _add(bullet_manager, create_bullet_angle(
+-                gx, gy, i * math.tau / 10 + 0.07, 1.6, Bullet.TYPE_BIG,
+-                radius=4.0, color=(196, 74, 255), lifetime=340))
+-
+-
+*** End Patch

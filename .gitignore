@@ -30,3 +30,6 @@ assets/backgrounds/bg_0_old.png
 
 # 工具脚本生成的启动日志
 tools/_boot_*.txt
+
+# 官网浏览器验收截图（与 previews/ 同类：工具生成的临时出图）
+shots/

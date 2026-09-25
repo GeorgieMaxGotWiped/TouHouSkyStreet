@@ -21,3 +21,13 @@ def get_stage_class(stage_num):
 def get_next_stage_class(stage_num):
     """返回当前关卡通关后的下一关类；没有下一关返回 None"""
     return get_stage_class(stage_num + 1)
+
+
+def get_extra_stage_class():
+    """Ex 面（裂隙 ~ The Rift）关卡类。
+
+    刻意不进 1~6 面的推进链表：Ex 面只能从主菜单「Extra Stage」进入，
+    通关后也不会接在六面之后（六面的下一关仍然是「没有」）。
+    """
+    from src.stages.stage_ex import ExtraStageTheRift
+    return ExtraStageTheRift

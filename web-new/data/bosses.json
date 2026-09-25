@@ -1,0 +1,73 @@
+{
+ "note": "Boss 介绍文字。按 id 合并进 stages.json 的 Boss 条目；单独成文是因为同一个 Boss 会在多面出现（如 The Watcher），写进 stages.json 会重复。",
+ "bosses": [
+  {
+   "id": "arachne",
+   "intro": "天空街最下面那道门，也是唯一一个先跟你说话再动手的对手——她想知道你为什么要往下走。四张符卡都围着网转：罠符「Luxurious Spool」织出旋转的网，丝符「Soul String」负责把网结起来，成网之前没有判定，成网之后才开始收。"
+  },
+  {
+   "id": "end_stone_protector",
+   "intro": "守在龙巢门口的构装体。没有台词，也不打算跟你讲道理，只负责确认你有没有资格走进去。一张符卡：石符「Immobile Protector's Wraith」。"
+  },
+  {
+   "id": "ender_dragon",
+   "intro": "末地最深处的存在，也是本作里唯一一条会开口的龙。四张符卡加一张 Last Spell：燃符「Fireball Barrage」在「轰炸阵列」与「绕场封锁」两幕之间循环，电光「Directional Lightning」用麟弹铺出折线阵列，龙符「One with the Dragons」的幻影龙会随战斗推进从两条增到五条，最后用超符「Superiority」的正反双螺旋收尾。"
+  },
+  {
+   "id": "the_watcher",
+   "intro": "从你踏进地下城那一刻起就在看着你的家伙，台词里没有一句直接回答你的问题——「答案不是靠询问得到的」。展符「Undead Exhibition」是他唯一一张符卡，三面与五面共用同一套弹幕：游戏里是明确复用同一份实现的，为的是两个场的视觉语言一致。"
+  },
+  {
+   "id": "bonzo",
+   "intro": "地下城的小丑，把战斗当成演出看。五张符卡几乎每张都是一个节目：死符「Undead Revival」的亡灵要走完召唤—存活—消散—重组四态，骸符「Skull Dreadlord」在场上按下一枚巨大的骷髅头印记，戏符「Grand Illusion」拿小丑面具的幻象藏他的位置，气符「Balloon Barrage」放气球，最后以秘仪「Showtime」收场。"
+  },
+  {
+   "id": "scarf",
+   "intro": "四面的道中，一个还没出师的死灵术士。两张符卡都是「带一队人」：队符「Necrotic Squad」放出四名亡灵固定站位，当前主攻的那个带脉冲光环与名字标识，牧师会开紫色强化法阵；兵符「Terracotta Army」干脆抬出一整座兵马俑军阵——倒下的会留下石质头骨标记，再从复活法阵里站起来。"
+  },
+  {
+   "id": "sadan",
+   "intro": "四面的关底，墓穴的看守者。他不急着拦你，台词更像是在给忠告：「有些答案，只有亲眼见到才能理解。」三张符卡：巨符「Precursors' Return」、王符「The Giant One」，以及以终符神代「Bridge Between Worlds」收尾。"
+  },
+  {
+   "id": "the_professor",
+   "intro": "五面连战的第一位。墓穴对他来说不是墓地而是实验室，开场第一句就是「看来，今天来了位新的研究对象。」一张非符加一张符卡：实验「Professor's Experiment」。"
+  },
+  {
+   "id": "thorn",
+   "intro": "连战第二位，灵兽园的看守。台词只有两句，第二句是「让我看看你有没有资格继续前进」。符卡灵符「Spirit Zoo」是一场 Spirit Animals 的展示。"
+  },
+  {
+   "id": "livid",
+   "intro": "连战第三位，打完他 Wither Lords 的连战才正式开始。符卡影符「八重存在」正对着他那句「希望你能找到真正的我」——这一场的难点不在火力，在辨认。"
+  },
+  {
+   "id": "maxor",
+   "intro": "凋零领主里的第一位。Phase1「Maxor's Frenzy」把高速穿梭、Wither Skull 横穿与 TNT 延迟爆炸叠在一起。台词是「终于来了个有意思的家伙」。"
+  },
+  {
+   "id": "storm",
+   "intro": "掌管雷霆的凋零。雷符「Giga Lightning」在场地四角立起四根方形避雷柱，柱子正下方留了一小块安全区，其余位置按阶段落下雷击，打到后面还会叠上狂暴倍率。"
+  },
+  {
+   "id": "goldor",
+   "intro": "唯一带两张符卡的凋零领主，也是唯一一个把界面当武器用的：机械符「Terminal Pursuit」给你一个方形环路终端让你破解，破解期间屏幕会拉一层警告红幕；Phase3「Infinite Rage」换成旋转的剑盾，缝隙里还钻得出骷髅。"
+  },
+  {
+   "id": "necron",
+   "intro": "五面的关底，王座前的最后一位。焚符「Nuclear Frenzy」是积蓄起来的核能爆炸领域，终符「Necron's Frenzy」把旋转八臂螺旋、大玉环和上涌的烈焰叠在一起。他没有 Last Spell。台词也比谁都清楚：「没有人能够改变已经发生的事情。」"
+  },
+  {
+   "id": "wither_king",
+   "intro": "六面关底，本作的最终 Boss。王符「Wither King's Dominion」开场，中途要用冥符「Five Corrupted Relics」处理五件腐化的 Relic，还有龙符「Withered Dragon」与裂符「Dimensional Slash」，最后以终仪「The Wither King's Final Slumber」收场。他的门徒会在这一面以残影出现，每人从自己那张符卡里借一小段弹幕——只留形状，机制一概不带。"
+  },
+  {
+   "id": "wizardman",
+   "intro": "Ex 面的道中。他不承认自己是一个人：「Wizardman 不是一个人，而是一份传承。」三项试炼——竞速、交锋、四子连线，全部由非符弹幕支撑，没有符卡。"
+  },
+  {
+   "id": "barry",
+   "intro": "Ex 面的关底，一位落选之后还在竞选的前市长。他自己也知道这件事有多荒唐——「最荒唐的是什么，你知道吗？」竞选纲领有五级税率、强调手势、翻转世界和抗议标语，同样不走符卡。"
+  }
+ ]
+}

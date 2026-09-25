@@ -43,9 +43,15 @@ def get_item_icon(item_id, size=32, factor=1):
     return _icon_cache.get(key)
 
 
-def draw_item_icon(screen, item_id, x, y, size=32, padding=0):
+def draw_item_icon(screen, item_id, x, y, size=32, padding=0, ui_layer=False):
     """在屏幕坐标 (x, y) 处绘制物品图标（居中于 size x size 方格）；无图标时跳过。
-    padding 会在四周留白，使图标缩进并完整落在框内。"""
+    padding 会在四周留白，使图标缩进并完整落在框内。
+
+    ui_layer=True 时走 screen.blit（高分辨率图层：与文字 / 面板同层），图标排在该层
+    的最后，所以压得住同样画在这一层上的底板；默认走 blit_gpu（显卡实体层，回放时
+    在所有图层之下），只适合底板也画在同一层的界面 —— 底板画在高分辨率图层、图标
+    画在显卡实体层时，图标会被底板盖住（STG 右侧的掉落弹窗就是这么错的）。
+    """
     inner = size - 2 * padding
     if inner <= 0:
         return
@@ -56,7 +62,7 @@ def draw_item_icon(screen, item_id, x, y, size=32, padding=0):
     dest = (x + (size - icon.get_width()) // 2,
             y + (size - icon.get_height()) // 2)
     blit_gpu = getattr(screen, "blit_gpu", None)
-    if blit_gpu is None:
+    if ui_layer or blit_gpu is None:
         screen.blit(icon, dest)
     else:
         blit_gpu(icon, dest)

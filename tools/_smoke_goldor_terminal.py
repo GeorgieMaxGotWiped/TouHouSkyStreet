@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # 机械符「Terminal Pursuit」冒烟测试：
 # 强开 Goldor 第一张符卡 -> 环路约束 -> 依次破解 5 个终端 ->
-# 进入中央 -> 符卡结束并直接进入 Aegis；期间渲染预览图。
+# 进入中央 -> 符卡结束并直接进入下一张符卡；期间渲染预览图。
 import os
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 os.environ["SDL_AUDIODRIVER"] = "dummy"
@@ -31,6 +31,12 @@ def make_stage():
     boss.entry_timer = 0
     boss._start_spell(boss.spell_cards[0])
     assert boss.current_spell.name == "机械符「Terminal Pursuit」", boss.current_spell.name
+    # 符卡宣言横幅的计时只在 _draw_spell_banner 里推进，而这个测试是直接跑
+    # stage.update 的无头用例：不关掉横幅，符卡函数永远等不到第一帧。
+    boss.spell_banner_active = False
+    # 「开符站稳」最多要等 240 帧（Goldor 从 y=-60 走到符卡站位），测试只想跑
+    # 符卡本身，这里直接落位，省掉 90 帧的入场移动。
+    boss.x, boss.y = boss.target_x, boss.target_y
     return stage, boss
 
 
@@ -211,7 +217,7 @@ assert all(t["solved"] for t in state["terminals"]), "全部终端应已解决"
 render("_gt_terminal_center_open.png")
 print("[4] 中央入口已开启 OK")
 
-# --- 5. 进入中央 -> 符卡结束 -> 直接进入 Aegis ---
+# --- 5. 进入中央 -> 符卡结束 -> 直接进入下一张符卡（direct_next）---
 guard = 0
 while boss.current_spell is not None and boss.current_spell.name == "机械符「Terminal Pursuit」" and guard < 900:
     state = boss.goldor_terminal
@@ -235,9 +241,11 @@ while boss.current_spell is not None and boss.current_spell.name == "机械符�
                              (gt.GT_ENTRANCE_Y0 + gt.GT_ENTRANCE_Y1) / 2, speed=5.0)
     px, py = tick(stage, bm, px, py)
     guard += 1
-assert boss.current_spell is not None and "Aegis" in boss.current_spell.name, (
-    f"应进入 Aegis，实际 {boss.current_spell.name if boss.current_spell else None}")
+assert (boss.current_spell is not None
+        and boss.current_spell.name == boss.spell_cards[1].name), (
+    f"应直接进入下一张符卡 {boss.spell_cards[1].name}，实际 "
+    f"{boss.current_spell.name if boss.current_spell else None}")
 print("[5] 进入中央后符卡结束，直接进入下一张：", boss.current_spell.name)
 
-render("_gt_terminal_aegis_start.png")
+render("_gt_terminal_next_spell.png")
 print("[SMOKE] 机械符「Terminal Pursuit」全流程 OK")

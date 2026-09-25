@@ -10,6 +10,7 @@ import random
 import pygame
 
 from src.engine import settings as cfg
+from src.engine import hires
 from src.engine.collision import circle_collision
 from src.engine.pseudo3d import Pseudo3DFloor
 from src.entities.boss import Boss, SpellCard
@@ -500,7 +501,9 @@ def _sadan_terracotta_check_hits(army, bullet_manager, P, boss):
                 continue
             if circle_collision(s["x"], s["y"], P["hit_radius"],
                                 pb.x, pb.y, pb.collision_radius):
-                pb.alive = False
+                # 穿透弹（Mage）打中后不消失，只记下这个目标（同一目标只结算一次）
+                if not pb.try_hit(s):
+                    continue
                 s["hp"] -= pb.damage
                 if s["hp"] <= 0:
                     _sadan_terracotta_down(s, bullet_manager, P)
@@ -1721,6 +1724,8 @@ _BBW_OUTSIDE_WALL_COLOR = (105, 70, 160)
 _BBW_OUTSIDE_WALL_RADIUS = 5.0
 _BBW_OUTSIDE_ROW_GAP = 14.0
 _BBW_OUTSIDE_COL_GAP = 14.0
+# 终符黑暗遮罩的横带条数上限：带内取同一 alpha，带高 = 高度 / 该值（见 draw_foreground）
+_BBW_DARK_BANDS = 180
 
 
 def _bbw_channel_vertices(base_y):
@@ -2391,22 +2396,22 @@ class Stage4_Catacombs(Stage):
 
         self.defeat_dialogue_lines = [
             ("Sadan", "看来，我的忠告并没有什么作用。"),
-            ("魔法使 Mage", "所以，地下城深处究竟隐藏着什么？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "所以，地下城深处究竟隐藏着什么？"),
             ("Sadan", "一个漫长的故事。"),
-            ("魔法使 Mage", "听起来，你并不准备解释。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "听起来，你并不准备解释。"),
             ("Sadan", "有些答案，只有亲眼见到才能理解。"),
-            ("魔法使 Mage", "看来，我只能继续前进了。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "看来，我只能继续前进了。"),
             ("Sadan", "那么，去吧。"),
             ("Sadan", "不过，从这里开始，等待你的将不再是守卫者。"),
-            ("魔法使 Mage", "什么意思？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "什么意思？"),
             ("Sadan", "你很快就会知道。"),
         ]
         self.defeat_dialogue_portraits = {
-            "魔法使 Mage": cfg.SELF_SPRITE,
+            cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             "Sadan": cfg.SADAN_BOSS_SPRITE,
         }
         self.defeat_dialogue_portrait_sides = {
-            "魔法使 Mage": "left",
+            cfg.PLAYER_DIALOGUE_NAME: "left",
         }
 
     def setup_waves(self):
@@ -2679,33 +2684,50 @@ class Stage4_Catacombs(Stage):
         if top >= height:
             return
 
-        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
         span = max(1.0, float(height - top))
-        for y in range(top, height):
+        # 原来在这里逐行画 1x 半透明横线（最多 720 条 CPU 绘制）再整幅 blit 放大，
+        # 放缩后每行的边界都会糊成一条。现在按同样的 alpha 公式改成若干条纯色横带，
+        # 铺到「战斗区前景」层（弹幕之上、HUD 之下，顺序与原来贴在画布后半一致）：
+        # 纯色块放大后没有边缘，不需要按倍率出图，缺的只是顺序，所以走显卡填矩形。
+        # 带高不超过 4 逻辑像素，最陡处相邻带只差不到 2/255，看不出台阶。
+        band = max(1, int(math.ceil(span / _BBW_DARK_BANDS)))
+        band_top = top
+        band_alpha = None
+        y = top
+        while y < height:
             t = (y - top) / span
             alpha = int(255 * min(1.0, 0.18 + t * 1.35))
-            pygame.draw.line(overlay, (0, 0, 3, alpha), (0, y), (width, y))
-        screen.blit(overlay, (offset_x, offset_y))
+            if band_alpha is None:
+                band_alpha = alpha
+            elif alpha != band_alpha:
+                hires.fg_rect(screen, (0, 0, 3, band_alpha),
+                              (offset_x, offset_y + band_top, width, y - band_top))
+                band_top = y
+                band_alpha = alpha
+            y += band
+        if band_alpha is not None:
+            hires.fg_rect(screen, (0, 0, 3, band_alpha),
+                          (offset_x, offset_y + band_top, width, height - band_top))
 
     def _start_dialogue(self):
         """关底对话：自机 Mage 与 Sadan 战前对峙（自机立绘在左侧）。"""
         self.dialogue_lines = [
             ("Sadan", "能来到这里，说明你已经击败了前面的那些家伙。"),
-            ("魔法使 Mage", "看来，你知道我为什么会来到这里。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "看来，你知道我为什么会来到这里。"),
             ("Sadan", "最近的地下城，确实有些不同。"),
-            ("魔法使 Mage", "终于有人愿意承认这一点了。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "终于有人愿意承认这一点了。"),
             ("Sadan", "但我劝你不要继续前进。"),
-            ("魔法使 Mage", "为什么？"),
+            (cfg.PLAYER_DIALOGUE_NAME, "为什么？"),
             ("Sadan", "因为有些事情，并不值得被重新唤醒。"),
-            ("魔法使 Mage", "那我更应该亲眼确认。"),
+            (cfg.PLAYER_DIALOGUE_NAME, "那我更应该亲眼确认。"),
             ("Sadan", "既然如此，就先证明你有继续前进的资格吧。"),
         ]
         self.dialogue_portraits = {
-            "魔法使 Mage": cfg.SELF_SPRITE,
+            cfg.PLAYER_DIALOGUE_NAME: cfg.SELF_SPRITE,
             "Sadan": cfg.SADAN_BOSS_SPRITE,
         }
         self.dialogue_portrait_sides = {
-            "魔法使 Mage": "left",
+            cfg.PLAYER_DIALOGUE_NAME: "left",
         }
         self.setup_boss()
         self._ramp_background_speed(FINAL_BOSS_BG_SPEED_MULT, BOSS_BG_RAMP_TIME)

@@ -5,6 +5,7 @@ import math
 import os
 import pygame
 from src.engine import settings as cfg
+from src.engine import hires
 
 
 # Boss-specific reward drop identifiers.
@@ -13,11 +14,36 @@ DROP_REVIVE_STONE = "revive_stone"
 
 
 _pickup_sprite_cache = {}
+# 红 Power 方块的烤图缓存：key = (边长, 渲染倍率)
+_power_block_cache = {}
 
 
-def _get_pickup_sprite(path, target_size):
+def _get_power_block_sprite(size, factor=1):
+    """红 Power 方块按渲染倍率烤成一张小图
+
+    方块是「实心红 + 白边」两笔画出来的，逐帧 draw.rect 在放大后白边会发糊；
+    烤成一张图以后它和敌机、自机一样走战斗区实体层，清晰度与层级都对得上。
+    """
+    factor = max(1, int(factor))
+    key = (size, factor)
+    sprite = _power_block_cache.get(key)
+    if sprite is not None:
+        return sprite
+    if factor > 1:
+        sprite = hires.HiresSurface((size * factor, size * factor), factor)
+    else:
+        sprite = pygame.Surface((size, size), pygame.SRCALPHA)
+    box = pygame.Rect(0, 0, size * factor, size * factor)
+    pygame.draw.rect(sprite, cfg.COLOR_RED, box, 0)
+    pygame.draw.rect(sprite, cfg.COLOR_WHITE, box, max(1, 2 * factor))
+    _power_block_cache[key] = sprite
+    return sprite
+
+
+def _get_pickup_sprite(path, target_size, factor=1):
     """Load and scale a pickup sprite. Returns None when unavailable."""
-    key = (path, target_size)
+    factor = max(1, int(factor))
+    key = (path, target_size, factor)
     if key in _pickup_sprite_cache:
         return _pickup_sprite_cache[key]
 
@@ -39,7 +65,10 @@ def _get_pickup_sprite(path, target_size):
                 scale = target_size / max(w, h)
                 new_w = max(1, round(w * scale))
                 new_h = max(1, round(h * scale))
-                sprite = pygame.transform.smoothscale(img, (new_w, new_h))
+                if factor > 1:
+                    sprite = hires.scaled_image(img, (new_w, new_h), factor)
+                else:
+                    sprite = pygame.transform.smoothscale(img, (new_w, new_h))
     except Exception as exc:
         print(f"[Pickup] Failed to load sprite {path}: {exc}")
 
@@ -117,9 +146,8 @@ class PowerPickup:
         px = int(self.x + offset_x)
         py = int(self.y + offset_y)
         s = self.SIZE
-        rect = pygame.Rect(px - s // 2, py - s // 2, s, s)
-        pygame.draw.rect(screen, cfg.COLOR_RED, rect, 0)
-        pygame.draw.rect(screen, cfg.COLOR_WHITE, rect, 2)
+        hires.blit_entity(screen, _get_power_block_sprite(s, hires.scale()),
+                          (px - s // 2, py - s // 2))
 
     def get_hitbox(self):
         return (self.x, self.y, self.SIZE / 2)
@@ -137,11 +165,11 @@ class OverfluxPowerOrbPickup(PowerPickup):
         super().__init__(x, y, vx=vx, value=0)
 
     def draw(self, screen, offset_x=0, offset_y=0):
-        sprite = _get_pickup_sprite(self.SPRITE_PATH, self.SIZE)
+        sprite = _get_pickup_sprite(self.SPRITE_PATH, self.SIZE, hires.scale())
         px = int(self.x + offset_x)
         py = int(self.y + offset_y)
         if sprite is not None:
-            screen.blit(sprite, sprite.get_rect(center=(px, py)))
+            hires.blit_entity(screen, sprite, sprite.get_rect(center=(px, py)))
             return
         pygame.draw.circle(screen, self.FALLBACK_COLOR, (px, py), self.SIZE // 2, 0)
         pygame.draw.circle(screen, cfg.COLOR_WHITE, (px, py), self.SIZE // 2, 2)
@@ -159,11 +187,11 @@ class ReviveStonePickup(PowerPickup):
         super().__init__(x, y, vx=vx, value=0)
 
     def draw(self, screen, offset_x=0, offset_y=0):
-        sprite = _get_pickup_sprite(self.SPRITE_PATH, self.SIZE)
+        sprite = _get_pickup_sprite(self.SPRITE_PATH, self.SIZE, hires.scale())
         px = int(self.x + offset_x)
         py = int(self.y + offset_y)
         if sprite is not None:
-            screen.blit(sprite, sprite.get_rect(center=(px, py)))
+            hires.blit_entity(screen, sprite, sprite.get_rect(center=(px, py)))
             return
         pygame.draw.circle(screen, self.FALLBACK_COLOR, (px, py), self.SIZE // 2, 0)
         pygame.draw.circle(screen, cfg.COLOR_WHITE, (px, py), self.SIZE // 2, 2)

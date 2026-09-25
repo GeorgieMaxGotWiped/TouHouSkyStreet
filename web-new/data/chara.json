@@ -1,0 +1,40 @@
+{
+ "characters": [
+  {
+   "key": "mage", "en": "Mage", "cn": "魔法使", "label": "魔法使 Mage", "title": "Mage · 魔法使",
+   "color": "#50c8ff",
+   "portrait": "assets/chara/mage.webp",
+   "fight": "assets/chara/mage-fight.webp",
+   "intro": ["以寒霜镰刀与魔导之力贯穿弹幕的魔法使。", "指尖凝霜成刃，Hyperion 一出鞘，", "整条地下城走廊都会安静下来。"],
+   "shot": "自机弹 1 / 3 / 5 条，扩散是其他自机的两倍，固定弹能穿透，没有追踪弹。",
+   "shot_tag": "扩散 · 穿透"
+  },
+  {
+   "key": "archer", "en": "Archer", "cn": "弓手", "label": "弓手 Archer", "title": "Archer · 弓手",
+   "color": "#c060ff",
+   "portrait": "assets/chara/archer.webp",
+   "fight": "assets/chara/archer-fight.webp",
+   "intro": ["眼里只有一条弹道的弓手。", "拉满弓弦的那一瞬，敌机的位置、", "弹幕的缝隙、风的走向，全在计算之内。"],
+   "shot": "与魔法使同形但不穿透，扩散减半（低速再减半）；所有箭从同一点射出，中间那支命中时炸掉小范围敌弹。",
+   "shot_tag": "收束 · 爆裂箭"
+  },
+  {
+   "key": "tank", "en": "Tank", "cn": "重装", "label": "重装 Tank", "title": "Tank · 重装",
+   "color": "#d0d0d8",
+   "portrait": "assets/chara/tank.webp",
+   "fight": "assets/chara/tank-fight.webp",
+   "intro": ["把像素方块当铠甲披在身上的重装。", "慢，但不会被推走：", "她站在哪里，哪里就是安全线。"],
+   "shot": "自机弹 1 / 2 / 3 条笔直向上，另带追踪弹。",
+   "shot_tag": "直射 · 追踪"
+  },
+  {
+   "key": "frozen_blaze", "en": "Frozen Blaze", "cn": "冰焰", "label": "冰焰 Frozen Blaze", "title": "Frozen Blaze · 冰焰",
+   "color": "#90b8ff",
+   "portrait": "assets/chara/frozen_blaze.webp",
+   "fight": "assets/chara/frozen_blaze-fight.webp",
+   "intro": ["把地下城走廊冻成一条冰面的自机。", "冰箭离弦即结霜，弹幕再密，", "也挡不住其中那条笔直的白线。"],
+   "shot": "1 / 2 / 3 条扇形 + 追踪弹，与旧版逐发手感一致，是默认自机。",
+   "shot_tag": "扇形 · 追踪 · 默认"
+  }
+ ]
+}

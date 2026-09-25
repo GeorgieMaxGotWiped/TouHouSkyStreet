@@ -1,0 +1,6 @@
+*** Begin Patch
+*** Update File: src/stages/stage6.py
+@@
+-#   - 后半段「要塞」：推进到凋零要塞，敌人减少而弹幕更宏大，曾败北的
++#   - 后半段「要塞」：推进到凋零要塞后不再生成小怪，曾败北的
+*** End Patch

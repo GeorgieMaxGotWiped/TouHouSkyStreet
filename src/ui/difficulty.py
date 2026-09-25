@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 # 难度选择界面：远征出征前选择本局难度（当前仅开放 Easy）
 
-import math
-import os
 import pygame
 
 from src.engine import settings as cfg
+from src.engine import hires, painter
 from src.engine.game import GameState
+from src.ui.menu import load_background, refresh_background
+from src.ui.anim import Entrance
 
 
 # 难度定义：(ID, 显示名, 是否已开放)
@@ -18,30 +19,27 @@ DIFFICULTIES = [
 ]
 
 
-def _load_background(path, size):
-    try:
-        if os.path.exists(path):
-            img = pygame.image.load(path)
-            return pygame.transform.smoothscale(img, size)
-    except Exception as e:
-        print(f"[Difficulty] Failed to load {path}: {e}")
-    return None
-
-
 class DifficultySelectState(GameState):
     """出征前的难度选择界面。当前仅有 Easy 开放，其余难度显示为锁定。"""
 
-    def __init__(self, game):
+    def __init__(self, game, extra=False):
         super().__init__(game)
-        self.background = _load_background(
-            cfg.MENU_BACKGROUND, (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
+        # extra=True：Ex 面（裂隙 ~ The Rift）流程，选完难度直接开打（不经仓库出征）
+        self.extra = bool(extra)
+        # 背景按渲染倍率准备（与主菜单同一个助手）：以前这里是把图缩到 960x720
+        # 再整体放大，等于先丢细节再放大，所以这一屏的背景一直是糊的
+        self.background = load_background(cfg.MENU_BACKGROUND,
+                                          (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
+                                          game.screen.bake_factor())
         # 光标位置：只能落在唯一开放的 EASY 上
         self.selected = self._available_indexes()[0]
         self._last_mouse_pos = (0, 0)
+        self.intro = Entrance()
 
     def enter(self, game):
         self.game.stop_music()
         self.selected = self._available_indexes()[0]
+        self.intro.reset()
 
     def _available_indexes(self):
         return [i for i, entry in enumerate(DIFFICULTIES) if entry[2]]
@@ -61,8 +59,23 @@ class DifficultySelectState(GameState):
             return
         self.game.global_data["difficulty"] = DIFFICULTIES[self.selected][0]
         self.game.play_sfx("ok")
+        if self.extra:
+            self._launch_extra_stage()
+            return
         from src.ui.loadout import LoadoutState
         self.game.switch_state(LoadoutState(self.game))
+
+    def _launch_extra_stage(self):
+        """Ex 面入场：不经仓库出征，直接满火力开打（装备物品效果本面不生效）。"""
+        from src.stages import get_extra_stage_class
+        from src.ui.loading import start_stage
+
+        self.game.global_data["score"] = 0
+        self.game.global_data["lives"] = cfg.PLAYER_START_LIVES
+        self.game.global_data["bombs"] = cfg.PLAYER_START_BOMBS
+        self.game.global_data["power"] = cfg.EX_STAGE_START_POWER
+        self.game.global_data["graze"] = 0
+        start_stage(self.game, get_extra_stage_class())
 
     def _difficulty_rects(self):
         """各难度行的可点击区域（与 draw 布局一致）"""
@@ -74,11 +87,13 @@ class DifficultySelectState(GameState):
         return rects
 
     def update(self, dt):
+        self.intro.update(dt)
         keys = self.game.keys_just_pressed
         if (keys.get(pygame.K_ESCAPE, False) or keys.get(pygame.K_x, False)
                 or keys.get(pygame.K_BACKSPACE, False)):
-            from src.ui.menu import MenuState
-            self.game.switch_state(MenuState(self.game))
+            # 退回上一步：自机选择
+            from src.ui.character_select import CharacterSelectState
+            self.game.switch_state(CharacterSelectState(self.game, extra=self.extra))
             return
 
         if keys.get(pygame.K_UP, False) or keys.get(pygame.K_w, False):
@@ -114,50 +129,83 @@ class DifficultySelectState(GameState):
                     break
 
     def draw(self, screen):
-        if self.background:
-            screen.blit(self.background, (0, 0))
+        background = refresh_background(self, screen)
+        if background:
+            screen.blit_gpu(background, (0, 0))
         else:
-            screen.fill((4, 4, 16))
+            screen.fill_gpu((4, 4, 16))
 
         title = self.game.font_large.render("选择难度", True, cfg.COLOR_YELLOW)
-        screen.blit(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 110))
+        # 进场动效：标题 -> 副标题 -> 各难度行 -> 底部提示，依次错位淡入
+        alpha, dy = self.intro.item(0)
+        screen.blit_gpu(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 110 - dy),
+                        alpha=alpha)
 
-        sub = self.game.font_small.render("Difficulty", True, cfg.COLOR_GRAY)
-        screen.blit(sub, ((cfg.SCREEN_WIDTH - sub.get_width()) // 2, 162))
+        sub_text = ("Extra Stage · 裂隙 ~ The Rift" if self.extra else "Difficulty")
+        sub = self.game.font_small.render(
+            sub_text, True, cfg.COLOR_YELLOW if self.extra else cfg.COLOR_GRAY)
+        alpha, dy = self.intro.item(0.5)
+        screen.blit_gpu(sub, ((cfg.SCREEN_WIDTH - sub.get_width()) // 2, 162 - dy),
+                        alpha=alpha)
 
         rects = self._difficulty_rects()
         for i, (_, name, available) in enumerate(DIFFICULTIES):
+            alpha, dy = self.intro.item(1.0 + i * 0.5)
+            if alpha <= 0:
+                continue
             is_sel = i == self.selected
-            rect = rects[i]
+            rect = rects[i].move(0, -dy)
             color = (cfg.COLOR_YELLOW if is_sel else cfg.COLOR_WHITE) if available else cfg.COLOR_DARK_GRAY
             text = self.game.font_medium.render(name, True, color)
 
-            pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, rect)
-            pygame.draw.rect(screen,
-                             cfg.COLOR_GRAY if available else cfg.COLOR_DARK_GRAY,
-                             rect, 1)
+            # 各难度的底板 / 外框同样预烤后由显卡 1:1 贴出（1x 画布上的矩形放大
+            # 时边缘会被线性过滤糊掉）
+            screen.blit_baked(("diff_row", rect.size, available), rect.topleft,
+                              rect.size, self._build_row(available), alpha)
 
             if available and is_sel:
-                pulse = math.sin(pygame.time.get_ticks() * 0.004) * 0.3 + 0.7
-                glow_color = tuple(int(c * pulse) for c in cfg.COLOR_YELLOW)
-                glow = self.game.font_medium.render(name, True, glow_color)
-                screen.blit(glow, (rect.x + (rect.width - glow.get_width()) // 2,
-                                   rect.y + (rect.height - glow.get_height()) // 2))
+                glow = self.game.font_medium.render(
+                    name, True, hires.pulse_color(cfg.COLOR_YELLOW))
+                screen.blit_gpu(glow, (rect.x + (rect.width - glow.get_width()) // 2,
+                                       rect.y + (rect.height - glow.get_height()) // 2),
+                                alpha=alpha)
                 ind = self.game.font_medium.render("> ", True, cfg.COLOR_YELLOW)
-                screen.blit(ind, (rect.x + 10, rect.y + (rect.height - ind.get_height()) // 2))
+                screen.blit_gpu(ind, (rect.x + 10,
+                                      rect.y + (rect.height - ind.get_height()) // 2),
+                                alpha=alpha)
             else:
-                screen.blit(text, (rect.x + (rect.width - text.get_width()) // 2,
-                                   rect.y + (rect.height - text.get_height()) // 2))
+                screen.blit_gpu(text, (rect.x + (rect.width - text.get_width()) // 2,
+                                       rect.y + (rect.height - text.get_height()) // 2),
+                                alpha=alpha)
 
             if not available:
                 lock = self.game.font_small.render("未开放", True, cfg.COLOR_DARK_GRAY)
-                screen.blit(lock, (rect.right - lock.get_width() - 10,
-                                   rect.y + (rect.height - lock.get_height()) // 2))
+                screen.blit_gpu(lock, (rect.right - lock.get_width() - 10,
+                                       rect.y + (rect.height - lock.get_height()) // 2),
+                                alpha=alpha)
 
         hint = self.game.font_small.render(
             "↑↓ 选择    Enter/Z 确认    Esc 返回", True, cfg.COLOR_GRAY)
-        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 620))
+        alpha, dy = self.intro.item(4.0)
+        screen.blit_gpu(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 620 - dy),
+                        alpha=alpha)
 
         summary = self.game.font_small.render(
-            "当前仅有 Easy 难度开放", True, cfg.COLOR_GREEN)
-        screen.blit(summary, ((cfg.SCREEN_WIDTH - summary.get_width()) // 2, 654))
+            "当前仅有 Easy 难度开放" if not self.extra
+            else "Ex 面：不经仓库出征，装备物品效果不生效，通关后回主菜单",
+            True, cfg.COLOR_GREEN)
+        alpha, dy = self.intro.item(4.4)
+        screen.blit_gpu(summary, ((cfg.SCREEN_WIDTH - summary.get_width()) // 2, 654 - dy),
+                        alpha=alpha)
+
+    @staticmethod
+    def _build_row(available):
+        """难度行的底板 / 外框预烤画法（尺寸取自 blit_baked 建好的目标表面）"""
+        def build(target, k):
+            size = pygame.Surface.get_size(target)
+            rect = (0, 0, size[0], size[1])
+            painter.bake_rect(target, 1, cfg.COLOR_PANEL_BG, rect)
+            painter.bake_rect(target, 1,
+                              cfg.COLOR_GRAY if available else cfg.COLOR_DARK_GRAY,
+                              rect, 1)
+        return build

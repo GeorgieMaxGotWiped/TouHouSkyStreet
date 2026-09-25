@@ -13,6 +13,7 @@ import random
 import pygame
 
 from src.engine import settings as cfg
+from src.engine import hires
 from src.entities.bullet import Bullet, create_bullet_angle
 
 # ---------------------------------------------------------------------------
@@ -51,9 +52,13 @@ _goldor_rage_sword_rot_cache = {}
 _goldor_rage_glow_cache = {}
 
 
-def _get_goldor_rage_sword_base(sword_len):
-    """加载金色巨剑贴图：抠除黑底，按剑身长度等比缩放。"""
-    key = int(round(sword_len))
+def _get_goldor_rage_sword_base(sword_len, sharp=False):
+    """加载金色巨剑贴图：抠除黑底，按剑身长度等比缩放。
+
+    sharp=True 时输出渲染倍率的贴图（巨剑画在弹幕之上，是前景层里最显眼的一块）。
+    """
+    factor = hires.scale() if sharp else 1
+    key = (int(round(sword_len)), factor)
     if key in _goldor_rage_sword_base_attempted:
         return _goldor_rage_sword_base_cache.get(key)
     _goldor_rage_sword_base_attempted.add(key)
@@ -74,38 +79,44 @@ def _get_goldor_rage_sword_base(sword_len):
         blue[:] = arr[:, :, 2]
         del red, green, blue
         side = max(1, int(round(sword_len / math.sqrt(2))))
-        sprite = pygame.transform.smoothscale(surf, (side, side))
+        if factor > 1:
+            sprite = hires.scaled_image(surf, (side, side), factor)
+        else:
+            sprite = pygame.transform.smoothscale(surf, (side, side))
     except Exception as exc:
         print(f"[GoldorRage] Failed to load sword sprite: {exc}")
     _goldor_rage_sword_base_cache[key] = sprite
     return sprite
 
 
-def _get_goldor_rage_sword_rotated(sword_len, sword_angle):
+def _get_goldor_rage_sword_rotated(sword_len, sword_angle, sharp=False):
     """按剑位角旋转巨剑贴图：剑刃朝外、金色护手朝内（旋转角 = 角度 + 225°）。"""
-    key = (int(round(sword_len)), int(round(math.degrees(sword_angle))) % 360)
+    factor = hires.scale() if sharp else 1
+    key = (int(round(sword_len)), int(round(math.degrees(sword_angle))) % 360,
+           factor)
     sprite = _goldor_rage_sword_rot_cache.get(key)
     if sprite is not None:
         return sprite
-    base = _get_goldor_rage_sword_base(sword_len)
+    base = _get_goldor_rage_sword_base(sword_len, sharp)
     if base is None:
         return None
-    sprite = pygame.transform.rotate(base, math.degrees(sword_angle) + 225)
+    sprite = hires.rotate(base, math.degrees(sword_angle) + 225)
     _goldor_rage_sword_rot_cache[key] = sprite
     return sprite
 
 
-def _get_goldor_rage_glow(radius):
-    """巨剑底部柔和金色辉光（缓存）。"""
-    key = int(radius)
+def _get_goldor_rage_glow(radius, sharp=False):
+    """巨剑底部柔和金色辉光（缓存，按渲染倍率作画）。"""
+    factor = hires.scale() if sharp else 1
+    key = (int(radius), factor)
     glow = _goldor_rage_glow_cache.get(key)
     if glow is not None:
         return glow
     size = key * 2
-    glow = pygame.Surface((size, size), pygame.SRCALPHA)
+    glow = hires.panel((size, size), factor)
     for r in range(key, 0, -1):
         alpha = int(42 * (1 - r / float(key)))
-        pygame.draw.circle(glow, (255, 215, 130, alpha), (key, key), r)
+        glow.hi_circle((255, 215, 130, alpha), (key, key), r)
     _goldor_rage_glow_cache[key] = glow
     return glow
 
@@ -200,11 +211,11 @@ def draw_goldor_rage(screen, boss, ox=0, oy=0):
     r_int = int(radius)
 
     # 盾环 + 尾迹 + 剑隙提示合并为一张轨道层
-    layer = pygame.Surface((r_int * 2 + 10, r_int * 2 + 10), pygame.SRCALPHA)
-    c = r_int + 5
-    rect = pygame.Rect(5, 5, r_int * 2, r_int * 2)
-    pygame.draw.circle(layer, (255, 205, 90, 28), (c, c), r_int, 1)
-    pygame.draw.circle(layer, (255, 232, 170, 16), (c, c), r_int - 7, 1)
+    sharp = hires.entity_factor(screen) > 1
+    layer = hires.entity_effect(screen, (int(cx) - r_int - 5, int(cy) - r_int - 5),
+                                (r_int * 2 + 10, r_int * 2 + 10), fg=True)
+    layer.circle((255, 205, 90, 28), (cx, cy), r_int, 1)
+    layer.circle((255, 232, 170, 16), (cx, cy), r_int - 7, 1)
     angle = state["angle"]
     for i in range(4):
         sword_angle = angle + i * math.tau / 4
@@ -212,28 +223,30 @@ def draw_goldor_rage(screen, boss, ox=0, oy=0):
         stop_a = sword_angle % math.tau
         if stop_a <= start_a:
             stop_a += math.tau
-        pygame.draw.arc(layer, (255, 205, 110, int(34 + 30 * pulse)),
-                        rect, start_a, stop_a, 2)
+        layer.arc((255, 205, 110, int(34 + 30 * pulse)),
+                  (int(cx) - r_int, int(cy) - r_int, r_int * 2, r_int * 2),
+                  start_a, stop_a, 2)
         gap = (sword_angle + math.tau / 8) % math.tau
         gap0 = (gap - 0.20) % math.tau
         gap1 = gap + 0.20
         if gap1 <= gap0:
             gap1 += math.tau
-        pygame.draw.arc(layer, (255, 240, 190, int(115 + 85 * pulse)),
-                        rect, gap0, gap1, 3)
-    screen.blit(layer, (int(cx) - c, int(cy) - c))
+        layer.arc((255, 240, 190, int(115 + 85 * pulse)),
+                  (int(cx) - r_int, int(cy) - r_int, r_int * 2, r_int * 2),
+                  gap0, gap1, 3)
+    layer.commit()
 
     # 巨剑本体：金色辉光 + 旋转贴图（剑刃朝外）
     sword_len = state["sword_len"]
-    glow = _get_goldor_rage_glow(int(sword_len * 0.55))
+    glow = _get_goldor_rage_glow(int(sword_len * 0.55), sharp)
     for i in range(4):
         sword_angle = angle + i * math.tau / 4
         sx = cx + math.cos(sword_angle) * radius
         sy = cy + math.sin(sword_angle) * radius
         if glow is not None:
-            screen.blit(glow, (int(sx) - glow.get_width() // 2,
-                               int(sy) - glow.get_height() // 2))
-        sprite = _get_goldor_rage_sword_rotated(sword_len, sword_angle)
+            hires.blit_fg(screen, glow, (int(sx) - glow.get_width() // 2,
+                                         int(sy) - glow.get_height() // 2))
+        sprite = _get_goldor_rage_sword_rotated(sword_len, sword_angle, sharp)
         if sprite is not None:
-            screen.blit(sprite, (int(sx) - sprite.get_width() // 2,
-                                 int(sy) - sprite.get_height() // 2))
+            hires.blit_fg(screen, sprite, (int(sx) - sprite.get_width() // 2,
+                                           int(sy) - sprite.get_height() // 2))

@@ -41,6 +41,39 @@ SPELL_SETTLE_MAX = 240       # 最长等待帧数（超时就位兜底）
 BOSS_DIALOGUE_FLOAT_AMPLITUDE = 8   # 上下浮动幅度（px）
 BOSS_DIALOGUE_FLOAT_SPEED = 2.2     # 漂浮角速度（rad/s）
 
+# 阶段血环：Boss 机体周围一圈，表示当前阶段（一个非符 + 紧随其后的符卡）的总血量
+RING_THICKNESS = 5             # 环厚度（px）
+RING_RADIUS_SPRITE_FIT = 0.95  # 环半径 = 立绘外接矩形长边的一半 x 该系数 + 余量
+RING_RADIUS_PAD = 8            # 半径余量（px）
+RING_RADIUS_MIN = 34           # 半径下限（无贴图的几何 Boss / 小立绘）
+RING_RADIUS_MAX = 92           # 半径上限（大立绘不至于顶到战斗区两侧）
+RING_BACK_COLOR = (58, 58, 68) # 底环：阶段总刻度（尚未打掉的部分）
+RING_SPELL_DARKEN = 0.62       # 符卡段颜色 = 非符段颜色 x 该系数（略深，作区分）
+RING_ARC_STEP = 4.0            # 分段扇形的步进角度（度）
+RING_RATIO_REF = 1.5           # 典型「符卡血量 : 非符血量」比值
+RING_SPELL_SHARE_REF = 1.0 / 6.0   # 该比值下符卡段占的角度比例（平均 1/6 圈）
+RING_SPELL_SHARE_MIN = 0.03    # 符卡段最小角度比例（再薄也留一丝可见）
+RING_EARLY_EPS = 0.5           # 判定「非符提前结束」的血量容差
+
+
+def _ring_spell_share(non_spell_hp, spell_hp):
+    """符卡段在环上占的角度比例（压缩后）。
+
+    直接按血量占比（spell / (non + spell)）画，本作的符卡血量普遍是非符的 1~3 倍，
+    一圈里大半都是符卡色、非符段反而被挤没。这里按血量比做一次压缩：
+    「符卡 : 非符 = RING_RATIO_REF」的典型阶段正好落到 1/6 圈
+    （RING_SPELL_SHARE_REF），各阶段的差异仍随血量比单调变化 —— 非符越厚，
+    符卡段越窄；本阶段只有符卡（非符没血）时整圈都是符卡色。
+    """
+    if non_spell_hp <= 0:
+        return 1.0
+    if spell_hp <= 0:
+        return 0.0
+    weight = RING_RATIO_REF * (1.0 - RING_SPELL_SHARE_REF) / RING_SPELL_SHARE_REF
+    ratio = spell_hp / non_spell_hp
+    share = ratio / (ratio + weight)
+    return min(1.0, max(RING_SPELL_SHARE_MIN, share))
+
 
 def _english_only(text):
     """Boss 显示名：只保留 ASCII 英文部分（删除中文），避免名字过长超出战斗区域"""
@@ -55,11 +88,13 @@ _boss_sprite_attempted = set()
 def _get_boss_sprite(path, target_height, sharp=False):
     """加载并缓存 Boss 贴图（按目标高度等比缩放）；失败返回 None（回退几何绘制）
 
-    sharp=True 走文字/立绘的高分辨率图层（符卡宣言那类整幅立绘用），像素乘渲染
-    倍率但度量仍是逻辑尺寸；战斗中的贴图与碰撞 Mask 一律用默认的 1x 版本，
-    这样判定范围不随画面设置改变。
+    sharp=True 走高分辨率（符卡宣言的整幅立绘、战斗中出场的本体）：像素乘渲染
+    倍率，但度量仍是逻辑尺寸，绘制代码不用改；画到哪里由调用方的贴图层决定
+    （立绘走 blit_gpu_top，本体走 hires.blit_entity）。
+    碰撞 Mask 一律用默认的 1x 版本，这样判定范围不随画面设置改变。
     """
-    key = (path, target_height, bool(sharp))
+    factor = hires.scale() if sharp else 1
+    key = (path, target_height, factor)
     if key in _boss_sprite_attempted:
         return _boss_sprite_cache.get(key)
     _boss_sprite_attempted.add(key)
@@ -72,8 +107,9 @@ def _get_boss_sprite(path, target_height, sharp=False):
         if h <= 0:
             raise ValueError("invalid sprite height")
         new_w = max(1, round(w * target_height / h))
-        if sharp:
-            _boss_sprite_cache[key] = hires.scaled_image(img, (new_w, target_height))
+        if factor > 1:
+            _boss_sprite_cache[key] = hires.scaled_image(img, (new_w, target_height),
+                                                        factor)
         else:
             _boss_sprite_cache[key] = pygame.transform.smoothscale(img, (new_w, target_height))
     except Exception as e:
@@ -137,22 +173,24 @@ def _get_bullet_mask(radius):
 _sadan_sword_sprite_cache = {}
 
 
-def _get_sadan_sword_sprite(path, target_height):
+def _get_sadan_sword_sprite(path, target_height, sharp=False):
     """Loads the diamond sword asset and rotates it to fall vertically.
 
     The source icon is a square with a diagonal sword, so it is scaled to
     target_height / sqrt(2) and then rotated +45 degrees. The returned surface
     has the sword blade running straight down.
+
+    sharp=True 时按渲染倍率加载与旋转（旋转在倍率像素上做），供实体层直贴。
     """
-    key = (path, target_height)
+    key = (path, target_height, bool(sharp))
     if key in _sadan_sword_sprite_cache:
         return _sadan_sword_sprite_cache[key]
     sprite = None
     try:
         side = max(1, int(round(target_height / math.sqrt(2))))
-        source = _get_boss_sprite(path, side)
+        source = _get_boss_sprite(path, side, sharp=sharp)
         if source is not None:
-            sprite = pygame.transform.rotate(source, 45)
+            sprite = _hi_rotate(source, 45)
     except Exception as e:
         print(f"[Boss] Failed to load Sadan sword sprite {path}: {e}")
     _sadan_sword_sprite_cache[key] = sprite
@@ -166,6 +204,69 @@ def _with_alpha(surf, alpha):
     result = surf.copy()
     result.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
     return result
+
+
+# --- 战斗区召唤物 / 特效：贴图按倍率旋转、翻转，画到「实体层」---
+# 召唤物（幻影龙、亡灵展品、亡灵小队、兵马俑、巨像…）原先与整幅画面一起被放大，
+# 与旁边的 Boss 本体、弹幕有清晰度落差。这里统一改走 hires.blit_entity：贴图按
+# 渲染倍率加载（_entity_sprite），旋转 / 翻转在倍率像素上做，整体透明度与加法混合
+# 都交给显卡（不必每帧抠半透明副本）。
+
+
+def _hi_rotate(sprite, degrees):
+    """旋转一张（可能带倍率的）贴图，并补回倍率标记
+
+    pygame.transform 返回的是普通表面，不带「逻辑尺寸」标记 —— 直接贴会被当成 1x
+    图处理（位置按真实像素算，等于错位 + 更糊），所以要重新包一层。
+    """
+    rotated = pygame.transform.rotate(sprite, degrees)
+    factor = getattr(sprite, "hi_scale", 1)
+    return rotated if factor <= 1 else hires.wrap(rotated, factor)
+
+
+def _hi_flip(sprite, flip_x=True, flip_y=False):
+    """水平 / 垂直翻转（同样要补回倍率标记，见 _hi_rotate）"""
+    flipped = pygame.transform.flip(sprite, flip_x, flip_y)
+    factor = getattr(sprite, "hi_scale", 1)
+    return flipped if factor <= 1 else hires.wrap(flipped, factor)
+
+
+def _hi_scale(sprite, logical_size):
+    """按逻辑尺寸重新缩放一张（可能带倍率的）贴图，并保持倍率标记"""
+    factor = getattr(sprite, "hi_scale", 1)
+    size = (max(1, int(round(logical_size[0] * factor))),
+            max(1, int(round(logical_size[1] * factor))))
+    scaled = pygame.transform.smoothscale(sprite, size)
+    return scaled if factor <= 1 else hires.wrap(scaled, factor)
+
+
+def _entity_sprite(path, height, screen):
+    """战斗区召唤物贴图：实体层开着时按渲染倍率加载（关掉开关时仍是 1x 旧观感）"""
+    return _get_boss_sprite(path, height, sharp=hires.entity_factor(screen) > 1)
+
+
+# 符卡宣言文字缓存：key = (符卡名, 颜色) -> (投影, 白字)
+_banner_text_cache = {}
+
+
+def _get_banner_text(name, color):
+    """符卡宣言的两张贴图（带色投影 + 白字），按符卡名缓存
+
+    每次开符本来都要 render 两遍、再用 _with_alpha 抠两份半透明副本（copy + fill
+    走 BLEND_RGBA_MULT 慢路径，实测 1.3ms/帧）。这里缓存一份「自己的」副本，
+    逐帧只调透明度，既省掉渲染与抠副本，也不会污染字体内部的字形缓存表面。
+    """
+    key = (name, tuple(color))
+    got = _banner_text_cache.get(key)
+    if got is None:
+        font = _get_font(SPELL_BANNER_FONT_SIZE, bold=True)
+        shadow = font.render(name, True, color)
+        text = font.render(name, True, cfg.COLOR_WHITE)
+        if len(_banner_text_cache) > 16:
+            _banner_text_cache.clear()
+        got = (shadow.copy(), text.copy())
+        _banner_text_cache[key] = got
+    return got
 
 
 # 亡灵展品柔光层缓存：key = (半径, 颜色)
@@ -194,7 +295,12 @@ _phantom_dragon_glow_cache = {}
 
 
 def _get_phantom_dragon_glow(glow_radius=10, color=(232, 200, 255)):
-    """生成幻影龙贴图的柔和光晕层（沿剪影向外扩散的淡紫柔光，轻微发光）"""
+    """生成幻影龙贴图的柔和光晕层（沿剪影向外扩散的淡紫柔光，轻微发光）
+
+    光晕刻意留在 1x：它是「剪影按 1 像素往外糊一圈」出来的柔边，本身没有细节可
+    丢 —— 按倍率做反而会把 9 次偏移拉成倍率像素一级的台阶（3x 下就是 3 像素一级
+    的硬边）。贴图与法阵走倍率，柔光跟 1x 画布一起放大，观感与旧版一致。
+    """
     key = (PHANTOM_DRAGON_HEIGHT, glow_radius, color)
     if key in _phantom_dragon_glow_cache:
         return _phantom_dragon_glow_cache[key]
@@ -302,6 +408,12 @@ class Boss:
         # 开符站稳：Boss 未到达符卡站位前不展开符卡弹幕
         self._spell_settle = False
         self._spell_settle_frames = 0
+
+        # 阶段血环（Boss 周围一圈：一个非符 + 紧随其后的那张符卡的总血量）
+        self._ring_from = None          # 本阶段起始血量（None = 还没铺环）
+        self._ring_in_non_spell = False # 环里是否留着尚未结清的非符段
+        self._ring_ns_budget = None     # 非符段血量预算（开符时结清）
+        self._ring_sp_budget = None     # 符卡段血量预算
 
         # 符卡
         self.spell_cards = []
@@ -490,6 +602,7 @@ class Boss:
                 self.entering = False
                 self.phase = "non_spell"
                 self.non_spell_timer = 0
+                self._ring_begin_non_spell()
             self.y += 0.5
             return
 
@@ -547,6 +660,7 @@ class Boss:
                     self.phase = "non_spell"
                     self.non_spell_timer = 0
                     self.non_spell_duration = 240
+                    self._ring_begin_non_spell()
 
         elif self.phase == "defeated":
             pass
@@ -702,6 +816,14 @@ class Boss:
                 self.hp = 0
             else:
                 self.hp = self.last_spell_hp
+        # 阶段血环：从非符打进来的结清非符段，否则本阶段从这张符卡起算
+        if self._ring_in_non_spell:
+            thresholds = self._ring_thresholds()
+            if thresholds is not None:
+                self._ring_close_non_spell(*thresholds)
+        else:
+            self._ring_begin_spell_only()
+
     def _clear_spell_effects(self):
         """Boss 战败时清除符卡视觉残留（幻影龙/石柱等）"""
         self.phantom_dragons = []
@@ -833,6 +955,7 @@ class Boss:
             self.phase = "non_spell"
             self.non_spell_timer = 0
             self.non_spell_duration = 240
+            self._ring_begin_non_spell()
 
     def take_damage(self, damage, source=None):
         if (self.entering or self.invincible or not self.combat_enabled
@@ -919,11 +1042,15 @@ class Boss:
         # 超符：金色龙之核心光环（Last Spell 展开时）
         if self.is_last_spell_active():
             self._draw_core_aura(screen, px, py)
+        # 阶段血环：当前阶段（非符 + 符卡）的总血量，画在本体之下
+        self._draw_phase_ring(screen, px, py)
         # Boss 本体：配置了贴图时用贴图替换几何绘制（加载失败则回退八角形）
         if self.sprite_path:
-            sprite = _get_boss_sprite(self.sprite_path, self.sprite_height)
+            sprite = _get_boss_sprite(self.sprite_path, self.sprite_height, sharp=True)
             if sprite is not None:
-                screen.blit(sprite, (px - sprite.get_width() // 2, py - sprite.get_height() // 2))
+                hires.blit_entity(screen, sprite,
+                                  (px - sprite.get_width() // 2,
+                                   py - sprite.get_height() // 2))
             else:
                 self._draw_boss_body(screen, px, py)
         else:
@@ -948,7 +1075,9 @@ class Boss:
         """龙符幻影龙：龙形能量体沿固定轨迹环绕/穿越场地（带柔和光晕）"""
         if not self.phantom_dragons:
             return
-        sprite = _get_boss_sprite(cfg.END_DRAGON_PET_SPRITE, PHANTOM_DRAGON_HEIGHT)
+        sharp = hires.entity_factor(screen) > 1
+        sprite = _entity_sprite(cfg.END_DRAGON_PET_SPRITE, PHANTOM_DRAGON_HEIGHT,
+                                screen)
         if sprite is None:
             return
         glow = _get_phantom_dragon_glow()
@@ -962,39 +1091,44 @@ class Boss:
             img = sprite
             glow_img = glow
             if ang:
-                img = pygame.transform.rotate(sprite, -math.degrees(ang))
+                img = _hi_rotate(sprite, -math.degrees(ang))
                 if glow_img is not None:
-                    glow_img = pygame.transform.rotate(glow_img, -math.degrees(ang))
+                    glow_img = _hi_rotate(glow_img, -math.degrees(ang))
             if flip:
-                img = pygame.transform.flip(img, True, False)
+                img = _hi_flip(img, True, False)
                 if glow_img is not None:
-                    glow_img = pygame.transform.flip(glow_img, True, False)
+                    glow_img = _hi_flip(glow_img, True, False)
 
             # 柔和光晕：亮度随整体透明度缩放，带轻微呼吸脉动
             if glow_img is not None:
                 pulse = 0.72 + 0.28 * math.sin(pygame.time.get_ticks() * 0.004 + i * 1.9)
                 glow_alpha = max(0, min(255, int(alpha * 0.55 * pulse)))
                 if glow_alpha > 0:
-                    g = _with_alpha(glow_img, glow_alpha)
-                    screen.blit(g, (px - g.get_width() // 2, py - g.get_height() // 2))
+                    hires.blit_entity(screen, glow_img,
+                                      (px - glow_img.get_width() // 2,
+                                       py - glow_img.get_height() // 2),
+                                      alpha=glow_alpha)
 
-            if alpha < 255:
-                img = _with_alpha(img, alpha)
-            screen.blit(img, (px - img.get_width() // 2, py - img.get_height() // 2))
+            hires.blit_entity(screen, img,
+                              (px - img.get_width() // 2,
+                               py - img.get_height() // 2),
+                              alpha=alpha)
 
     def _draw_core_aura(self, screen, px, py):
         """金色龙之核心：脉动金环 + 旋转符文环（Last Spell 期间围绕本体）"""
         t = pygame.time.get_ticks() * 0.003
+        fx = hires.entity_effect(screen, (px - 59, py - 59), (118, 118))
         for i, (base_r, width, col) in enumerate((
                 (34, 2, _SUPER_GOLD_DIM), (44, 1, _SUPER_GOLD), (54, 1, _SUPER_WHITE))):
             rr = int(base_r + math.sin(t + i * 1.4) * 2)
-            pygame.draw.circle(screen, col, (px, py), rr, width)
+            fx.circle(col, (px, py), rr, width)
         a = t * 0.9
         for k in range(4):
             ang = a + k * math.pi / 2
             x = px + math.cos(ang) * 30
             y = py + math.sin(ang) * 30
-            pygame.draw.circle(screen, _SUPER_GOLD, (int(x), int(y)), 2, 0)
+            fx.circle(_SUPER_GOLD, (int(x), int(y)), 2, 0)
+        fx.commit()
 
     def _draw_protector_effects(self, screen, offset_x=0, offset_y=0):
         """石符：固定石柱结界 + 堡垒石环 + 震荡冲击环（纯视觉，无判定）"""
@@ -1003,30 +1137,39 @@ class Boss:
             px = int(p["x"] + offset_x)
             py = int(p["y"] + offset_y)
             w, h = p["w"], p["h"]
-            pygame.draw.rect(screen, _STONE_DIM, (px - w // 2, py - h // 2, w, h))
-            pygame.draw.rect(screen, _STONE_COLOR, (px - w // 2, py - h // 2, w, h), 1)
-            pygame.draw.rect(screen, _STONE_COLOR, (px - w // 2, py - h // 2 - 4, w, 5))
+            fx = hires.entity_effect(screen, (px - w // 2 - 2, py - h // 2 - 6),
+                                     (w + 4, h + 12))
+            fx.rect(_STONE_DIM, (px - w // 2, py - h // 2, w, h))
+            fx.rect(_STONE_COLOR, (px - w // 2, py - h // 2, w, h), 1)
+            fx.rect(_STONE_COLOR, (px - w // 2, py - h // 2 - 4, w, 5))
+            fx.commit()
         # 堡垒石环：围绕本体的「岩石堡垒」轮廓
         if self.protector_fortress:
             cx = int(self.x + offset_x)
             cy = int(self.y + offset_y)
             t = pygame.time.get_ticks() * 0.002
-            pygame.draw.circle(screen, _STONE_DIM, (cx, cy), 30, 2)
-            pygame.draw.circle(screen, _STONE_COLOR, (cx, cy), 37, 1)
+            fx = hires.entity_effect(screen, (cx - 44, cy - 44), (88, 88))
+            fx.circle(_STONE_DIM, (cx, cy), 30, 2)
+            fx.circle(_STONE_COLOR, (cx, cy), 37, 1)
             for k in range(4):
                 a = t + k * math.pi / 2
                 tx = cx + math.cos(a) * 30
                 ty = cy + math.sin(a) * 30
-                pygame.draw.rect(screen, _STONE_DIM, (int(tx) - 5, int(ty) - 5, 10, 10))
-                pygame.draw.rect(screen, _STONE_COLOR, (int(tx) - 5, int(ty) - 5, 10, 10), 1)
+                fx.rect(_STONE_DIM, (int(tx) - 5, int(ty) - 5, 10, 10))
+                fx.rect(_STONE_COLOR, (int(tx) - 5, int(ty) - 5, 10, 10), 1)
+            fx.commit()
         # 震荡冲击环
         shock = self.protector_shock
         if shock is not None:
             prog = 1.0 - shock["life"] / shock["max_life"]
             r = int(22 + prog * 190)
             col = tuple(int(c * (0.55 + 0.45 * (1.0 - prog))) for c in _STONE_COLOR)
-            pygame.draw.circle(screen, col,
-                               (int(self.x + offset_x), int(self.y + offset_y)), r, 2)
+            cx = int(self.x + offset_x)
+            cy = int(self.y + offset_y)
+            fx = hires.entity_effect(screen, (cx - r - 3, cy - r - 3),
+                                     (r * 2 + 6, r * 2 + 6))
+            fx.circle(col, (cx, cy), r, 2)
+            fx.commit()
 
     def _draw_watcher_exhibits(self, screen, offset_x=0, offset_y=0):
         """展符亡灵展品：屏幕上方一排亡灵幻影（贴图发光渲染 + 预警光环，纯视觉无判定）"""
@@ -1034,7 +1177,7 @@ class Boss:
             return
         for ex in self.watcher_exhibits:
             height = ex.get("height", 56)
-            sprite = _get_boss_sprite(ex["sprite"], height)
+            sprite = _entity_sprite(ex["sprite"], height, screen)
             if sprite is None:
                 continue
             px = int(ex["x"] + offset_x)
@@ -1043,25 +1186,36 @@ class Boss:
             glow = _get_watcher_glow(int(height * 0.95),
                                      ex.get("glow_color", (70, 110, 200)))
             if glow is not None:
-                screen.blit(glow, (px - glow.get_width() // 2, py - glow.get_height() // 2))
+                hires.blit_entity(screen, glow,
+                                  (px - glow.get_width() // 2,
+                                   py - glow.get_height() // 2))
             # 预警：幽蓝脉冲光环（符卡点亮 ex["warn"] 期间持续闪烁）
             if ex.get("warn"):
                 pulse = (pygame.time.get_ticks() * 0.012) % (math.tau)
                 rr = int(height * 0.62) + int(math.sin(pulse) * 6)
                 warn_col = ex.get("warn_color", (130, 220, 255))
-                pygame.draw.circle(screen, warn_col, (px, py), rr, 2)
-                pygame.draw.circle(screen, (240, 250, 255), (px, py), max(4, rr - 9), 1)
+                fx = hires.entity_effect(screen, (px - rr - 3, py - rr - 3),
+                                         (rr * 2 + 6, rr * 2 + 6))
+                fx.circle(warn_col, (px, py), rr, 2)
+                fx.circle((240, 250, 255), (px, py), max(4, rr - 9), 1)
+                fx.commit()
             # 亡灵幻影贴图：加法混合发光渲染（黑色背景不叠加）
-            screen.blit(sprite, (px - sprite.get_width() // 2, py - sprite.get_height() // 2),
-                        special_flags=pygame.BLEND_ADD)
+            hires.blit_entity(screen, sprite,
+                              (px - sprite.get_width() // 2,
+                               py - sprite.get_height() // 2),
+                              add=True)
 
-    def _draw_revival_circle(self, screen, px, py, prog, color, now):
-        """亡灵魔法阵：旋转六芒星紫环 + 内圈亮纹（Undead 召唤/复活共用，纯视觉）"""
+    def _draw_revival_circle(self, fx, px, py, prog, color, now):
+        """亡灵魔法阵：旋转六芒星紫环 + 内圈亮纹（Undead 召唤/复活共用，纯视觉）
+
+        fx 是一块实体层特效面板（hires.entity_effect）：它按渲染倍率作画，与旁边
+        的召唤物贴图同一清晰度；没有显卡层时就是一张 1x 临时表面，观感与旧版一致。
+        """
         r = 15 + int(8 * (1.0 - prog))
         rot = now * 0.004
         bright = tuple(min(255, c + 60) for c in color)
-        pygame.draw.circle(screen, color, (px, py), r, 2)
-        pygame.draw.circle(screen, bright, (px, py), max(3, r - 5), 1)
+        fx.circle(color, (px, py), r, 2)
+        fx.circle(bright, (px, py), max(3, r - 5), 1)
 
         def _triangle(radius, offset):
             pts = [
@@ -1069,7 +1223,7 @@ class Boss:
                  py + math.sin(rot + offset + k * math.tau / 3) * radius)
                 for k in range(3)
             ]
-            pygame.draw.polygon(screen, color, pts, 1)
+            fx.polygon(color, pts, 1)
 
         _triangle(r, 0.0)
         _triangle(max(3, int(r * 0.6)), math.pi / 3)
@@ -1083,7 +1237,7 @@ class Boss:
         now = pygame.time.get_ticks()
         for u in self.bonzo_undeads:
             height = u.get("height", 46)
-            sprite = _get_boss_sprite(u["sprite"], height)
+            sprite = _entity_sprite(u["sprite"], height, screen)
             px = int(u["x"] + offset_x)
             py = int(u["y"] + offset_y)
             phase = u["phase"]
@@ -1095,43 +1249,58 @@ class Boss:
             # 常驻亡灵能量光晕（所有状态都有一层淡紫柔光）
             glow = _get_watcher_glow(int(height * 0.9), glow_color)
             if glow is not None:
-                screen.blit(glow, (px - glow.get_width() // 2, py - glow.get_height() // 2))
+                hires.blit_entity(screen, glow,
+                                  (px - glow.get_width() // 2,
+                                   py - glow.get_height() // 2))
 
             if phase == "summoning":
                 # 召唤魔法阵 + 贴图随进度淡入（期间不可命中、不发射）
                 prog = min(1.0, timer / max(1, u.get("summon_time", 24)))
-                self._draw_revival_circle(screen, px, py, prog, summon_color, now)
+                fx = hires.entity_effect(screen, (px - 26, py - 26), (52, 52))
+                self._draw_revival_circle(fx, px, py, prog, summon_color, now)
+                fx.commit()
                 if sprite is not None:
-                    sprite = _with_alpha(sprite, int(255 * prog))
-                    screen.blit(sprite, (px - sprite.get_width() // 2,
-                                         py - sprite.get_height() // 2))
+                    hires.blit_entity(screen, sprite,
+                                      (px - sprite.get_width() // 2,
+                                       py - sprite.get_height() // 2),
+                                      alpha=int(255 * prog))
             elif phase == "active":
                 # 存活：贴图 + 青绿灵魂火核心
                 if sprite is not None:
-                    screen.blit(sprite, (px - sprite.get_width() // 2,
-                                         py - sprite.get_height() // 2))
-                pygame.draw.circle(screen, soul_color, (px, py), 4, 1)
+                    hires.blit_entity(screen, sprite,
+                                      (px - sprite.get_width() // 2,
+                                       py - sprite.get_height() // 2))
+                fx = hires.entity_effect(screen, (px - 7, py - 7), (14, 14))
+                fx.circle(soul_color, (px, py), 4, 1)
+                fx.commit()
             elif phase == "dying":
                 # 灵魂消散：贴图淡出收缩 + 青绿残焰
                 prog = 1.0 - min(1.0, timer / max(1, u.get("die_time", 22)))
                 if sprite is not None:
                     w = max(1, int(sprite.get_width() * max(0.4, prog)))
                     h = max(1, int(sprite.get_height() * max(0.4, prog)))
-                    small = pygame.transform.smoothscale(sprite, (w, h))
-                    small = _with_alpha(small, int(255 * prog))
-                    screen.blit(small, (px - w // 2, py - h // 2))
-                pygame.draw.circle(screen, soul_color, (px, py),
-                                   max(2, int(8 * prog)), 1)
+                    small = _hi_scale(sprite, (w, h))
+                    hires.blit_entity(screen, small, (px - w // 2, py - h // 2),
+                                      alpha=int(255 * prog))
+                soul_r = max(2, int(8 * prog))
+                fx = hires.entity_effect(screen, (px - soul_r - 2, py - soul_r - 2),
+                                         (soul_r * 2 + 4, soul_r * 2 + 4))
+                fx.circle(soul_color, (px, py), soul_r, 1)
+                fx.commit()
             elif phase == "reviving":
                 # 亡灵魔法阵重组：紫环旋转 + 青绿灵魂能量朝中心汇聚
                 prog = min(1.0, timer / max(1, u.get("revive_time", 90)))
-                self._draw_revival_circle(screen, px, py, prog, summon_color, now)
+                fx = hires.entity_effect(screen, (px - 26, py - 26), (52, 52))
+                self._draw_revival_circle(fx, px, py, prog, summon_color, now)
+                fx.commit()
+                fx = hires.entity_effect(screen, (px - 36, py - 36), (72, 72))
                 for k in range(4):
                     a = now * 0.004 + k * math.pi / 2
                     rr = 6 + (1.0 - prog) * 26
                     gx = px + math.cos(a) * rr
                     gy = py + math.sin(a) * rr
-                    pygame.draw.circle(screen, soul_color, (int(gx), int(gy)), 2, 0)
+                    fx.circle(soul_color, (int(gx), int(gy)), 2, 0)
+                fx.commit()
 
     def _draw_bonzo_dreadlord_skulls(self, screen, offset_x=0, offset_y=0):
         """骸符「Skull Dreadlord」的巨大骷髅头印记（纯视觉，弹幕判定由符卡负责）：
@@ -1165,9 +1334,14 @@ class Boss:
             if phase == "warn":
                 prog = min(1.0, timer / max(1, sk.get("warn_frames", 30)))
                 ring_r = int(r * (1.3 + (1.0 - prog) * 2.0))
-                pygame.draw.circle(screen, purple, (px, py), ring_r, 2)
                 pulse = 0.5 + 0.5 * math.sin(now * 0.02)
-                pygame.draw.circle(screen, warn, (px, py), int(r * (1.15 + pulse * 0.55)), 1)
+                pulse_r = int(r * (1.15 + pulse * 0.55))
+                radius = max(ring_r, pulse_r) + 3
+                fx = hires.entity_effect(screen, (px - radius, py - radius),
+                                         (radius * 2, radius * 2))
+                fx.circle(purple, (px, py), ring_r, 2)
+                fx.circle(warn, (px, py), pulse_r, 1)
+                fx.commit()
                 alpha = int(255 * min(1.0, prog * 1.5))
             elif phase == "despawn":
                 prog = min(1.0, timer / max(1, sk.get("despawn_frames", 36)))
@@ -1178,15 +1352,19 @@ class Boss:
             flash = sk.get("flash", 0)
             if flash > 0:
                 fl = min(1.0, flash / 6.0)
-                pygame.draw.circle(screen, (215, 245, 255), (px, py),
-                                   int(r * (0.9 + 0.6 * (1.0 - fl))), 1)
+                flash_r = int(r * (0.9 + 0.6 * (1.0 - fl))) + 2
+                fx = hires.entity_effect(screen, (px - flash_r, py - flash_r),
+                                         (flash_r * 2, flash_r * 2))
+                fx.circle((215, 245, 255), (px, py), flash_r - 2, 1)
+                fx.commit()
 
             if alpha <= 0:
                 continue
 
-            # 骷髅头绘制到临时表面（支持整体淡入淡出 / 缩小）
+            # 骷髅头绘制到实体层特效面板（按渲染倍率作画，支持整体淡入淡出 / 缩小）
             size = int(r * 2.7) + 8
-            surf = pygame.Surface((size, size), pygame.SRCALPHA)
+            fx = hires.entity_effect(screen, (px - size // 2, py - size // 2),
+                                     (size, size))
             cx = cy = size // 2
             rr = r
             bone_dim = tuple(int(c * 0.80) for c in bone)
@@ -1200,76 +1378,76 @@ class Boss:
                 tip = (spx, spy - int(rr * (0.42 - abs(k) * 0.06)))
                 base_l = (spx - int(rr * 0.16), spy + int(rr * 0.10))
                 base_r = (spx + int(rr * 0.16), spy + int(rr * 0.10))
-                pygame.draw.polygon(surf, bone, [tip, base_l, base_r])
-                pygame.draw.polygon(surf, purple, [tip, base_l, base_r], 1)
+                fx.polygon(bone, [tip, base_l, base_r])
+                fx.polygon(purple, [tip, base_l, base_r], 1)
             # 颅顶圆 + 颧骨/上颌（头骨下半变宽）
-            pygame.draw.circle(surf, bone, (cx, int(cy - rr * 0.32)), int(rr * 0.78))
+            fx.circle(bone, (cx, int(cy - rr * 0.32)), int(rr * 0.78))
             for sx in (-1, 1):
-                pygame.draw.circle(surf, bone, (cx + sx * int(rr * 0.42), int(cy + rr * 0.10)),
-                                   int(rr * 0.42))
+                fx.circle(bone, (cx + sx * int(rr * 0.42), int(cy + rr * 0.10)),
+                          int(rr * 0.42))
             # 骨缝线（颅顶细线）
-            pygame.draw.line(surf, bone_dim, (cx - int(rr * 0.30), int(cy - rr * 0.62)),
-                             (cx + int(rr * 0.30), int(cy - rr * 0.62)), 1)
+            fx.line(bone_dim, (cx - int(rr * 0.30), int(cy - rr * 0.62)),
+                    (cx + int(rr * 0.30), int(cy - rr * 0.62)), 1)
 
             # 眼窝 + 青色灵魂火
             for sx in (-1, 1):
                 ex = cx + sx * int(rr * 0.33)
                 ey = int(cy - rr * 0.16)
-                pygame.draw.circle(surf, socket, (ex, ey), int(rr * 0.24))
+                fx.circle(socket, (ex, ey), int(rr * 0.24))
                 flicker = 0.75 + 0.25 * math.sin(now * 0.02 + sx * 2.1)
-                pygame.draw.circle(surf, teal, (ex, ey), max(2, int(rr * 0.13 * flicker)))
-                pygame.draw.circle(surf, (205, 255, 235),
-                                   (ex - int(rr * 0.06), ey - int(rr * 0.06)),
-                                   max(1, int(rr * 0.04)))
-                pygame.draw.circle(surf, purple, (ex, ey), int(rr * 0.24), 1)
+                fx.circle(teal, (ex, ey), max(2, int(rr * 0.13 * flicker)))
+                fx.circle((205, 255, 235),
+                          (ex - int(rr * 0.06), ey - int(rr * 0.06)),
+                          max(1, int(rr * 0.04)))
+                fx.circle(purple, (ex, ey), int(rr * 0.24), 1)
 
             # 鼻洞（倒三角）
             nose_top = (cx, int(cy + rr * 0.06))
             nose_l = (cx - int(rr * 0.10), int(cy + rr * 0.22))
             nose_r = (cx + int(rr * 0.10), int(cy + rr * 0.22))
-            pygame.draw.polygon(surf, socket, [nose_top, nose_l, nose_r])
+            fx.polygon(socket, [nose_top, nose_l, nose_r])
 
             # 嘴部：开口高度随 mouth 张合，含上下牙齿与口腔灵魂火
             mouth_top = int(cy + rr * 0.52)
             gap = int(rr * 0.45 * mouth)
             mouth_bottom = mouth_top + gap
             mouth_w = int(rr * 0.66)
-            pygame.draw.rect(surf, mouth_dark,
-                             (cx - mouth_w // 2, mouth_top, mouth_w, max(1, gap)))
+            fx.rect(mouth_dark, (cx - mouth_w // 2, mouth_top, mouth_w, max(1, gap)))
             if mouth > 0.02:
                 if mouth > 0.3:
                     flame_r = max(2, int(rr * 0.18 * mouth))
-                    pygame.draw.circle(surf, teal, (cx, mouth_top + gap // 2), flame_r)
+                    fx.circle(teal, (cx, mouth_top + gap // 2), flame_r)
                 teeth = 5
                 for k in range(teeth):
                     tx = cx + (k - (teeth - 1) / 2) * int(rr * 0.15)
                     tw = max(2, int(rr * 0.09))
                     th = max(2, int(rr * 0.13))
-                    pygame.draw.rect(surf, bone, (tx - tw // 2, mouth_top - th // 2, tw, th))
-                    pygame.draw.rect(surf, bone, (tx - tw // 2, mouth_bottom - th // 2, tw, th))
-                pygame.draw.rect(surf, purple, (cx - mouth_w // 2, mouth_top,
-                                                mouth_w, max(1, gap)), 1)
+                    fx.rect(bone, (tx - tw // 2, mouth_top - th // 2, tw, th))
+                    fx.rect(bone, (tx - tw // 2, mouth_bottom - th // 2, tw, th))
+                fx.rect(purple, (cx - mouth_w // 2, mouth_top,
+                                 mouth_w, max(1, gap)), 1)
 
             # 下颌骨（随开口下移）
             jaw_cy = int(cy + rr * 0.62 + gap)
-            pygame.draw.ellipse(surf, bone, (cx - int(rr * 0.55), jaw_cy - int(rr * 0.30),
-                                             int(rr * 1.10), int(rr * 0.60)))
-            pygame.draw.ellipse(surf, purple, (cx - int(rr * 0.55), jaw_cy - int(rr * 0.30),
-                                               int(rr * 1.10), int(rr * 0.60)), 1)
+            fx.ellipse(bone, (cx - int(rr * 0.55), jaw_cy - int(rr * 0.30),
+                              int(rr * 1.10), int(rr * 0.60)))
+            fx.ellipse(purple, (cx - int(rr * 0.55), jaw_cy - int(rr * 0.30),
+                                int(rr * 1.10), int(rr * 0.60)), 1)
 
             # 颅骨外轮廓（紫色描边）
-            pygame.draw.circle(surf, purple, (cx, int(cy - rr * 0.32)), int(rr * 0.78), 1)
+            fx.circle(purple, (cx, int(cy - rr * 0.32)), int(rr * 0.78), 1)
             for sx in (-1, 1):
-                pygame.draw.circle(surf, purple, (cx + sx * int(rr * 0.42), int(cy + rr * 0.10)),
-                                   int(rr * 0.42), 1)
+                fx.circle(purple, (cx + sx * int(rr * 0.42), int(cy + rr * 0.10)),
+                          int(rr * 0.42), 1)
 
             # 整体淡入淡出 / 缩放后贴回屏幕
+            out = fx
             if scale != 1.0:
-                new_w = max(1, int(size * scale))
-                surf = pygame.transform.smoothscale(surf, (new_w, new_w))
-            if alpha < 255:
-                surf = _with_alpha(surf, alpha)
-            screen.blit(surf, (px - surf.get_width() // 2, py - surf.get_height() // 2))
+                side = max(1, int(size * scale))
+                out = _hi_scale(fx, (side, side))
+            hires.blit_entity(screen, out,
+                              (px - out.get_width() // 2,
+                               py - out.get_height() // 2), alpha=alpha)
 
     def _draw_bonzo_masks(self, screen, offset_x=0, offset_y=0):
         """戏符「Grand Illusion」的小丑面具幻象节点：
@@ -1291,20 +1469,22 @@ class Boss:
             color = mask.get("glow_color", (205, 105, 245))
             glow = _get_watcher_glow(int(height * 0.95), color)
             if glow is not None:
-                screen.blit(glow, (px - glow.get_width() // 2,
-                                   py - glow.get_height() // 2))
+                hires.blit_entity(screen, glow, (px - glow.get_width() // 2,
+                                                 py - glow.get_height() // 2))
             # 存活期间缓慢呼吸的紫色外环
             pulse = 0.5 + 0.5 * math.sin(now * 0.006 + mask.get("phase", 0.0))
             ring_r = int(height * 0.58 + pulse * 5)
-            pygame.draw.circle(screen, color, (px, py), ring_r, 1)
-            sprite = _get_boss_sprite(cfg.STAGE3_BONZO_MASK_SPRITE, height)
+            fx = hires.entity_effect(screen, (px - ring_r - 3, py - ring_r - 3),
+                                     (ring_r * 2 + 6, ring_r * 2 + 6))
+            fx.circle(color, (px, py), ring_r, 1)
+            fx.commit()
+            sprite = _entity_sprite(cfg.STAGE3_BONZO_MASK_SPRITE, height, screen)
             if sprite is None:
                 continue
-            if alpha < 255:
-                sprite = _with_alpha(sprite, alpha)
-            screen.blit(sprite, (px - sprite.get_width() // 2,
-                                 py - sprite.get_height() // 2),
-                        special_flags=pygame.BLEND_ADD)
+            hires.blit_entity(screen, sprite,
+                              (px - sprite.get_width() // 2,
+                               py - sprite.get_height() // 2),
+                              alpha=alpha, add=True)
 
     def _draw_scarf_squad(self, screen, offset_x=0, offset_y=0):
         """队符「Necrotic Squad」的小队视觉层：
@@ -1322,8 +1502,10 @@ class Boss:
             bright = tuple(int(ch * (0.45 + 0.55 * fade)) for ch in (180, 95, 240))
             dim = tuple(int(ch * 0.55) for ch in bright)
             pulse = 0.5 + 0.5 * math.sin(now * 0.006 + circle["x"] * 0.02)
-            pygame.draw.circle(screen, bright, (cx, cy), r, 2)
-            pygame.draw.circle(screen, dim, (cx, cy), int(r * 0.82), 1)
+            fx = hires.entity_effect(screen, (cx - r - 2, cy - r - 2),
+                                     (r * 2 + 4, r * 2 + 4))
+            fx.circle(bright, (cx, cy), r, 2)
+            fx.circle(dim, (cx, cy), int(r * 0.82), 1)
             rot = now * 0.0012
             for i in range(8):
                 a = rot + i * math.tau / 8
@@ -1331,9 +1513,9 @@ class Boss:
                 y0 = cy + math.sin(a) * r * 0.60
                 x1 = cx + math.cos(a) * r * (0.90 + pulse * 0.08)
                 y1 = cy + math.sin(a) * r * (0.90 + pulse * 0.08)
-                pygame.draw.line(screen, dim, (int(x0), int(y0)),
-                                 (int(x1), int(y1)), 1)
-            pygame.draw.circle(screen, bright, (cx, cy), 4, 0)
+                fx.line(dim, (x0, y0), (x1, y1), 1)
+            fx.circle(bright, (cx, cy), 4, 0)
+            fx.commit()
 
         if not self.scarf_squad:
             return
@@ -1349,22 +1531,26 @@ class Boss:
             # 亡灵成员常驻柔和光晕。
             glow = _get_watcher_glow(int(height * 0.95), color)
             if glow is not None:
-                screen.blit(glow, (px - glow.get_width() // 2,
+                hires.blit_entity(screen, glow,
+                                  (px - glow.get_width() // 2,
                                    py - glow.get_height() // 2))
 
             # 当前主攻成员：脉冲光环 + 高亮小核。
             if active:
                 pulse = 0.5 + 0.5 * math.sin(now * 0.008 + idx * 0.9)
                 ring_r = int(height * 0.58 + pulse * 7)
-                pygame.draw.circle(screen, color, (px, py), ring_r, 2)
-                pygame.draw.circle(screen, (255, 255, 255),
-                                   (px, py), max(3, ring_r - 6), 1)
-                pygame.draw.circle(screen, (255, 255, 255), (px, py), 3, 0)
+                fx = hires.entity_effect(screen, (px - ring_r - 2, py - ring_r - 2),
+                                         (ring_r * 2 + 4, ring_r * 2 + 4))
+                fx.circle(color, (px, py), ring_r, 2)
+                fx.circle((255, 255, 255), (px, py), max(3, ring_r - 6), 1)
+                fx.circle((255, 255, 255), (px, py), 3, 0)
+                fx.commit()
 
-            sprite = _get_boss_sprite(member["sprite"], height)
+            sprite = _entity_sprite(member["sprite"], height, screen)
             if sprite is not None:
-                screen.blit(sprite, (px - sprite.get_width() // 2,
-                                     py - sprite.get_height() // 2))
+                hires.blit_entity(screen, sprite,
+                                  (px - sprite.get_width() // 2,
+                                   py - sprite.get_height() // 2))
 
             # 当前主攻者名字：让玩家能明确识别这一轮是谁在攻击。
             if active and member.get("label"):
@@ -1392,8 +1578,9 @@ class Boss:
                 continue
             if phase == "reviving":
                 prog = min(1.0, timer / max(1, s.get("revive_time", 38)))
-                self._draw_revival_circle(screen, px, py, prog,
-                                          (206, 126, 74), now)
+                fx = hires.entity_effect(screen, (px - 26, py - 26), (52, 52))
+                self._draw_revival_circle(fx, px, py, prog, (206, 126, 74), now)
+                fx.commit()
                 self._draw_terracotta_soldier(screen, px, py, s, now,
                                               alpha=70 + int(150 * prog),
                                               attack_active=False)
@@ -1433,9 +1620,13 @@ class Boss:
             width = max(1, wave.get("width", 2))
             cx = int(x + offset_x)
             cy = int(y + offset_y)
-            pygame.draw.circle(screen, color, (cx, cy), max(1, r), width)
+            pad = width + 2
+            fx = hires.entity_effect(screen, (cx - r - pad, cy - r - pad),
+                                     (r * 2 + pad * 2, r * 2 + pad * 2))
+            fx.circle(color, (cx, cy), max(1, r), width)
             if r > 7:
-                pygame.draw.circle(screen, color, (cx, cy), max(1, r - 6), 1)
+                fx.circle(color, (cx, cy), max(1, r - 6), 1)
+            fx.commit()
 
         # Telegraph: player can identify the next giant and its fixed spawn slot.
         telegraph = state.get("telegraph")
@@ -1445,9 +1636,12 @@ class Boss:
             pulse = 0.5 + 0.5 * math.sin(now * 0.012 + telegraph.get("phase", 0.0))
             radius = int(telegraph.get("radius", 30) + pulse * 8)
             color = telegraph.get("color", (255, 220, 150))
-            pygame.draw.circle(screen, color, (px, py), radius, 2)
-            pygame.draw.circle(screen, (255, 255, 255), (px, py), max(4, radius - 7), 1)
-            pygame.draw.circle(screen, color, (px, py), 4, 0)
+            fx = hires.entity_effect(screen, (px - radius - 3, py - radius - 3),
+                                     (radius * 2 + 6, radius * 2 + 6))
+            fx.circle(color, (px, py), radius, 2)
+            fx.circle((255, 255, 255), (px, py), max(4, radius - 7), 1)
+            fx.circle(color, (px, py), 4, 0)
+            fx.commit()
             label = telegraph.get("label")
             if label:
                 font = _get_font(11)
@@ -1467,11 +1661,14 @@ class Boss:
             bx = int(boulder.x + offset_x)
             by = int(boulder.y + offset_y)
             half = 12
-            pygame.draw.rect(screen, (120, 205, 255),
-                             (bx - half, by - half, half * 2, half * 2), 3)
-            pygame.draw.rect(screen, (230, 245, 255),
-                             (bx - half + 3, by - half + 3,
-                              half * 2 - 6, half * 2 - 6), 1)
+            fx = hires.entity_effect(screen, (bx - half - 3, by - half - 3),
+                                     (half * 2 + 6, half * 2 + 6))
+            fx.rect((120, 205, 255),
+                    (bx - half, by - half, half * 2, half * 2), 3)
+            fx.rect((230, 245, 255),
+                    (bx - half + 3, by - half + 3,
+                     half * 2 - 6, half * 2 - 6), 1)
+            fx.commit()
 
         # Diamond Giant's falling sword is visual-only; the landing burst is
         # created by stage4 when its y coordinate reaches land_y.
@@ -1480,16 +1677,21 @@ class Boss:
             sx = int(sword.get("x", cfg.BATTLE_AREA_WIDTH / 2) + offset_x)
             sy = int(sword.get("y", -200) + offset_y)
             sword_sprite = _get_sadan_sword_sprite(
-                sword.get("sprite"), int(sword.get("height", 660)))
+                sword.get("sprite"), int(sword.get("height", 660)),
+                sharp=hires.entity_factor(screen) > 1)
             if sword_sprite is not None:
-                screen.blit(sword_sprite,
-                            (sx - sword_sprite.get_width() // 2,
-                             sy - sword_sprite.get_height() // 2))
+                hires.blit_entity(screen, sword_sprite,
+                                  (sx - sword_sprite.get_width() // 2,
+                                   sy - sword_sprite.get_height() // 2))
             else:
                 half_w = 18
                 sword_h = int(sword.get("height", 660))
-                pygame.draw.rect(screen, (140, 215, 255),
-                                 (sx - half_w, sy - sword_h, half_w * 2, sword_h), 3)
+                fx = hires.entity_effect(
+                    screen, (sx - half_w - 2, sy - sword_h - 2),
+                    (half_w * 2 + 4, sword_h + 4))
+                fx.rect((140, 215, 255),
+                        (sx - half_w, sy - sword_h, half_w * 2, sword_h), 3)
+                fx.commit()
 
         if state.get("hide_giant"):
             return
@@ -1508,25 +1710,28 @@ class Boss:
             return
         color = giant.get("color", (200, 180, 150))
         sprite_path = giant.get("sprite")
-        sprite = _get_boss_sprite(sprite_path, height) if sprite_path else None
+        sprite = _entity_sprite(sprite_path, height, screen) if sprite_path else None
 
         glow = _get_watcher_glow(int(height * 0.85), color)
         if glow is not None:
-            draw_glow = glow if alpha >= 255 else _with_alpha(glow, alpha)
-            screen.blit(draw_glow, (px - draw_glow.get_width() // 2,
-                                    py - draw_glow.get_height() // 2))
+            hires.blit_entity(screen, glow,
+                              (px - glow.get_width() // 2,
+                               py - glow.get_height() // 2), alpha=alpha)
 
         if sprite is not None:
-            draw_sprite = sprite if alpha >= 255 else _with_alpha(sprite, alpha)
-            screen.blit(draw_sprite, (px - draw_sprite.get_width() // 2,
-                                      py - draw_sprite.get_height() // 2))
+            hires.blit_entity(screen, sprite,
+                              (px - sprite.get_width() // 2,
+                               py - sprite.get_height() // 2), alpha=alpha)
         else:
             # Distinct colored silhouette fallback if a sprite is missing.
             hw = max(1, int(height * 0.22))
             hh = max(1, int(height * 0.50))
-            pygame.draw.ellipse(screen, color, (px - hw, py - hh, hw * 2, hh * 2))
-            pygame.draw.circle(screen, color, (px, py - int(height * 0.36)),
-                               max(1, int(height * 0.14)), 0)
+            fx = hires.entity_effect(screen, (px - hw - 2, py - hh - 2),
+                                     (hw * 2 + 4, hh * 2 + 4))
+            fx.ellipse(color, (px - hw, py - hh, hw * 2, hh * 2))
+            fx.circle(color, (px, py - int(height * 0.36)),
+                      max(1, int(height * 0.14)), 0)
+            fx.commit(alpha=alpha)
 
         label = giant.get("label")
         if label and giant.get("phase") in ("entering", "attack"):
@@ -1541,14 +1746,21 @@ class Boss:
             bar_h = 6
             bar_x = px - bar_w // 2
             bar_y = label_y + 14
-            pygame.draw.rect(screen, (24, 26, 36), (bar_x, bar_y, bar_w, bar_h))
             fill_w = int(bar_w * min(1.0, hp / max_hp))
-            pygame.draw.rect(screen, color, (bar_x, bar_y, fill_w, bar_h))
-            pygame.draw.rect(screen, cfg.COLOR_WHITE,
-                             (bar_x, bar_y, bar_w, bar_h), 1)
+            fx = hires.entity_effect(screen, (bar_x - 1, bar_y - 1),
+                                     (bar_w + 2, bar_h + 2))
+            fx.rect((24, 26, 36), (bar_x, bar_y, bar_w, bar_h))
+            fx.rect(color, (bar_x, bar_y, fill_w, bar_h))
+            fx.rect(cfg.COLOR_WHITE, (bar_x, bar_y, bar_w, bar_h), 1)
+            fx.commit()
 
     def _draw_sadan_laser_visual(self, screen, laser, now, offset_x=0, offset_y=0):
-        """Draws L.A.S.R.'s warning line and eye source without re-adding collision."""
+        """Draws L.A.S.R.'s warning line and eye source without re-adding collision.
+
+        光束线走 hires.entity_line：长线整条一块面板的话，面板面积是长度平方级
+        （一条 900 逻辑像素的斜线在 3x 下就是 20MB 的贴图，每帧重传一次），切成
+        若干段后每段一块小面板，总开销只正比于线长，线本身仍按倍率画。
+        """
         x = int(laser["x"] + offset_x)
         y = int(laser["y"] + offset_y)
         angle = laser.get("angle", 0.0)
@@ -1561,41 +1773,48 @@ class Boss:
         if phase == "warn":
             pulse = 0.5 + 0.5 * math.sin(now * 0.02)
             bright = tuple(int(ch * (0.35 + 0.65 * pulse)) for ch in color)
-            pygame.draw.line(screen, bright, (x, y), (ex, ey), 5)
-            pygame.draw.line(screen, (255, 255, 255), (x, y), (ex, ey), 1)
+            hires.entity_line(screen, bright, (x, y), (ex, ey), 5)
+            hires.entity_line(screen, (255, 255, 255), (x, y), (ex, ey), 1)
         elif phase == "active":
-            pygame.draw.line(screen, color, (x, y), (ex, ey), 8)
-            pygame.draw.circle(screen, (255, 255, 255), (x, y), 5, 0)
+            hires.entity_line(screen, color, (x, y), (ex, ey), 8)
+            fx = hires.entity_effect(screen, (x - 7, y - 7), (14, 14))
+            fx.circle((255, 255, 255), (x, y), 5, 0)
+            fx.commit()
         elif phase == "recover":
-            pygame.draw.line(screen, color, (x, y), (ex, ey), 2)
+            hires.entity_line(screen, color, (x, y), (ex, ey), 2)
 
         if phase in ("warn", "active", "recover"):
             r = 6 if phase == "active" else 5
-            pygame.draw.circle(screen, color, (x, y), r, 1)
+            fx = hires.entity_effect(screen, (x - r - 2, y - r - 2),
+                                     (r * 2 + 4, r * 2 + 4))
+            fx.circle(color, (x, y), r, 1)
+            fx.commit()
 
     def _draw_terracotta_soldier(self, screen, px, py, s, now, alpha=255,
                                  attack_active=False):
         """兵马俑贴图渲染；贴图缺失时回退到简单陶土人形。"""
         sprite_path = s.get("sprite", cfg.STAGE4_TERRACOTTA_SPRITE)
         height = s.get("sprite_height", 38)
-        sprite = _get_boss_sprite(sprite_path, height)
+        sprite = _entity_sprite(sprite_path, height, screen)
 
         if sprite is not None:
-            draw_sprite = sprite if alpha >= 255 else _with_alpha(sprite, alpha)
-            screen.blit(draw_sprite,
-                        (px - draw_sprite.get_width() // 2,
-                         py - draw_sprite.get_height() // 2))
+            hires.blit_entity(screen, sprite,
+                              (px - sprite.get_width() // 2,
+                               py - sprite.get_height() // 2), alpha=alpha)
         else:
-            pygame.draw.ellipse(screen, (35, 25, 22),
-                                (px - 11, py - 12, 22, 26))
-            pygame.draw.rect(screen, (196, 112, 62),
-                             (px - 7, py - 6, 14, 18), border_radius=4)
-            pygame.draw.circle(screen, (196, 112, 62), (px, py - 12), 7)
+            fx = hires.entity_effect(screen, (px - 12, py - 20), (24, 40))
+            fx.ellipse((35, 25, 22), (px - 11, py - 12, 22, 26))
+            fx.rect((196, 112, 62), (px - 7, py - 6, 14, 18), radius=4)
+            fx.circle((196, 112, 62), (px, py - 12), 7)
+            fx.commit(alpha=alpha)
 
         if attack_active and alpha >= 255:
             pulse = 0.5 + 0.5 * math.sin(now * 0.012 + px * 0.03)
             ring = int(14 + pulse * 3)
-            pygame.draw.circle(screen, (255, 190, 120), (px, py), ring, 1)
+            fx = hires.entity_effect(screen, (px - ring - 2, py - ring - 2),
+                                     (ring * 2 + 4, ring * 2 + 4))
+            fx.circle((255, 190, 120), (px, py), ring, 1)
+            fx.commit()
 
     def _draw_terracotta_skull(self, screen, px, py, timer, down_time):
         """被击破后留在原阵位的石质头骨标记，外圈显示复活进度。"""
@@ -1603,18 +1822,20 @@ class Boss:
         dark = (40, 34, 30)
         light = (188, 146, 106)
 
-        pygame.draw.ellipse(screen, (45, 38, 33), (px - 9, py - 8, 18, 18))
-        pygame.draw.circle(screen, base, (px, py), 9)
-        pygame.draw.rect(screen, base, (px - 6, py + 1, 12, 7), border_radius=2)
-        pygame.draw.circle(screen, dark, (px - 3, py - 2), 2)
-        pygame.draw.circle(screen, dark, (px + 3, py - 2), 2)
-        pygame.draw.line(screen, dark, (px - 2, py + 6), (px + 2, py + 6), 1)
+        fx = hires.entity_effect(screen, (px - 14, py - 14), (28, 28))
+        fx.ellipse((45, 38, 33), (px - 9, py - 8, 18, 18))
+        fx.circle(base, (px, py), 9)
+        fx.rect(base, (px - 6, py + 1, 12, 7), radius=2)
+        fx.circle(dark, (px - 3, py - 2), 2)
+        fx.circle(dark, (px + 3, py - 2), 2)
+        fx.line(dark, (px - 2, py + 6), (px + 2, py + 6), 1)
 
         prog = min(1.0, timer / max(1, down_time))
         rect = (px - 12, py - 12, 24, 24)
         start = math.pi / 2
         end = start + math.tau * prog
-        pygame.draw.arc(screen, light, rect, start, end, 2)
+        fx.arc(light, rect, start, end, 2)
+        fx.commit()
 
     def _draw_boss_body(self, screen, px, py):
         """Boss 本体（八角形 + 魔法阵光环）"""
@@ -1623,12 +1844,16 @@ class Boss:
         for i in range(8):
             angle = i * math.pi / 4
             points.append((px + math.cos(angle) * r, py + math.sin(angle) * r))
-        pygame.draw.polygon(screen, self.color, points, 0)
-        pygame.draw.polygon(screen, cfg.COLOR_WHITE, points, 2)
+        pad = 12
+        fx = hires.entity_effect(screen, (px - r - pad, py - r - pad),
+                                 (r * 2 + pad * 2, r * 2 + pad * 2))
+        fx.polygon(self.color, points, 0)
+        fx.polygon(cfg.COLOR_WHITE, points, 2)
 
         # 魔法阵光环
         glow_r = r + 6 + math.sin(pygame.time.get_ticks() * 0.003) * 3
-        pygame.draw.circle(screen, self.color, (px, py), int(glow_r), 2)
+        fx.circle(self.color, (px, py), int(glow_r), 2)
+        fx.commit()
 
     def _draw_spell_banner(self, screen, offset_x=0, offset_y=0):
         """符卡宣言：整幅 Boss 立绘 + 符卡名，居中显示后向下略平移淡出"""
@@ -1653,28 +1878,224 @@ class Boss:
         cx = offset_x + cfg.BATTLE_AREA_WIDTH // 2
         cy = offset_y + cfg.BATTLE_AREA_HEIGHT // 2 + drop
 
+        # 立绘与符卡名都贴到「所有图层之上」那一层显卡指令（文字压在立绘之上，
+        # 与旧版同序），透明度交给显卡调制：原先每帧把 1728x1728 的立绘与两份
+        # 3x 文字贴进 2880x2160 的高分辨率图层，实测 5.3ms/帧 —— 横幅 100 帧
+        # 就是 0.3s 的纯卡顿。没有显卡路径时退回画布（表面级 alpha，观感一致）。
+        blit_top = getattr(screen, "blit_gpu_top", None)
+
+        def _blit_banner(surface, dest, a):
+            if blit_top is not None:
+                blit_top(surface, dest, a)
+            else:
+                surface.set_alpha(None if a >= 255 else a)
+                screen.blit(surface, dest)
+
         # 整幅立绘（等比放大铺满战斗区域中部）
         if self.sprite_path:
             banner_h = _banner_target_height(self.sprite_path)
             sprite = _get_boss_sprite(self.sprite_path, banner_h, sharp=True)
             if sprite is not None:
-                # 整幅立绘逐帧调透明度：copy+fill 在 3x 下要 ~14ms/帧，横幅
-                # 100 帧全程被拖到 30fps。改用表面级 alpha（pygame 2 对带逐像素
-                # 透明的表面同样生效），开销接近 0，alpha=255 时与原样贴图等价。
-                sprite.set_alpha(alpha)
-                screen.blit(sprite, (cx - sprite.get_width() // 2, cy - sprite.get_height() // 2))
+                _blit_banner(sprite,
+                             (cx - sprite.get_width() // 2,
+                              cy - sprite.get_height() // 2), alpha)
 
         # 符卡名（居中，加粗 + 下方投影，无底框）
         if self.spell_banner_name:
-            font = _get_font(SPELL_BANNER_FONT_SIZE, bold=True)
-            shadow = font.render(self.spell_banner_name, True, self.color)
-            text = font.render(self.spell_banner_name, True, cfg.COLOR_WHITE)
-            shadow = _with_alpha(shadow, int(alpha * 0.7))
-            text = _with_alpha(text, alpha)
+            # 投影 + 白字按符卡名缓存一份自己的副本（逐帧只调透明度，
+            # 不动字体内部的字形缓存表面）
+            shadow, text = _get_banner_text(self.spell_banner_name, self.color)
             text_x = cx - text.get_width() // 2
             text_y = cy + 150 - text.get_height() // 2
-            screen.blit(shadow, (text_x + 2, text_y + 3))
-            screen.blit(text, (text_x, text_y))
+            # 投影固定 70% 透明度（alpha=255 时是 178，永远不为 None）
+            _blit_banner(shadow, (text_x + 2, text_y + 3), int(alpha * 0.7))
+            _blit_banner(text, (text_x, text_y), alpha)
+
+    # --- 阶段血环 ---
+    #
+    # 环表示当前阶段的总血量：整圈 = 「一个非符 + 紧随其后的那张符卡」的血量之和，
+    # 从 12 点钟方向顺时针随掉血缩短；两段按血量比分角度（符卡段做压缩，见
+    # _ring_spell_share），符卡段颜色略深作区分。Last Spell 没有非符段，整圈都是
+    # 符卡色；时符没有血量，不画环。
+
+    def _ring_card(self):
+        """当前阶段对应的符卡：非符阶段是接下来要展开的那张，符卡阶段是正在展开的这张"""
+        if self.phase == "spell" and self.current_spell is not None:
+            return self.current_spell
+        if self.current_spell_idx < len(self.spell_cards):
+            return self.spell_cards[self.current_spell_idx]
+        return self.last_spell
+
+    def _ring_thresholds(self):
+        """当前阶段的两段血量阈值 (开符血量, 符卡结束血量)；无法换算时返回 None"""
+        card = self._ring_card()
+        if card is None or card.hp_threshold is None:
+            # 没有符卡（道中级 Boss）/ 没有血量阈值：整条血都算非符段，打到死为止
+            return 0.0, 0.0
+        if card is self.last_spell:
+            # Last Spell 独立血量：开符时补满一轮，打到 0 为止（没有非符段）
+            return self.max_hp * card.hp_threshold, 0.0
+        if getattr(card, "time_spell", False):
+            # 时符没有血量：环只画到开符那一刻，符卡段不占角度
+            return self.max_hp * card.hp_threshold, self.max_hp * card.hp_threshold
+        idx = None
+        for i, c in enumerate(self.spell_cards):
+            if c is card:
+                idx = i
+                break
+        if idx is None:
+            return None
+        ns_to = self.max_hp * card.hp_threshold
+        if card.end_hp_threshold is not None:
+            sp_to = self.max_hp * card.end_hp_threshold
+        elif idx + 1 < len(self.spell_cards):
+            sp_to = self.max_hp * self.spell_cards[idx + 1].hp_threshold
+        elif self.last_spell is not None:
+            sp_to = self.max_hp * (self.last_spell.hp_threshold or 0.0)
+        else:
+            sp_to = 0.0
+        return ns_to, sp_to
+
+    def _ring_begin_non_spell(self):
+        """进入非符阶段：环从当前血量铺满，非符打完（开符）时再结清这一段"""
+        self._ring_from = self.hp
+        self._ring_in_non_spell = True
+        self._ring_ns_budget = None
+        self._ring_sp_budget = None
+
+    def _ring_begin_spell_only(self):
+        """本阶段直接从符卡开始：复活直接开符 / 连续开符 / Last Spell / 练习单符"""
+        self._ring_from = self.hp
+        self._ring_in_non_spell = False
+        self._ring_ns_budget = None
+        self._ring_sp_budget = None
+
+    def _ring_close_non_spell(self, ns_to, sp_to):
+        """开符：按实际打掉的血量结清非符段，剩下的圈全归符卡段"""
+        self._ring_in_non_spell = False
+        if self.hp > ns_to + RING_EARLY_EPS:
+            # 非符提前结束（时间触发 / 血量被抬回）：本阶段按「只有符卡」显示
+            self._ring_ns_budget = 0.0
+            self._ring_sp_budget = max(0.0, self.hp - sp_to)
+        else:
+            start = self._ring_from if self._ring_from is not None else self.hp
+            self._ring_ns_budget = max(0.0, start - ns_to)
+            self._ring_sp_budget = max(0.0, ns_to - sp_to)
+
+    def _ring_geometry(self, screen):
+        """环的 (半径, 厚度)：跟着立绘大小走，没有贴图时按机体尺寸兜底"""
+        half = self.size * 1.6
+        if self.sprite_path:
+            sprite = _get_boss_sprite(self.sprite_path, self.sprite_height)
+            if sprite is not None:
+                half = max(sprite.get_size()) * 0.5
+        radius = min(RING_RADIUS_MAX,
+                     max(RING_RADIUS_MIN, half * RING_RADIUS_SPRITE_FIT + RING_RADIUS_PAD))
+        return radius, RING_THICKNESS
+
+    def _ring_state(self, screen):
+        """血环绘制参数；None 表示当前不画（未开战 / 战败 / 时符 / 没有符卡）"""
+        if not (self.alive and self.combat_enabled):
+            return None
+        if self.phase not in ("non_spell", "spell"):
+            return None
+        if self._is_time_spell_active():
+            return None
+        thresholds = self._ring_thresholds()
+        if thresholds is None:
+            return None
+        ns_to, sp_to = thresholds
+        hp = self.hp
+        if self._ring_from is None:
+            # 兜底：练习模式 / 调试跳转直接落在某个阶段时，环从当前血量铺起
+            if self.phase == "non_spell":
+                self._ring_begin_non_spell()
+            else:
+                self._ring_begin_spell_only()
+
+        if self._ring_ns_budget is None or self._ring_sp_budget is None:
+            if self._ring_in_non_spell and self.phase == "non_spell":
+                self._ring_ns_budget = max(0.0, self._ring_from - ns_to)
+                self._ring_sp_budget = max(0.0, ns_to - sp_to)
+            else:
+                self._ring_close_non_spell(ns_to, sp_to)
+        ns_budget = self._ring_ns_budget
+        sp_budget = self._ring_sp_budget
+
+        if self._ring_in_non_spell:
+            remaining_ns = min(ns_budget, max(0.0, hp - ns_to))
+            remaining_sp = sp_budget
+        else:
+            remaining_ns = 0.0
+            remaining_sp = min(sp_budget, max(0.0, hp - sp_to))
+        share = _ring_spell_share(ns_budget, sp_budget)
+        ns_span = (1.0 - share) * 360.0
+        sp_span = share * 360.0
+        consumed = 0.0
+        if ns_budget > 0:
+            consumed += ns_span * (1.0 - remaining_ns / ns_budget)
+        else:
+            consumed += ns_span
+        if sp_budget > 0:
+            consumed += sp_span * (1.0 - remaining_sp / sp_budget)
+        consumed = min(360.0, max(0.0, consumed))
+
+        # 与非符血条同色系：残血红 -> 黄 -> 白，符卡段整体压深一档
+        ratio = max(0.0, hp / self.max_hp) if self.max_hp else 0.0
+        if ratio > 0.3:
+            base = cfg.COLOR_RED
+        elif ratio > 0.15:
+            base = cfg.COLOR_YELLOW
+        else:
+            base = cfg.COLOR_WHITE
+        dark = tuple(int(c * RING_SPELL_DARKEN) for c in base)
+        radius, thickness = self._ring_geometry(screen)
+        return {"radius": radius, "thickness": thickness, "base": base, "dark": dark,
+                "ns_span": ns_span, "sp_span": sp_span, "consumed": consumed}
+
+    @staticmethod
+    def _ring_point(cx, cy, radius, angle):
+        """环上的点：angle 以度计，0 度在 12 点钟方向、顺时针为正"""
+        rad = math.radians(angle)
+        return (cx + math.sin(rad) * radius, cy - math.cos(rad) * radius)
+
+    def _ring_fill(self, fx, cx, cy, r_in, r_out, a0, a1, color):
+        """按小扇形填充一段环：a0 -> a1 顺时针（度）"""
+        if a1 - a0 <= 0.01 or r_out <= r_in:
+            return
+        sectors = max(1, int(math.ceil((a1 - a0) / RING_ARC_STEP)))
+        step = (a1 - a0) / sectors
+        for i in range(sectors):
+            b0 = a0 + step * i
+            b1 = b0 + step
+            fx.polygon(color, (
+                self._ring_point(cx, cy, r_in, b0),
+                self._ring_point(cx, cy, r_out, b0),
+                self._ring_point(cx, cy, r_out, b1),
+                self._ring_point(cx, cy, r_in, b1),
+            ))
+
+    def _draw_phase_ring(self, screen, px, py):
+        """阶段血环：Boss 机体周围一圈，表示当前阶段（非符 + 符卡）的总血量"""
+        state = self._ring_state(screen)
+        if state is None:
+            return
+        radius = state["radius"]
+        thickness = state["thickness"]
+        outer = radius + thickness * 0.5
+        inner = max(2.0, radius - thickness * 0.5)
+        fx = hires.entity_effect(screen, (px - outer - 2, py - outer - 2),
+                                 (outer * 2 + 4, outer * 2 + 4))
+        # 底环：整圈暗色，把阶段总量（= 满圈）标出来
+        self._ring_fill(fx, px, py, inner, outer, 0.0, 360.0, RING_BACK_COLOR)
+        ns_span = state["ns_span"]
+        consumed = state["consumed"]
+        if consumed < ns_span:
+            self._ring_fill(fx, px, py, inner, outer, consumed, ns_span, state["base"])
+        spell_start = max(consumed, ns_span)
+        if spell_start < 360.0:
+            self._ring_fill(fx, px, py, inner, outer, spell_start, 360.0, state["dark"])
+        fx.commit()
 
     def _draw_hp_bar(self, screen, y, offset_x=0):
         inset = self.hp_bar_inset          # 血条左右边距（默认 30）
@@ -1684,19 +2105,22 @@ class Boss:
 
         hp_ratio = max(0, self.hp / self.max_hp)
 
-        pygame.draw.rect(screen, cfg.COLOR_DARK_GRAY, (bar_x, y, bar_w, bar_h))
         if hp_ratio > 0.3:
             color = cfg.COLOR_RED
         elif hp_ratio > 0.15:
             color = cfg.COLOR_YELLOW
         else:
             color = cfg.COLOR_WHITE
-        pygame.draw.rect(screen, color, (bar_x, y, int(bar_w * hp_ratio), bar_h))
-        pygame.draw.rect(screen, cfg.COLOR_WHITE, (bar_x, y, bar_w, bar_h), 1)
+        fx = hires.entity_effect(screen, (bar_x - 2, y - 3),
+                                 (bar_w + 4, bar_h + 7))
+        fx.rect(cfg.COLOR_DARK_GRAY, (bar_x, y, bar_w, bar_h))
+        fx.rect(color, (bar_x, y, int(bar_w * hp_ratio), bar_h))
+        fx.rect(cfg.COLOR_WHITE, (bar_x, y, bar_w, bar_h), 1)
 
         for i in range(1, 4):
             mx = bar_x + bar_w * i / 4
-            pygame.draw.line(screen, cfg.COLOR_WHITE, (mx, y - 2), (mx, y + bar_h + 2), 1)
+            fx.line(cfg.COLOR_WHITE, (mx, y - 2), (mx, y + bar_h + 2), 1)
+        fx.commit()
 
         # Boss 名（只保留英文）：血量下方一行，左侧略缩进避免贴边被遮挡
         font = _get_font(16)

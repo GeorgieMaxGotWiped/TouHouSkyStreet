@@ -37,12 +37,16 @@ class HUD:
     def _draw_panel_bg(self, screen):
         """面板底板：一块半透明纯色。
 
-        直接在高分辨率图层上填这块区域，而不是贴一张预先填好的大图：3x 下这张图
-        有 2.2M 像素，半透明贴图要逐像素混合（3.4ms），而填充是逐行写入（0.4ms）。
-        仍旧画在高分辨率图层上，所以面板边缘不会像 1x 放大那样发虚。
+        交给显卡直接填这块矩形：3x 下它有 2.2M 像素（8.8MB），画在高分辨率图层
+        上就意味着每帧重传一遍，而且它纵贯整个屏幕高度，会把其它标脏点的包围盒
+        撑成整屏。显卡填充的边缘同样锐利，不会像 1x 放大那样发虚。
         """
-        hires.ui_rect(screen, (*cfg.COLOR_PANEL_BG, 128),
-                      (self.panel_x, 0, self.panel_w, cfg.SCREEN_HEIGHT))
+        rect = (self.panel_x, 0, self.panel_w, cfg.SCREEN_HEIGHT)
+        fill_ui = getattr(screen, "fill_gpu_ui", None)
+        if fill_ui is not None:
+            fill_ui((*cfg.COLOR_PANEL_BG, 128), rect)
+            return
+        hires.ui_rect(screen, (*cfg.COLOR_PANEL_BG, 128), rect)
 
     def draw(self, screen, player, score, lives, bombs, power, graze, stage_name="", stage_timer=0, boss=None):
         """绘制右侧信息面板"""
@@ -235,7 +239,9 @@ class HUD:
 
         try:
             from src.systems.item_icons import draw_item_icon
-            draw_item_icon(screen, item.id, x + 8, y + 10, size=32)
+            # 底板画在高分辨率图层上，图标必须跟着画在同一层（ui_layer），否则它
+            # 会落到显卡实体层、被半透明的底板压住
+            draw_item_icon(screen, item.id, x + 8, y + 10, size=32, ui_layer=True)
         except Exception:
             pass
 

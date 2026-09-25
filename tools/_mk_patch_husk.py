@@ -1,0 +1,119 @@
+# -*- coding: utf-8 -*-
+# 临时脚本：生成「守卫/矿工落点上移」+「游魂 V / 斜线队形」的 apply_patch 文本
+import io
+
+path = "src/stages/stage6.py"
+txt = io.open(path, encoding="utf-8").read()
+
+H1_OLD = """TOP_SPAWN_LOWEST_Y = 220.0    # 落点最低的一档（对应原来最靠画面上缘的 -24）
+TOP_SPAWN_SPREAD = 2.4        # 原高度每高 1px，落点就高 2.4px
+
+
+def _top_spawn(y_above):
+    \"\"\"把原来的「区域外高度」换算成画面内的落点（越高的原高度 -> 越高的落点）。\"\"\"
+    return int(round(TOP_SPAWN_LOWEST_Y + (y_above + 24) * TOP_SPAWN_SPREAD))
+"""
+H1_NEW = """TOP_SPAWN_LOWEST_Y = 180.0    # 落点最低的一档（对应原来最靠画面上缘的 -24）
+TOP_SPAWN_HIGHEST_Y = 64.0    # 落点最高的一档（再高的原高度压在这一行，免得贴图顶出框）
+TOP_SPAWN_SPREAD = 2.4        # 原高度每高 1px，落点就高 2.4px
+
+
+def _top_spawn(y_above):
+    \"\"\"把原来的「区域外高度」换算成画面内的落点（越高的原高度 -> 越高的落点）。\"\"\"
+    y = TOP_SPAWN_LOWEST_Y + (y_above + 24) * TOP_SPAWN_SPREAD
+    return int(round(max(TOP_SPAWN_HIGHEST_Y, y)))
+
+
+# 同一批凋零游魂的队形（见 _husk_line）：整队摆在战斗区上缘之外，下落时保持形状
+HUSK_FORMATION_TOP_Y = -112.0   # 队形最高的一档
+HUSK_FORMATION_STEP = 40.0      # 队形里每往里 / 往下走一档就低这么多
+"""
+
+H2_OLD = """            radius=2.5, color=(150, 60, 110)))
+
+
+class WitherGuardEnemy(Enemy):
+"""
+H2_NEW = """            radius=2.5, color=(150, 60, 110)))
+
+
+def _husk_line(xs, shape="v", top_y=HUSK_FORMATION_TOP_Y, step=HUSK_FORMATION_STEP):
+    \"\"\"把同一批凋零游魂摆成一个队形，返回这一批敌机（按 x 排序后取位次定高低）。
+
+    shape="v"：中间最低、两翼依次抬高，两臂档高一致（V 字）；
+    "\\\\"：最左端最高，向右逐档降低；"/"：最右端最高，向左逐档降低。
+    整队都在战斗区上缘之外，三者下落速度相同，因此下压时队形不变。
+    \"\"\"
+    order = sorted(xs)
+    count = len(order)
+    if shape == "v":
+        middle = (count - 1) / 2.0
+        drops = [middle - abs(i - middle) for i in range(count)]
+    else:
+        drops = [float(i) for i in range(count)]
+        if shape == "/":
+            drops.reverse()
+    return [WitherHuskEnemy(x, int(round(top_y + step * drop)))
+            for x, drop in zip(order, drops)]
+
+
+class WitherGuardEnemy(Enemy):
+"""
+
+H3_OLD = """                WitherHuskEnemy(200, -60), WitherHuskEnemy(150, -88),
+                WitherHuskEnemy(380, -60), WitherHuskEnemy(430, -88)],
+                name="Undead Line")),
+"""
+H3_NEW = """                *_husk_line([150, 200], "\\\\", step=48),
+                *_husk_line([380, 430], "/", step=48)],
+                name="Undead Line")),
+"""
+
+H4_OLD = """                WitherMinerEnemy(492, _top_spawn(-24)), WitherHuskEnemy(160, -70),
+                WitherHuskEnemy(105, -98), WitherHuskEnemy(420, -70),
+                WitherHuskEnemy(475, -98)], name="Miner Phalanx")),
+"""
+H4_NEW = """                WitherMinerEnemy(492, _top_spawn(-24)),
+                *_husk_line([105, 160], "\\\\", step=48),
+                *_husk_line([420, 475], "/", step=48)], name="Miner Phalanx")),
+"""
+
+H5_OLD = """                WitherHuskEnemy(288, -80), WitherHuskEnemy(232, -108),
+                WitherHuskEnemy(344, -108)], name="Fortress Gate")),
+"""
+H5_NEW = """                *_husk_line([232, 288, 344], step=44)], name="Fortress Gate")),
+"""
+
+H6_OLD = """                WitherGuardEnemy(450, _top_spawn(-40)), WitherHuskEnemy(80, -80),
+                WitherHuskEnemy(150, -108), WitherHuskEnemy(230, -90),
+                WitherHuskEnemy(300, -118), WitherHuskEnemy(420, -90),
+                WitherHuskEnemy(490, -118)], name="Guard Wall")),
+"""
+H6_NEW = """                WitherGuardEnemy(450, _top_spawn(-40)),
+                *_husk_line([80, 150, 230, 300, 420, 490], step=34)],
+                name="Guard Wall")),
+"""
+
+H7_OLD = """                WitherHuskEnemy(70, -24), WitherHuskEnemy(180, -56),
+                WitherHuskEnemy(288, -80), WitherHuskEnemy(400, -56),
+                WitherHuskEnemy(500, -24), WitherHuskEnemy(40, -42),
+                WitherHuskEnemy(150, -74), WitherHuskEnemy(288, -108),
+                WitherHuskEnemy(430, -74), WitherHuskEnemy(540, -42),
+                WitherMinerEnemy(240, _top_spawn(-90)),
+"""
+H7_NEW = """                *_husk_line([70, 180, 288, 400, 500]),
+                *_husk_line([40, 150, 288, 430, 540], top_y=-160.0),
+                WitherMinerEnemy(240, _top_spawn(-90)),
+"""
+
+hunks = []
+for old, new in ((H1_OLD, H1_NEW), (H2_OLD, H2_NEW), (H3_OLD, H3_NEW),
+                 (H4_OLD, H4_NEW), (H5_OLD, H5_NEW), (H6_OLD, H6_NEW),
+                 (H7_OLD, H7_NEW)):
+    assert txt.count(old) == 1, "anchor not unique (%d): %r" % (txt.count(old), old[:70])
+    hunks.append("@@\n" + "".join("-" + ln + "\n" for ln in old.splitlines())
+                 + "".join("+" + ln + "\n" for ln in new.splitlines()))
+
+patch = "*** Begin Patch\n*** Update File: %s\n" % path + "".join(hunks) + "*** End Patch\n"
+io.open("tools/_patch_husk.txt", "w", encoding="utf-8", newline="\n").write(patch)
+print("patch written, %d hunks" % len(hunks))

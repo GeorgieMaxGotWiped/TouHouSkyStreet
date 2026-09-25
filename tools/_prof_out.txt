@@ -1,0 +1,26 @@
+         47641 function calls in 2.882 seconds
+
+   Ordered by: internal time
+   List reduced from 113 to 18 due to restriction <18>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+       60    2.477    0.041    2.541    0.042 D:\pyz\my thingses\TouHou\src\engine\display.py:174(present)
+     1920    0.203    0.000    0.203    0.000 {function HiResCanvas.blit at 0x0000024B27F4E520}
+       60    0.063    0.001    0.063    0.001 D:\pyz\my thingses\TouHou\src\engine\pseudo3d.py:437(draw_gpu)
+      300    0.051    0.000    0.051    0.000 {method 'fill' of 'pygame.surface.Surface' objects}
+       60    0.015    0.000    0.059    0.001 D:\pyz\my thingses\TouHou\src\stages\stage1.py:225(draw)
+      300    0.014    0.000    0.014    0.000 {built-in method pygame.draw.rect}
+       60    0.011    0.000    0.011    0.000 {method 'render' of 'pygame.font.Font' objects}
+      120    0.009    0.000    0.009    0.000 D:\pyz\my thingses\TouHou\src\engine\hires.py:98(__init__)
+       60    0.006    0.000    0.297    0.005 D:\pyz\my thingses\TouHou\src\ui\menu.py:2821(draw)
+      240    0.004    0.000    0.004    0.000 {built-in method pygame.draw.line}
+     1860    0.003    0.000    0.205    0.000 D:\pyz\my thingses\TouHou\src\engine\hires.py:433(blit)
+       60    0.002    0.000    0.061    0.001 D:\pyz\my thingses\TouHou\src\ui\hud.py:47(draw)
+     1980    0.002    0.000    0.003    0.000 D:\pyz\my thingses\TouHou\src\engine\hires.py:410(_mark_hi)
+       60    0.002    0.000    0.052    0.001 D:\pyz\my thingses\TouHou\src\ui\menu.py:885(_draw_music_banner)
+     1500    0.001    0.000    0.002    0.000 D:\pyz\my thingses\TouHou\src\engine\hires.py:421(hi_clip)
+       60    0.001    0.000    0.004    0.000 D:\pyz\my thingses\TouHou\src\ui\menu.py:1192(update)
+     1260    0.001    0.000    0.024    0.000 D:\pyz\my thingses\TouHou\src\engine\fallback_font.py:183(render)
+     3900    0.001    0.000    0.001    0.000 {built-in method builtins.round}
+
+

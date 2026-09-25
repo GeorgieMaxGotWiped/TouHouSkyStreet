@@ -1,0 +1,25 @@
+{
+ "groups": [
+  {"key": "stage1", "no": "01", "cn": "蜘蛛巢穴的圣所", "en": "Spider's Den",
+   "tracks": [{"cn": "巢穴深处", "en": "Deep into the Den", "kind": "道中"},
+              {"cn": "蛛丝马迹！", "en": "Spider's Fragments", "kind": "关底"}]},
+  {"key": "stage2", "no": "02", "cn": "末地最底层", "en": "Dragon's Nest",
+   "tracks": [{"cn": "末影之底", "en": "Depths of the End", "kind": "道中"},
+              {"cn": "龙之怒号", "en": "Dragon's Wrath", "kind": "关底"}]},
+  {"key": "stage3", "no": "03", "cn": "地下墓穴", "en": "The Catacombs Floor 1",
+   "tracks": [{"cn": "墓穴回响", "en": "Echoes of the Catacombs", "kind": "道中"},
+              {"cn": "小丑嘉年华", "en": "Bonzo's Carnival", "kind": "关底"}]},
+  {"key": "stage4", "no": "04", "cn": "地下墓穴深处", "en": "The Catacombs",
+   "tracks": [{"cn": "墓穴深处", "en": "The Catacombs", "kind": "道中"},
+              {"cn": "死灵王的狂宴", "en": "Necromancer's Feast", "kind": "关底"}]},
+  {"key": "stage5", "no": "05", "cn": "凋零之厅", "en": "Hall of the Wither Lords",
+   "tracks": [{"cn": "凋零之厅", "en": "Hall of the Wither Lords", "kind": "道中 / 关底"}]},
+  {"key": "stage6", "no": "06", "cn": "最终进军", "en": "Final Approach",
+   "tracks": [{"cn": "最终进军", "en": "Final Approach", "kind": "道中"},
+              {"cn": "凋零之王的王座", "en": "Throne of the Wither King", "kind": "关底"}]},
+  {"key": "ex", "no": "EX", "cn": "裂隙", "en": "The Rift",
+   "tracks": [{"cn": "裂隙彼端", "en": "Beyond the Rift", "kind": "道中"},
+              {"cn": "竞选者的狂想", "en": "The Candidate's Fantasy", "kind": "关底"}]}
+ ],
+ "note": "曲目信息取自游戏内的曲名表。音乐音频仍在打磨，本页只列出曲目，不提供试听。"
+}

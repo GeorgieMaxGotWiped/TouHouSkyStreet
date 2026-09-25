@@ -27,9 +27,13 @@ DIALOGUE_PORTRAIT_INACTIVE_ALPHA = 110
 DIALOGUE_PORTRAIT_RETREAT = 30
 # 所有人物统一向自己一侧外移的像素（说话者/非说话者都移动；非说话者再叠加 RETREAT）
 DIALOGUE_PORTRAIT_SIDE_SHIFT = 60
+# 立绘允许探出战斗框的比例（按内容宽算）。立绘是「靠边站」的构图，探出去一点才自然，
+# 但探多少得有个上限：各张立绘里脸落在内容的哪一列相差很大（Kaeman 的脸在正中，
+# 两侧的披风却宽得多），一律按内容外沿对齐会把整张脸推出框外
+DIALOGUE_PORTRAIT_EDGE_BLEED = 0.25
 
 
-# 立绘缓存：key = (贴图路径, 角色缩放) -> (Surface, 内容框)。
+# 立绘缓存：key = (贴图路径, 角色缩放, 渲染倍率, 是否取景补偿) -> (Surface, 内容框)。
 # 放在模块级是为了跨对话框复用：同一张立绘在整局里只做一次抠图 / 遮罩 / 缩放。
 # 遮罩要扫整张立绘，是这里最贵的一步，所以两个用途（立绘高度、内容框）共用一次结果。
 _PORTRAIT_CACHE = {}
@@ -73,17 +77,43 @@ def _union_content_rect(rects, w, h):
     return rect
 
 
-def get_portrait(path, scale):
+def _portrait_frame_scale(path, base_width, harmonize):
+    """取景补偿倍率：把取景更近（头更大）的立绘缩到统一的目标头高。
+
+    对话框按「内容高度」统一缩放立绘，而立绘各自的取景差得很远（全身像 / 半身特写），
+    于是同屏人物就一大一小 —— 换上一张取景更近的立绘（例如新的末影龙）时最明显。
+    这里按 settings 里登记的「头高 ÷ 内容高」换算补偿倍率，让所有人物看起来一样近。
+
+    放大方向另受宽度预算约束（cfg.DIALOGUE_PORTRAIT_MAX_WIDTH）：宽度会超预算时只缩不放
+    （五面 Watcher 与召唤的 Boss 同屏就属于这种），免得两张立绘在战斗区里糊在一起。
+    """
+    if not harmonize:
+        return 1.0
+    ratio = cfg.dialogue_portrait_head_ratio(path)
+    if not ratio:
+        return 1.0
+    low, high = cfg.DIALOGUE_PORTRAIT_FACTOR_RANGE
+    factor = max(low, min(high, cfg.DIALOGUE_PORTRAIT_HEAD_TARGET / ratio))
+    if factor > 1.0 and base_width > 0:
+        budget = cfg.DIALOGUE_PORTRAIT_MAX_WIDTH / float(base_width)
+        factor = min(factor, max(1.0, budget))
+    return factor
+
+
+def get_portrait(path, scale, harmonize=True):
     """取（并缓存）立绘贴图与内容框；失败返回 (None, (0, 0, 0))，不重复重试。
 
     立绘按基准缩放等比缩小（自机/boss 左右站位更清晰），内容框为
     (内容左, 内容右, 内容顶)（逻辑像素，即排版坐标）。
 
+    harmonize=False 表示不做取景补偿（裂隙面按现状保持）；缓存按 (贴图, 缩放, 渲染倍率,
+    是否补偿) 分开存，两种画法互不污染。
+
     贴图本身按渲染倍率放大像素（文字/立绘的高分辨率图层用），内容框仍是逻辑
     尺寸，所以 draw 里的站位计算一行都不用改。
     """
     factor = hires.scale()
-    key = (path, scale, factor)
+    key = (path, scale, factor, harmonize)
     cached = _PORTRAIT_CACHE.get(key)
     if cached is not None:
         return cached
@@ -103,7 +133,13 @@ def get_portrait(path, scale):
             rects = []
         content_top = min(r.top for r in rects) if rects else 0
         ph = _portrait_target_height(h, content_top)
-        ph = max(1, int(round(ph * scale * DIALOGUE_PORTRAIT_BASE_SCALE)))
+        # 取景对齐过的人物整体再做大 10%（裂隙面不参与，见 harmonize）
+        boost = cfg.DIALOGUE_PORTRAIT_SCALE if harmonize else 1.0
+        ph = max(1, int(round(ph * scale * DIALOGUE_PORTRAIT_BASE_SCALE * boost)))
+        # 取景补偿：按这张立绘的「头高 ÷ 内容高」把人物缩放到统一样子（宽度预算内）
+        frame = _portrait_frame_scale(path, w * ph / float(h), harmonize)
+        if frame != 1.0:
+            ph = max(1, int(round(ph * frame)))
         sprite = hires.scaled_image(img, (max(1, int(round(w * ph / h))), ph), factor)
         cr = _union_content_rect(rects, w, h)
         kx = ph / float(h)
@@ -165,9 +201,10 @@ class DialogueBox:
     """底部对话框（逐条推进）"""
     def __init__(self, game, lines, portraits=None, portrait_sides=None,
                  portrait_scales=None, portrait_offsets=None,
-                 portrait_vertical_offsets=None):
+                 portrait_vertical_offsets=None, harmonize=True):
         self.game = game
         self.lines = lines          # [(name, text), ...]
+        self.harmonize = harmonize   # False = 不做取景补偿（裂隙面按现状保持）
         self.portraits = portraits or {}   # {角色名: 贴图路径}
         self.portrait_sides = portrait_sides or {}   # {角色名: "left"/"right"}，默认右侧
         self.portrait_scales = portrait_scales or {}   # {角色名: 立绘放大倍率}，默认 1.0
@@ -214,7 +251,7 @@ class DialogueBox:
 
     def _draw_portrait(self, screen, name, portrait_path, alpha, retreat):
         """绘制单个立绘：alpha 为整体不透明度(0-255)，retreat 为向自己一侧后退像素。"""
-        key = (portrait_path, self.portrait_scales.get(name, 1.0))
+        key = (portrait_path, self.portrait_scales.get(name, 1.0), self.harmonize)
         sprite, (box_l, box_r, content_top) = get_portrait(*key)
         if sprite is None:
             return
@@ -225,10 +262,18 @@ class DialogueBox:
             side = "left" if portrait_path == cfg.SELF_SPRITE else "right"
         box_w = cfg.BATTLE_AREA_WIDTH - 24
         x = cfg.BATTLE_OFFSET_X + 12
+        # 靠边站：参与取景对齐的立绘，探出战斗框多少有个上限（按内容宽算），否则窄一点的
+        # 立绘会把脸整个推到框外（Kaeman 就是这么出界的）。裂隙面（harmonize=False）按旧
+        # 写法摆放，一分不动。retreat 的动画增量照旧叠在上面，说话 / 不说话的进退不变。
+        push = float(DIALOGUE_PORTRAIT_SIDE_SHIFT
+                     + (self.portrait_offsets.get(name, 0) if side != "left" else 0))
+        if self.harmonize:
+            push = min(push, DIALOGUE_PORTRAIT_EDGE_BLEED * max(1, box_r - box_l))
+        push += max(0.0, retreat - DIALOGUE_PORTRAIT_SIDE_SHIFT)
         if side == "left":
-            px = x - box_l - retreat
+            px = x - box_l - push
         else:
-            px = x + box_w - box_r + self.portrait_offsets.get(name, 0) + retreat
+            px = x + box_w - box_r + push
         # 头顶对齐战斗框上1/3线，立绘下半被对话框遮挡（半身效果）
         py = (DIALOGUE_PORTRAIT_TOP_TARGET - content_top
               - self.portrait_vertical_offsets.get(name, 0))

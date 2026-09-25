@@ -23,10 +23,13 @@ def build(game, name):
     from src.ui.intermission import IntermissionState
     from src.ui.loadout import LoadoutState
     from src.ui.difficulty import DifficultySelectState
+    from src.ui.character_select import CharacterSelectState
     if name == "menu":
         return MenuState(game)
     if name == "settings":
         return SettingsState(game)
+    if name == "character":
+        return CharacterSelectState(game)
     if name == "difficulty":
         return DifficultySelectState(game)
     if name == "storage":
@@ -41,10 +44,36 @@ def build(game, name):
         return st
     if name == "loadout":
         return LoadoutState(game)
+    if name == "prep":
+        # 出发前休整：从携带界面确认之后进入的就是这个界面（pre_start=True）
+        return IntermissionState(game, 0, pre_start=True)
+    if name == "practice":
+        from src.ui.practice import PracticeSelectState
+        return PracticeSelectState(game)
+    if name in ("boss_reward", "reward_confirm"):
+        from src.ui.boss_reward import BossRewardState
+        from src.systems.item_system import BOSS_REWARD_POOLS
+        import random
+        # 战利品是从池子里随机抽 3 件：固定种子，好让「改前 / 改后」两张图
+        # 抽到同一批、同一顺序，对比才有意义
+        random.seed(20260913)
+        stage_num = 1 if name == "boss_reward" else 5
+        return BossRewardState(game, stage_num, list(BOSS_REWARD_POOLS[stage_num]))
+    if name == "loading":
+        from src.ui.loading import LoadingState
+
+        def task(loading):
+            loading.title = "第 1 面"
+            loading.subtitle = "天空街 Skyblock Hub"
+            yield 0.1, "构建关卡数据…"
+            yield 0.55, "载入贴图 弹幕贴图"
+            yield 0.9, "载入 Boss 立绘 1/2"
+        return LoadingState(game, task)
     raise SystemExit("unknown screen " + name)
 
 
-SCREENS = ("menu", "settings", "difficulty", "storage", "shop", "forge", "loadout")
+SCREENS = ("menu", "settings", "difficulty", "storage", "shop", "forge", "loadout",
+           "prep", "practice", "boss_reward", "reward_confirm", "loading", "character")
 
 
 def run(mode):
@@ -56,6 +85,7 @@ def run(mode):
         try:
             game = game_module.Game()
             game.push_state(build(game, name))
+            game.settle_ui()   # 黑场过渡 + 进场动效走完，拍到的是落定后的画面
             from pygame._sdl2 import video as video_module
             video_module.Window.from_display_module().size = (1920, 1440)
             game._update_present_rect()
@@ -82,6 +112,12 @@ def main():
     painter.set_enabled(mode == "after")
     game = game_module.Game()
     game.push_state(build(game, name))
+    game.settle_ui()      # 黑场过渡 + 进场动效走完，拍到的是落定后的画面
+    if name == "reward_confirm":
+        # 顺带把「确认领取」的弹窗（半透明遮罩 + 弹窗）也画出来；
+        # 只能在 enter() 之后设置——enter() 本身会把弹窗重置掉
+        game.current_state.selected = 1
+        game.current_state.confirming = True
     from pygame._sdl2 import video as video_module
     video_module.Window.from_display_module().size = (1920, 1440)
     game._update_present_rect()

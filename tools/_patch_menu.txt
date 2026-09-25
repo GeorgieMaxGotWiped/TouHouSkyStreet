@@ -1,0 +1,26 @@
+*** Begin Patch
+*** Update File: src/ui/menu.py
+@@
+-    def _reward_enemy_kill(self, enemy):
+-        """敌人被击破后的奖励结算（分数/技能经验/掉落/击杀计数）"""
+-        if self.practice_info:
+-            return
++    def _death_clear_bullets(self, enemy):
++        """击破清弹（各面自定义口径）：把被击破小怪周围一定范围内的敌弹炸掉
++
++        半径由关卡给（`Stage.enemy_death_clear_radius`，基类默认 0 = 不清弹），
++        因此「越大的怪炸得越大」是各面自己的事；与奖励结算无关，练习 / Ex 面同样生效。
++        """
++        radius = self.stage.enemy_death_clear_radius(enemy)
++        if radius <= 0:
++            return
++        from src.entities.bullet import burst_cancel_bullets
++        burst_cancel_bullets(self.bullet_manager, enemy.x, enemy.y, radius,
++                             getattr(enemy, "color", (235, 245, 255)))
++
++    def _reward_enemy_kill(self, enemy):
++        """敌人被击破后的奖励结算（分数/技能经验/掉落/击杀计数）"""
++        self._death_clear_bullets(enemy)
++        if self.practice_info:
++            return
+*** End Patch

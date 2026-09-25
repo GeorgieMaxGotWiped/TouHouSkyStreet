@@ -1,0 +1,37 @@
+*** Begin Patch
+*** Update File: src/entities/bullet.py
+@@
+-    return Bullet(x, y, vx, vy, Bullet.TYPE_RICE, radius=2.0,
+-                  color=cfg.COLOR_BLUE, damage=cfg.BULLET_PLAYER_DAMAGE,
+-                  is_player_bullet=True, lifetime=60, homing=homing)
+-
+-
+-class BulletManager:
++    return Bullet(x, y, vx, vy, Bullet.TYPE_RICE, radius=2.0,
++                  color=cfg.COLOR_BLUE, damage=cfg.BULLET_PLAYER_DAMAGE,
++                  is_player_bullet=True, lifetime=60, homing=homing)
++
++
++def burst_cancel_bullets(bullet_manager, x, y, radius, color=(235, 245, 255)):
++    """爆炸清弹：把半径内的敌弹推进「变白自爆」动画，并补一圈扩散光效。
++
++    用于「小怪被击破 / 残影离场」这类击破奖励（六面，见 stages/stage6.py）：
++    半径由调用方按体型给。光效本身是无害的短命圆弹，所以不参与碰撞与擦弹，
++    也不吃难度下的弹幕密度缩减（`add_enemy_bullet` 会放过 harmless 弹）。
++    """
++    for bullet in bullet_manager.enemy_bullets:
++        if bullet.harmless or bullet.cancel_timer > 0 or not bullet.alive:
++            continue
++        if circle_collision(x, y, radius, bullet.x, bullet.y, 0):
++            bullet.start_cancel()
++    for scale, frames in ((0.62, 7), (0.34, 12)):
++        flash = create_bullet_angle(x, y, 0.0, 0.0, Bullet.TYPE_CIRCLE,
++                                    radius=radius * scale, color=color)
++        flash.manager = bullet_manager
++        flash.harmless = True
++        flash.lifetime = frames
++        bullet_manager.add_enemy_bullet(flash)
++
++
++class BulletManager:
+*** End Patch

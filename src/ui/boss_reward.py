@@ -3,6 +3,8 @@
 import random
 import pygame
 from src.engine import settings as cfg
+from src.engine import hires
+from src.engine import painter
 from src.engine.game import GameState
 from src.systems.item_system import (
     SKYBLOCK_ITEMS,
@@ -11,6 +13,28 @@ from src.systems.item_system import (
     ItemInventory,
 )
 from src.systems.item_icons import draw_item_icon
+
+
+def _build_card(size, rarity_color, selected, hover):
+    """战利品卡片底 / 稀有度外框 / 悬停黄框的预烤画法（按逻辑尺寸 x 倍率作画）"""
+    def build(target, k):
+        rect = (0, 0, size[0], size[1])
+        painter.bake_rect(target, k, cfg.COLOR_PANEL_BG, rect)
+        painter.bake_rect(target, k, rarity_color, rect, 3 if selected else 1)
+        if hover:
+            painter.bake_rect(target, k, cfg.COLOR_YELLOW, rect, 1)
+    return build
+
+
+def _build_button(size, hover):
+    """「确认领取」按钮的预烤画法"""
+    def build(target, k):
+        rect = (0, 0, size[0], size[1])
+        painter.bake_rect(target, k, cfg.COLOR_PANEL_BG, rect)
+        painter.bake_rect(target, k,
+                          cfg.COLOR_YELLOW if hover else cfg.COLOR_GRAY, rect,
+                          2 if hover else 1)
+    return build
 
 
 class BossRewardState(GameState):
@@ -82,8 +106,8 @@ class BossRewardState(GameState):
                 self.confirm_choice = 0
                 return
 
-    def _card_rects(self):
-        """三张奖励卡的可点击区域（与 draw 布局一致）"""
+    def _card_layouts(self):
+        """三张奖励卡的布局（可点击区域与 draw 共用一份，免得两边各算一遍算岔）"""
         card_w = 250
         gap = 22
         total = card_w * 3 + gap * 2
@@ -94,7 +118,7 @@ class BossRewardState(GameState):
         font_small = self.game.font_small
         font_medium = self.game.font_medium
         line_h = font_small.get_height() + 4
-        rects = []
+        layouts = []
         for idx, item in enumerate(self.offer):
             x = start_x + idx * (card_w + gap)
             name_surf = font_medium.render(item.name, True, item.rarity_color)
@@ -117,10 +141,28 @@ class BossRewardState(GameState):
             content_y = rarity_y + font_small.get_height() + 4
             if item.slot:
                 content_y += font_small.get_height() + 4
-            hint_y = content_y + len(shown) * line_h + 10
+            # 行数要含 slot 那一行：绘制时 ty 会先为 slot 前进一次，只按 shown
+            # 算会少一行，「按 Enter 确认领取」就压住了最后一行说明
+            line_count = len(shown) + (1 if item.slot else 0)
+            hint_y = content_y + line_count * line_h + 10
             card_h = max(250, (hint_y - card_y) + 34)
-            rects.append((idx, pygame.Rect(x, card_y, card_w, card_h)))
-        return rects
+            layouts.append({
+                "index": idx,
+                "item": item,
+                "x": x,
+                "rect": pygame.Rect(x, card_y, card_w, card_h),
+                "name": name_surf,
+                "rarity_y": rarity_y,
+                "content_y": content_y,
+                "hint_y": hint_y,
+                "lines": shown,
+                "line_h": line_h,
+            })
+        return layouts
+
+    def _card_rects(self):
+        """三张奖励卡的可点击区域（与 draw 布局一致）"""
+        return [(lay["index"], lay["rect"]) for lay in self._card_layouts()]
 
     def _confirm_claim_rect(self):
         """“确认领取”按钮区域"""
@@ -223,101 +265,83 @@ class BossRewardState(GameState):
             lines.append(cur)
         return lines
     def draw(self, screen):
-        screen.fill((7, 10, 25))
+        screen.fill_gpu((7, 10, 25))
         title = self.game.font_large.render("Boss 奖励", True, cfg.COLOR_YELLOW)
-        screen.blit(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 40))
+        screen.blit_gpu(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 40))
         sub = self.game.font_medium.render(
             f'第 {self.stage_num} 面关底 Boss 已被击破：从 3 件战利品中选择 1 件',
             True, cfg.COLOR_WHITE)
-        screen.blit(sub, ((cfg.SCREEN_WIDTH - sub.get_width()) // 2, 90))
+        screen.blit_gpu(sub, ((cfg.SCREEN_WIDTH - sub.get_width()) // 2, 90))
 
-        card_w = 250
-        gap = 22
-        total = card_w * 3 + gap * 2
-        start_x = (cfg.SCREEN_WIDTH - total) // 2
-        card_y = 150
-        pad = 12
-        text_w = card_w - pad * 2
         font_small = self.game.font_small
         font_medium = self.game.font_medium
-        line_h = font_small.get_height() + 4
 
-        for idx, item in enumerate(self.offer):
-            x = start_x + idx * (card_w + gap)
+        for lay in self._card_layouts():
+            idx = lay["index"]
+            item = lay["item"]
+            x = lay["x"]
+            panel = lay["rect"]
+            card_w = panel.width
+            card_h = panel.height
+            name_surf = lay["name"]
+            shown = lay["lines"]
+            line_h = lay["line_h"]
+            rarity_y = lay["rarity_y"]
+            content_y = lay["content_y"]
+            hint_y = lay["hint_y"]
             selected = idx == self.selected
-
-            name_surf = font_medium.render(item.name, True, item.rarity_color)
-            if name_surf.get_width() > text_w:
-                name_surf = font_small.render(item.name, True, item.rarity_color)
-
-            raw_lines = []
-            price_text = self._price_text(item)
-            if price_text:
-                raw_lines.append((cfg.COLOR_YELLOW, price_text))
-            if item.stat_text():
-                raw_lines.append((cfg.COLOR_GREEN, item.stat_text()))
-            for lore_line in item.lore[:3]:
-                raw_lines.append((cfg.COLOR_WHITE, lore_line))
-            text_lines = []
-            for color, text in raw_lines:
-                for line in self._wrap_text(font_small, text, text_w):
-                    text_lines.append((color, line))
-            shown = text_lines[:9]
-
-            rarity_y = card_y + 78 + name_surf.get_height() + 4
-            content_y = rarity_y + font_small.get_height() + 4
-            if item.slot:
-                content_y += font_small.get_height() + 4
-            hint_y = content_y + len(shown) * line_h + 10
-            card_h = max(250, (hint_y - card_y) + 34)
-
-            panel = pygame.Rect(x, card_y, card_w, card_h)
-            screen.blit(pygame.Surface((0, 0)), (0, 0))  # no-op keep pygame import
-            pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, panel)
-            pygame.draw.rect(screen, item.rarity_color, panel, 3 if selected else 1)
-            if self.game.mouse_hover(panel) and not selected:
-                pygame.draw.rect(screen, cfg.COLOR_YELLOW, panel, 1)
+            hover = self.game.mouse_hover(panel) and not selected
+            # 卡片底 / 稀有度外框（选中更粗）/ 悬停黄框：先按渲染倍率烤成一张图再由
+            # 显卡 1:1 贴出，边框不会被放大糊掉
+            screen.blit_baked(("reward_card", panel.size, tuple(item.rarity_color),
+                               selected, hover), panel.topleft, panel.size,
+                              _build_card(panel.size, item.rarity_color,
+                                          selected, hover))
             if selected:
                 arrow = self.game.font_large.render(">", True, cfg.COLOR_YELLOW)
-                screen.blit(arrow, (x - 24, card_y + card_h // 2 - 16))
+                screen.blit_gpu(arrow, (x - 24, panel.y + card_h // 2 - 16))
 
-            draw_item_icon(screen, item.id, x + (card_w - 48) // 2, card_y + 24, size=48)
+            draw_item_icon(screen, item.id, x + (card_w - 48) // 2, panel.y + 24, size=48)
 
-            screen.blit(name_surf, (x + (card_w - name_surf.get_width()) // 2, card_y + 78))
+            screen.blit_gpu(name_surf, (x + (card_w - name_surf.get_width()) // 2,
+                                        panel.y + 78))
 
             rarity = font_small.render(
                 f"{item.rarity} · {ITEM_TYPE_LABELS.get(item.item_type, item.item_type)}",
                 True, cfg.COLOR_GRAY)
-            screen.blit(rarity, (x + (card_w - rarity.get_width()) // 2, rarity_y))
+            screen.blit_gpu(rarity, (x + (card_w - rarity.get_width()) // 2, rarity_y))
 
             ty = content_y
             if item.slot:
                 slot_text = font_small.render(
                     SLOT_LABELS.get(item.slot, item.slot), True, cfg.COLOR_GRAY)
-                screen.blit(slot_text, (x + (card_w - slot_text.get_width()) // 2, ty))
+                screen.blit_gpu(slot_text, (x + (card_w - slot_text.get_width()) // 2,
+                                            ty))
                 ty += font_small.get_height() + 4
             for color, line in shown:
                 surf = font_small.render(line, True, color)
-                screen.blit(surf, (x + (card_w - surf.get_width()) // 2, ty))
+                screen.blit_gpu(surf, (x + (card_w - surf.get_width()) // 2, ty))
                 ty += line_h
 
             if selected:
                 mark = font_medium.render("按 Enter 确认领取", True, cfg.COLOR_YELLOW)
-                screen.blit(mark, (x + (card_w - mark.get_width()) // 2, hint_y))
+                screen.blit_gpu(mark, (x + (card_w - mark.get_width()) // 2, hint_y))
 
         claim_rect = self._confirm_claim_rect()
         claim_hover = self.game.mouse_hover(claim_rect)
-        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, claim_rect)
-        pygame.draw.rect(screen, cfg.COLOR_YELLOW if claim_hover else cfg.COLOR_GRAY,
-                         claim_rect, 2 if claim_hover else 1)
+        screen.blit_baked(("reward_claim", claim_rect.size, claim_hover),
+                          claim_rect.topleft, claim_rect.size,
+                          _build_button(claim_rect.size, claim_hover))
         claim_text = self.game.font_medium.render(
             "确认领取", True, cfg.COLOR_YELLOW if claim_hover else cfg.COLOR_WHITE)
-        screen.blit(claim_text, (claim_rect.x + (claim_rect.width - claim_text.get_width()) // 2,
-                                 claim_rect.y + (claim_rect.height - claim_text.get_height()) // 2))
+        screen.blit_gpu(claim_text,
+                        (claim_rect.x + (claim_rect.width - claim_text.get_width()) // 2,
+                         claim_rect.y + (claim_rect.height - claim_text.get_height()) // 2))
 
         hint = self.game.font_small.render(
             "← → / A D：选择     Enter / Z / Space：确认领取", True, cfg.COLOR_DARK_GRAY)
-        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, cfg.SCREEN_HEIGHT - 70))
+        screen.blit_gpu(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2,
+                               cfg.SCREEN_HEIGHT - 70))
 
         if self.confirming:
             self._draw_confirm(screen)
@@ -325,15 +349,15 @@ class BossRewardState(GameState):
     def _draw_confirm(self, screen):
         """确认领取环节：确定 / 返回。"""
         item = self.offer[self.selected]
-        overlay = pygame.Surface((cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
-        screen.blit(overlay, (0, 0))
+        # 半透明遮罩与弹窗必须走高分辨率图层：显卡层叠在最底，遮不住已经画上去的
+        # 内容（卡片、文字），只有高分辨率图层才在它们之上
+        screen.blit(hires.ui_overlay(screen, (0, 0, 0), 150), (0, 0))
 
         box_w = 620
         box_h = 220
         box = pygame.Rect((cfg.SCREEN_WIDTH - box_w) // 2, 280, box_w, box_h)
-        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, box)
-        pygame.draw.rect(screen, item.rarity_color, box, 2)
+        hires.ui_rect(screen, cfg.COLOR_PANEL_BG, box)
+        hires.ui_rect(screen, item.rarity_color, box, 2)
 
         q = self.game.font_medium.render("确定领取这件战利品吗？", True, cfg.COLOR_WHITE)
         screen.blit(q, ((cfg.SCREEN_WIDTH - q.get_width()) // 2, box.y + 30))
@@ -350,9 +374,9 @@ class BossRewardState(GameState):
             w = self.game.font_medium.size(label)[0] + 44
             rect = pygame.Rect(x, y, w, 38)
             selected = idx == self.confirm_choice
-            pygame.draw.rect(screen,
-                             cfg.COLOR_YELLOW if selected else cfg.COLOR_DARK_GRAY,
-                             rect, 2 if selected else 1)
+            hires.ui_rect(screen,
+                          cfg.COLOR_YELLOW if selected else cfg.COLOR_DARK_GRAY,
+                          rect, 2 if selected else 1)
             color = cfg.COLOR_YELLOW if selected else cfg.COLOR_GRAY
             surf = self.game.font_medium.render(label, True, color)
             screen.blit(surf, (rect.x + (w - surf.get_width()) // 2,

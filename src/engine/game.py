@@ -14,6 +14,35 @@ from src.engine.fallback_font import FallbackFont
 # DPI 感知与 GPU 缩放的 SDL 环境变量必须在 pygame.init() 之前设置
 display.configure_environment()
 
+_icon_cache = {}
+
+
+def load_window_icon():
+    """载入窗口 / 任务栏图标（assets/gui/icon.png），同一进程只解码一次。
+
+    原图偏大，先等比缩到 GAME_ICON_SIZE 再交给系统；缺图或解码失败返回 None，
+    此时保留 pygame 的默认图标。打包脚本（build_exe.bat、TouHouSkyStreet.spec）
+    用的是同一个文件，换图标只需替换 assets/gui/icon.png。
+    """
+    if "surface" not in _icon_cache:
+        surface = None
+        if os.path.exists(GAME_ICON_PATH):
+            try:
+                surface = pygame.image.load(GAME_ICON_PATH)
+                side = max(surface.get_size())
+                if side > GAME_ICON_SIZE:
+                    scale = GAME_ICON_SIZE / side
+                    surface = pygame.transform.smoothscale(surface, (
+                        max(1, round(surface.get_width() * scale)),
+                        max(1, round(surface.get_height() * scale))))
+            except Exception as e:
+                print(f"[Icon] Failed to load window icon {GAME_ICON_PATH}: {e}")
+                surface = None
+        else:
+            print(f"[Icon] Window icon not found: {GAME_ICON_PATH}")
+        _icon_cache["surface"] = surface
+    return _icon_cache["surface"]
+
 
 class Game:
     def __init__(self):
@@ -21,6 +50,11 @@ class Game:
         display.enable_dpi_awareness()
         pygame.init()
         pygame.display.set_caption(GAME_TITLE)
+        # 窗口 / 任务栏图标：在建窗口之前交给 pygame，之后每次 set_mode（换分辨率
+        # 重建窗口）它都会自动重新套用，不必在 _create_display 里重设
+        icon = load_window_icon()
+        if icon is not None:
+            pygame.display.set_icon(icon)
         # 分代 GC：gen2 扫描一次实测 4~8ms，而这类扫描最容易落在「一帧里分配
         # 最多」的帧上——比如开符那一帧（符卡背景重建）。这里只放宽 gen2 的
         # 触发间隔（gen0/gen1 保持默认，短命循环垃圾照常回收），实测开符帧
@@ -42,6 +76,8 @@ class Game:
         self._create_display()
         self.clock = pygame.time.Clock()
         self.running = True
+        # 主循环是否已经在跑：黑场过渡只在主循环里生效（见 _request_state_change）
+        self._loop_started = False
         self.dt = 0.0
         self._speed_accum = 0.0     # 流速子步进累计器（不足 1 步时保留到下一帧）
         self._speed_notice_until = 0 # 流速变化提示的显示截止时间（真实毫秒）
@@ -71,6 +107,10 @@ class Game:
         # Boss 立绘套组（new / another，可在设置界面切换）
         cfg.set_boss_art(self.user_config.get("boss_art", BOSS_ART_DEFAULT))
         self.boss_art = cfg.get_boss_art()
+        # 自机形象（默认自机 mage；后续自机选择界面接到 set_player_character）
+        cfg.set_player_character(self.user_config.get("player_character",
+                                                     PLAYER_CHARACTER_DEFAULT))
+        self.player_character = cfg.get_player_character()
         self.sfx_cache = {}
         if self.audio_ok:
             try:
@@ -106,6 +146,8 @@ class Game:
         # 游戏状态栈
         self.states = []
         self.current_state = None
+        # 界面切换的黑场过渡（None = 当前没有过渡在跑，见 ScreenTransition）
+        self.transition = None
 
         # 当前播放的音乐路径（用于判断是否需要切换，避免同一曲目重头播放）
         self.current_music_path = None
@@ -283,6 +325,16 @@ class Game:
         save_user_config(self.user_config)
         return self.boss_art
 
+    # --- 自机形象 ---
+
+    def set_player_character(self, key):
+        """切换自机形象并保存配置（后续自机选择界面调用这里）"""
+        cfg.set_player_character(key)
+        self.player_character = cfg.get_player_character()
+        self.user_config["player_character"] = self.player_character
+        save_user_config(self.user_config)
+        return self.player_character
+
     def _position_window(self, fullscreen):
         """Place the borderless fullscreen window correctly on Windows."""
         if sys.platform != "win32":
@@ -336,13 +388,33 @@ class Game:
         # 旧 texture/renderer 的析构会发生在 SDL 销毁窗口之后，可能误伤
         # 新窗口刚创建、恰好复用同一地址的渲染器（表现为 present 时报 texture 无效）
         self.presenter = None
-        flags = pygame.SCALED | (pygame.FULLSCREEN if self.fullscreen else 0)
+        # 窗口尺寸在建 renderer 之前一次定死，之后不再动：本模块要在窗口上建 renderer
+        # 画地面与高分辨率图层，而 pygame.SCALED 自己也会在这个窗口上建一个 renderer 做
+        # 缩放，SDL 并不支持一个窗口挂两份 renderer——挂着另一个 renderer 的时候改窗口
+        # 尺寸（旧版先建 960x720、建完 presenter 再调到设置的输出分辨率）会让 pygame
+        # 重建它那份 renderer，把另一份的显存状态一起带走，实测约四到六成概率在开局头
+        # 几帧读到已释放内存直接闪退（崩在 python312.dll 的小对象分配器里，空闲池头被
+        # 写坏）。所以这里按设置的输出分辨率直接建窗口，尺寸也在这里（presenter 之前）
+        # 一次修正到位；运行中改分辨率走整体重建（见 set_resolution）。
+        size = self._window_size()
+        flags = pygame.SCALED
+        if self.fullscreen:
+            # 全屏按桌面尺寸建（SCALED 下不会去改显示模式），画面仍由 renderer 整屏缩放
+            size = display.get_desktop_size() or size
+            flags |= pygame.FULLSCREEN
         try:
-            self.window = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
+            self.window = pygame.display.set_mode(size, flags)
         except pygame.error as e:
-            # 个别后端不支持 SCALED：退回普通窗口
-            print(f"[Display] SCALED window failed, fallback to plain window: {e}")
+            # 个别后端建不出目标尺寸的窗口：退回 960x720 普通窗口
+            print(f"[Display] Window creation failed, fallback to plain window: {e}")
             self.window = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        if not self.fullscreen:
+            # SCALED 还会按系统 DPI 缩放把窗口再开大一圈（本机 200% 缩放下请求
+            # 960x720 会得到 1920x1440 的窗口，"输出分辨率" 就不再等于窗口像素数）。
+            # 挂 renderer 之前把窗口摁回设置的尺寸：这一步必须在 GpuPresenter 之前，
+            # 因为改窗口尺寸会让 SDL 重建窗口的后备缓冲，另一份 renderer 活着的时候
+            # 这么干正是上面说的那条闪退路径。
+            self._fit_window_to(size)
         # 游戏始终绘制到 960x720 逻辑画布，缩放只发生在呈现阶段。
         # 画布带 alpha：走 GPU 地面时，战斗区要在这一层上抠空让显卡画的地面透出来
         # 画布另外挂一张「渲染倍率倍」的高分辨率图层，承接文字/立绘/面板（见 hires.py）
@@ -355,19 +427,19 @@ class Game:
             self.presenter = None
             self.window = pygame.display.set_mode(self._window_size())
         if not self.fullscreen:
-            self._apply_window_size()
             self._position_window(False)
         self._update_present_rect()
         self._init_floor_scale()
         self._disable_ime()
 
-    def _apply_window_size(self):
-        """窗口模式：把窗口调整到设置的分辨率（物理像素）"""
-        if self.fullscreen or self.presenter is None:
-            return
+    def _fit_window_to(self, size):
+        """窗口模式：把窗口摁成设置的分辨率（必须在建 renderer 之前调用）"""
+        size = (int(size[0]), int(size[1]))
         try:
+            if tuple(pygame.display.get_window_size()) == size:
+                return
             from pygame._sdl2 import video as video_module
-            video_module.Window.from_display_module().size = self._window_size()
+            video_module.Window.from_display_module().size = size
         except Exception as e:
             print(f"[Display] Resize window failed: {e}")
 
@@ -449,8 +521,9 @@ class Game:
         self.resolution_index = index
         self.user_config["resolution_index"] = index
         save_user_config(self.user_config)
-        self._apply_window_size()
-        self._update_present_rect()
+        # 窗口尺寸一次到位、建完不再改（见 _create_display），所以换分辨率要整块重建：
+        # 与 F11 全屏切换同一条路径（先释放旧 presenter，再建窗口与新的渲染器）
+        self._create_display()
 
     def set_scale_mode(self, mode):
         """设置缩放模式：integer=整数倍 / fill=等比填充"""
@@ -489,8 +562,16 @@ class Game:
 
     def run(self):
         """主循环"""
+        self._loop_started = True
         while self.running:
-            self.dt = self.clock.tick(FPS) / 1000.0
+            # 节拍：用 tick_busy_loop 而不是 tick。tick 只靠 SDL_Delay 睡整毫秒，实测
+            # 普通战斗帧的相邻帧间隔中位 16.35ms、p95 17.5ms、最大 18.8ms（16.67ms 是
+            # 60Hz 的一次刷新，尾巴甩出去就等于那一帧没赶上屏幕）；tick_busy_loop 在
+            # 最后一毫秒自旋，中位 16.02ms、p95 16.9ms，间隔更均匀。它同样保留 60FPS
+            # 上限，所以在 144Hz 这类高刷屏上也不会把按帧计时的逻辑（符卡计时等）带快。
+            # 注意：真正决定「顿一下」的还是单帧耗时 —— 重帧（横幅期 20ms 上下）时两种
+            # 节拍都会掉到 45fps 左右，那时候该治的是这一帧本身。
+            self.dt = self.clock.tick_busy_loop(FPS) / 1000.0
             self._handle_events()
             self._update()
             self._draw()
@@ -557,6 +638,19 @@ class Game:
 
     def _update(self):
         """按 game_speed 累计执行逻辑子步；一次性输入只在首个子步生效"""
+        if self.transition is not None:
+            # 黑场过渡按真实时间推进（不受 game_speed 影响：它是观感，不是游戏逻辑）
+            fading_out = self.transition.dir > 0
+            self.transition.update(self.dt)
+            if self.transition.done:
+                self.transition = None
+            if fading_out:
+                # 压黑阶段：冻住当前界面，并吞掉这几帧的输入 —— 否则「按下确认」的
+                # 那次按键会连同下一屏的首帧一起被消费（在新界面上又触发一次操作）
+                self.keys_just_pressed = {}
+                self.mouse_buttons_just_pressed = {}
+                return
+
         if not self.current_state:
             self.keys_just_pressed = {}
             self.mouse_buttons_just_pressed = {}
@@ -575,9 +669,10 @@ class Game:
 
         for i in range(steps):
             state = self.current_state
+            transition = self.transition
             state.update(self.dt)
-            if self.current_state is not state:
-                # 逻辑步内发生状态切换后立即停止剩余子步，
+            if self.current_state is not state or self.transition is not transition:
+                # 逻辑步内发生状态切换（或请求了切换）后立即停止剩余子步，
                 # 避免新状态在同一渲染帧被额外更新
                 self._speed_accum = 0.0
                 break
@@ -596,6 +691,9 @@ class Game:
         self.screen.begin_gpu_frame(self.render_scale, self.presenter is not None)
         if self.current_state:
             self.current_state.draw(self.screen)
+        # 界面切换的黑场过渡：压在所有图层之上（含 hi 图层的文字与显卡直绘的弹幕）
+        if self.transition is not None:
+            self._draw_screen_fade()
         # 流速变化提示（真实时间，短暂显示）
         if pygame.time.get_ticks() < self._speed_notice_until:
             text = f"游戏速度 {format_game_speed(self.game_speed)}"
@@ -616,12 +714,76 @@ class Game:
                                    self._battle_dst_rect() if floor is not None else None,
                                    ui=self.screen.hi, ui_area=ui_area,
                                    gpu_ops=self.screen.gpu_ops(),
-                                   layer_size=self.screen.hires_size())
+                                   layer_size=self.screen.hires_size(),
+                                   gpu_entity_ops=self.screen.gpu_entity_ops(),
+                                   gpu_over_ops=self.screen.gpu_over_ops(),
+                                   gpu_fg_ops=self.screen.gpu_fg_ops(),
+                                   gpu_ui_ops=self.screen.gpu_ui_ops(),
+                                   gpu_top_ops=self.screen.gpu_top_ops())
         else:
             self._cpu_present()
 
+    def _draw_screen_fade(self):
+        """黑场过渡的那层遮罩：整屏一块纯色，不透明度由显卡调制。
+
+        用 hires.overlay_surface 的缓存（尺寸 / 倍率 / 颜色相同的只有一份），所以
+        每帧只是一条贴图指令，不在 CPU 上重建表面、也不逐帧抠半透明副本。
+        """
+        alpha = self.transition.alpha()
+        if alpha <= 0:
+            return
+        surf = hires.overlay_surface((SCREEN_WIDTH, SCREEN_HEIGHT),
+                                     max(1, self.screen.hires_factor),
+                                     SCREEN_FADE_COLOR, 255)
+        self.screen.blit_gpu_top(surf, (0, 0), alpha)
+
+    def settle_ui(self):
+        """把黑场过渡与当前界面的进场动效一次走完。
+
+        给「不跑主循环」的绘制用（截图 / 冒烟 / 残留检查这些工具只画帧、不推进时间）：
+        不先走完，它们拍到的是黑场里、或者刚进场还没淡入的画面。
+        """
+        for _ in range(FPS * 2):
+            if self.transition is None:
+                break
+            self.transition.update(1.0 / FPS)
+            if self.transition.done:
+                self.transition = None
+        intro = getattr(self.current_state, "intro", None)
+        if intro is not None:
+            intro.skip()
+
+    def draw_frame(self):
+        """绘制并立即呈现一帧。
+
+        给「不在主循环绘制节奏里」的绘制用（载入界面在载入步骤之间自己刷屏）：
+        帧首清屏、显卡指令重置、高分辨率图层上传都在 _draw 这条路径里完成。
+        """
+        self._draw()
+
+    def split_canvas_layer(self):
+        """在弹幕之前给画布切一刀：前半交给显卡当「弹幕之下」那一层，画布清空续画。
+
+        战斗区的内容顺序是交错的 —— 地面 / 敌机 / 自机 / 掉落物在弹幕之下，符卡
+        前景遮罩 / 自机判定点 / HUD 在弹幕之上，而弹幕本身要走显卡原生绘制（清晰度
+        与界面拉齐）。一张画布表达不了这个顺序，所以在这里切一刀，弹幕作为显卡指令
+        插在前后半之间（见 display.GpuPresenter.present）。
+
+        没有显卡路径时什么都不做：弹幕照旧画在画布上，绘制顺序一模一样。
+
+        返回是否真的切了（切了才需要继续按上层绘制）。
+        """
+        if self.presenter is None or not self.screen.gpu.enabled:
+            return False
+        self.presenter.capture_lower(self.screen)
+        self.screen.clear_canvas()
+        return True
+
     def push_state(self, state):
-        """压入新状态"""
+        """压入新状态（带黑场过渡，真正的压栈发生在全黑那一帧）"""
+        self._request_state_change(lambda: self._push_state_now(state))
+
+    def _push_state_now(self, state):
         if self.current_state:
             self.current_state.pause()
             self.states.append(self.current_state)
@@ -629,7 +791,10 @@ class Game:
         state.enter(self)
 
     def pop_state(self):
-        """弹出当前状态"""
+        """弹出当前状态（带黑场过渡）"""
+        self._request_state_change(self._pop_state_now)
+
+    def _pop_state_now(self):
         if self.current_state:
             self.current_state.exit()
         if self.states:
@@ -639,16 +804,83 @@ class Game:
             self.current_state = None
 
     def switch_state(self, state):
-        """切换状态（替换当前）"""
+        """切换状态（替换当前，带黑场过渡，真正的替换发生在全黑那一帧）"""
+        self._request_state_change(lambda: self._switch_state_now(state))
+
+    def _switch_state_now(self, state):
         if self.current_state:
             self.current_state.exit()
         self.current_state = state
         state.enter(self)
 
+    def _request_state_change(self, action):
+        """把一次状态变更挂在黑场过渡上。
+
+        过渡中又请求一次（例如淡入还没走完就又按了一次确认）时只换掉待执行的动作、
+        从当前覆盖度继续压黑，不重新起一段，画面因此不会跳变。
+
+        主循环还没跑起来时（初始化和不跑主循环的冒烟 / 截图 / 基准工具，它们自己
+        手动 tick 界面）直接生效：那些工具是按「调用完立刻就是新界面」写的。
+        """
+        if not self._loop_started:
+            action()
+            return
+        if self.transition is not None and self.transition.done:
+            # 上一段已经走完、只是还没被主循环收走：留着它会把这次请求吞掉
+            self.transition = None
+        if self.transition is not None:
+            self.transition.request(action)
+        else:
+            self.transition = ScreenTransition(action, SCREEN_FADE_OUT, SCREEN_FADE_IN)
+
     def quit(self):
         self._restore_ime()
         pygame.quit()
         sys.exit()
+
+class ScreenTransition:
+    """界面切换的黑场过渡：先把画面压到全黑，在最黑那一帧才真正换界面，再淡回来。
+
+    cover 是「黑场覆盖度」0-1，dir=+1 压黑、dir=-1 揭开。切换动作只在 cover 冲到 1
+    的那一帧执行 —— 于是新界面最贵的那一帧（立绘贴图上传、面板预烤）正好落在全黑上，
+    切换本身看不出接缝，也不必让每个界面自己去预热。
+
+    过渡途中又收到一次切换请求时只换掉待执行的动作、从当前覆盖度继续压黑，所以连着
+    按两下不会出现「黑场闪一下又亮回来」的抖动。
+    """
+
+    def __init__(self, action, out_time, in_time):
+        self.action = action
+        self.out_time = max(1e-3, float(out_time))
+        self.in_time = max(1e-3, float(in_time))
+        self.cover = 0.0
+        self.dir = 1
+        self.done = False
+
+    def request(self, action):
+        """换掉这次要执行的动作，从当前覆盖度继续压黑"""
+        self.action = action
+        self.dir = 1
+
+    def update(self, dt):
+        span = self.out_time if self.dir > 0 else self.in_time
+        self.cover += self.dir * dt / span
+        if self.dir > 0:
+            if self.cover >= 1.0:
+                self.cover = 1.0
+                action, self.action = self.action, None
+                if action is not None:
+                    action()
+                self.dir = -1
+        elif self.cover <= 0.0:
+            self.cover = 0.0
+            self.done = True
+
+    def alpha(self):
+        """当前遮罩的不透明度（0-255）：smoothstep 缓动，进出都不会有生硬的起停"""
+        k = self.cover * self.cover * (3.0 - 2.0 * self.cover)
+        return int(round(255 * k))
+
 
 class GameState:
     """游戏状态基类"""

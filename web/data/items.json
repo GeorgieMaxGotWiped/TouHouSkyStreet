@@ -564,7 +564,7 @@
       "effects": {},
       "lore": [
         "Reforge Stone",
-        "Necrotic：低速状态下固定弹射速+3%"
+        "Necrotic：低速状态下固定弹有3%概率造成双倍伤害"
       ],
       "buy_price": 1000000,
       "sell_price": 350000,

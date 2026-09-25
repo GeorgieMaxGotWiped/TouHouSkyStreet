@@ -1,0 +1,7 @@
+*** Begin Patch
+*** Update File: src/stages/stage6.py
+@@
+-GHOST_SPELL_FRAMES = 110  # 登场即起手的「告别弹」长度（帧，见 _ghost_spell）
++GHOST_SPELL_FRAMES = 110  # 登场即起手的「告别弹」长度（帧，见 _ghost_spell）
++GHOST_CLEAR_RADIUS = 180.0  # 残影离场清弹半径（立绘 190 高，正好炸掉大半个战斗区）
+*** End Patch

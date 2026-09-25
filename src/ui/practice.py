@@ -2,30 +2,39 @@
 # 符卡练习模式
 # 主菜单 Practice 入口：可单独练习所有 Boss 的每一张符卡（含 Last Spell）。
 
-import os
-
 import pygame
 
 from src.engine import settings as cfg
+from src.engine import painter
 from src.engine.game import GameState
 from src.stages.stage1 import Stage1_SkyblockHub, Stage
+from src.ui.menu import load_background, refresh_background
+from src.ui.anim import Entrance
 
 
-def _load_menu_bg():
-    try:
-        if os.path.exists(cfg.MENU_BACKGROUND):
-            img = pygame.image.load(cfg.MENU_BACKGROUND)
-            return pygame.transform.smoothscale(
-                img, (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT))
-    except Exception as e:
-        print(f"[Practice] Failed to load background: {e}")
-    return None
+def _bake_plate(logical_size, fill=None, border=None, border_w=1):
+    """一块底板的预烤画法：按逻辑尺寸 x 倍率作画，边框因此不会被放大糊掉"""
+    def build(target, k):
+        rect = (0, 0, logical_size[0], logical_size[1])
+        if fill is not None:
+            painter.bake_rect(target, k, fill, rect)
+        if border is not None:
+            painter.bake_rect(target, k, border, rect, border_w)
+    return build
 
 
-def _panel(screen, x, y, w, h, alpha=120):
-    s = pygame.Surface((w, h), pygame.SRCALPHA)
-    s.fill((0, 0, 0, alpha))
-    screen.blit(s, (x, y))
+def _draw_plate(screen, tag, rect, fill=None, border=None, border_w=1, opacity=255):
+    """把一块底板交给显卡贴出（先烤成图并按参数缓存，之后每帧只剩一次贴图）"""
+    screen.blit_baked((tag, rect.size, fill and tuple(fill),
+                       border and tuple(border), border_w),
+                      rect.topleft, rect.size,
+                      _bake_plate(rect.size, fill, border, border_w), opacity)
+
+
+def _panel(screen, x, y, w, h, alpha=120, opacity=255):
+    """半透明底板：先按渲染倍率烤成一张图，再由显卡贴出（与休整界面的底板同一套路）"""
+    _draw_plate(screen, "practice_panel", pygame.Rect(x, y, w, h),
+                fill=(0, 0, 0, alpha), opacity=opacity)
 
 
 def _elide(font, text, max_w):
@@ -203,11 +212,6 @@ class PracticeStage(Stage):
         self.boss_music_loop_path = getattr(base_stage, "boss_music_loop_path", "")
         self.background = getattr(base_stage, "background", None)
         self.background_darkness = getattr(base_stage, "background_darkness", 0)
-        # 六面 Kaeman：使用凋零要塞背景（与真实关底战一致）
-        fortress = getattr(base_stage, "background_fortress", None)
-        if fortress is not None:
-            self.background = fortress
-            base_stage.background = fortress
 
     @property
     def player_input_locked(self):
@@ -317,7 +321,11 @@ class PracticeSelectState(GameState):
 
     def __init__(self, game):
         super().__init__(game)
-        self.background = _load_menu_bg()
+        # 背景按渲染倍率准备（与主菜单同一个助手）：这里原本是把图缩到 960x720
+        # 再整体放大，等于先丢细节再放大，所以这一屏的背景一直是糊的
+        self.background = load_background(cfg.MENU_BACKGROUND,
+                                          (cfg.SCREEN_WIDTH, cfg.SCREEN_HEIGHT),
+                                          game.screen.bake_factor())
         self.entries = build_practice_entries()
         self.boss_rows = self._build_boss_rows()
         self.boss_row_pos = {
@@ -330,6 +338,7 @@ class PracticeSelectState(GameState):
         self.boss_scroll = 0
         self.card_scroll = 0
         self._last_mouse_pos = (0, 0)
+        self.intro = Entrance()
 
     def _build_boss_rows(self):
         rows = []
@@ -340,7 +349,7 @@ class PracticeSelectState(GameState):
         return rows
 
     def enter(self, game):
-        pass
+        self.intro.reset()
 
     def _boss_visible_rows(self):
         """当前可见的 Boss 列表行，返回 [(row, y, height)]（与 draw 布局一致）"""
@@ -380,6 +389,7 @@ class PracticeSelectState(GameState):
         return scroll
 
     def update(self, dt):
+        self.intro.update(dt)
         keys = self.game.keys_just_pressed
         if (keys.get(pygame.K_ESCAPE, False) or keys.get(pygame.K_x, False)
                 or keys.get(pygame.K_BACKSPACE, False)):
@@ -458,55 +468,66 @@ class PracticeSelectState(GameState):
                             self.card_index)
 
     def draw(self, screen):
-        if self.background:
-            screen.blit(self.background, (0, 0))
+        background = refresh_background(self, screen)
+        if background:
+            screen.blit_gpu(background, (0, 0))
         else:
-            screen.fill((4, 4, 16))
+            screen.fill_gpu((4, 4, 16))
 
         title = self.game.font_large.render(
             "符卡练习 Spell Practice", True, cfg.COLOR_YELLOW)
-        screen.blit(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 52))
+        # 进场动效：标题 -> 左侧 Boss 列表 -> 右侧符卡列表 -> 底部信息 / 按钮
+        alpha, dy = self.intro.item(0)
+        screen.blit_gpu(title, ((cfg.SCREEN_WIDTH - title.get_width()) // 2, 52 - dy),
+                        alpha=alpha)
 
         entry = self.entries[self.boss_index]
         visible = self.PANE_H // self.ROW_H
 
         # ---- 左侧：Boss 列表 ----
+        alpha, dy = self.intro.item(1.0)
         bx, bw = 96, 420
-        _panel(screen, bx - 10, self.PANE_Y - 40, bw + 20, self.PANE_H + 56)
+        if alpha <= 0:
+            return
+        panel_y = self.PANE_Y - 40 - dy
+        _panel(screen, bx - 10, panel_y, bw + 20, self.PANE_H + 56, opacity=alpha)
         head = self.game.font_medium.render("选择 Boss", True, cfg.COLOR_WHITE)
-        screen.blit(head, (bx, self.PANE_Y - 34))
-        row_y = self.PANE_Y
+        screen.blit_gpu(head, (bx, self.PANE_Y - 34 - dy), alpha=alpha)
+        row_y = self.PANE_Y - dy
         for row in self.boss_rows[self.boss_scroll:self.boss_scroll + visible + 1]:
-            if row_y > self.PANE_Y + self.PANE_H - self.ROW_H:
+            if row_y > self.PANE_Y + self.PANE_H - self.ROW_H - dy:
                 break
             if row[0] == "group":
                 g = self.game.font_small.render("—— " + row[1] + " ——",
                                                 True, cfg.COLOR_GRAY)
-                screen.blit(g, (bx + 6, row_y))
+                screen.blit_gpu(g, (bx + 6, row_y), alpha=alpha)
                 row_y += self.HEADER_H
                 continue
             is_sel = row[2] == self.boss_index
             row_rect = pygame.Rect(bx, row_y, bw, self.ROW_H)
             if is_sel or self.game.mouse_hover(row_rect):
-                pygame.draw.rect(screen, (60, 60, 22), row_rect)
+                _draw_plate(screen, "practice_row", row_rect, fill=(60, 60, 22),
+                            opacity=alpha)
             color = cfg.COLOR_YELLOW if is_sel else cfg.COLOR_WHITE
             text = self.game.font_medium.render(row[1], True, color)
-            screen.blit(text, (bx + 26, row_y))
+            screen.blit_gpu(text, (bx + 26, row_y), alpha=alpha)
             if is_sel:
                 ind = self.game.font_medium.render("> ", True, cfg.COLOR_YELLOW)
-                screen.blit(ind, (bx + 2, row_y))
+                screen.blit_gpu(ind, (bx + 2, row_y), alpha=alpha)
             row_y += self.ROW_H
 
         # ---- 右侧：符卡列表 ----
+        alpha, dy = self.intro.item(1.6)
         cx, cw = 540, 390
-        _panel(screen, cx - 10, self.PANE_Y - 40, cw + 20, self.PANE_H + 56)
+        _panel(screen, cx - 10, self.PANE_Y - 40 - dy, cw + 20, self.PANE_H + 56,
+               opacity=alpha)
         head = self.game.font_medium.render("选择符卡", True, cfg.COLOR_WHITE)
-        screen.blit(head, (cx, self.PANE_Y - 34))
-        row_y = self.PANE_Y
+        screen.blit_gpu(head, (cx, self.PANE_Y - 34 - dy), alpha=alpha)
+        row_y = self.PANE_Y - dy
         cards = entry["cards"]
         max_text_w = cw - 26
         for ci in range(self.card_scroll, min(len(cards), self.card_scroll + visible + 1)):
-            if row_y > self.PANE_Y + self.PANE_H - self.ROW_H:
+            if row_y > self.PANE_Y + self.PANE_H - self.ROW_H - dy:
                 break
             spec = cards[ci]
             is_sel = ci == self.card_index
@@ -516,16 +537,18 @@ class PracticeSelectState(GameState):
                 label += "（Last）"
             row_rect = pygame.Rect(cx, row_y, cw, self.ROW_H)
             if is_sel or self.game.mouse_hover(row_rect):
-                pygame.draw.rect(screen, (60, 60, 22), row_rect)
+                _draw_plate(screen, "practice_row", row_rect, fill=(60, 60, 22),
+                            opacity=alpha)
             text = self.game.font_small.render(
                 _elide(self.game.font_small, label, max_text_w), True, color)
-            screen.blit(text, (cx + 20, row_y + 6))
+            screen.blit_gpu(text, (cx + 20, row_y + 6), alpha=alpha)
             if is_sel:
                 ind = self.game.font_small.render("> ", True, cfg.COLOR_YELLOW)
-                screen.blit(ind, (cx + 2, row_y + 6))
+                screen.blit_gpu(ind, (cx + 2, row_y + 6), alpha=alpha)
             row_y += self.ROW_H
 
         # ---- 底部信息 ----
+        alpha, dy = self.intro.item(2.4)
         sel_card = entry["cards"][self.card_index]
         label = sel_card["name"] + ("（Last Spell）" if sel_card["last"] else "")
         summary_text = _elide(
@@ -533,23 +556,30 @@ class PracticeSelectState(GameState):
             f"第{entry['stage_num']}面 · {entry['boss_name']} · {label}",
             cfg.SCREEN_WIDTH - 120)
         summary = self.game.font_medium.render(summary_text, True, cfg.COLOR_GREEN)
-        screen.blit(summary, ((cfg.SCREEN_WIDTH - summary.get_width()) // 2, 616))
+        screen.blit_gpu(summary, ((cfg.SCREEN_WIDTH - summary.get_width()) // 2,
+                                  616 - dy), alpha=alpha)
 
         hint = self.game.font_small.render(
             "↑↓ 选择    ←→ 切换列表    Enter/Z 开始练习    Esc 返回",
             True, cfg.COLOR_GRAY)
-        screen.blit(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 652))
+        screen.blit_gpu(hint, ((cfg.SCREEN_WIDTH - hint.get_width()) // 2, 652 - dy),
+                        alpha=alpha)
 
         # 开始练习按钮（鼠标可点击）
-        start_rect = self._practice_start_rect()
-        start_hover = self.game.mouse_hover(start_rect)
-        pygame.draw.rect(screen, cfg.COLOR_PANEL_BG, start_rect)
-        pygame.draw.rect(screen, cfg.COLOR_YELLOW if start_hover else cfg.COLOR_GRAY,
-                         start_rect, 2 if start_hover else 1)
+        alpha, dy = self.intro.item(2.9)
+        if alpha <= 0:
+            return
+        start_rect = self._practice_start_rect().move(0, -dy)
+        # 悬停 / 点击判定都用未位移的矩形（与 update() 一致）
+        start_hover = self.game.mouse_hover(self._practice_start_rect())
+        _draw_plate(screen, "practice_start", start_rect, fill=cfg.COLOR_PANEL_BG,
+                    border=cfg.COLOR_YELLOW if start_hover else cfg.COLOR_GRAY,
+                    border_w=2 if start_hover else 1, opacity=alpha)
         btn = self.game.font_medium.render("▶ 开始练习", True,
                                            cfg.COLOR_YELLOW if start_hover else cfg.COLOR_WHITE)
-        screen.blit(btn, (start_rect.x + (start_rect.width - btn.get_width()) // 2,
-                          start_rect.y + (start_rect.height - btn.get_height()) // 2))
+        screen.blit_gpu(btn, (start_rect.x + (start_rect.width - btn.get_width()) // 2,
+                          start_rect.y + (start_rect.height - btn.get_height()) // 2),
+                        alpha=alpha)
 
 
 # ---------------------------------------------------------------------------

@@ -937,95 +937,117 @@ def _gt_draw_boss_layer(screen, boss, ox, oy):
     _gt_draw_goldor_marker(screen, boss, ox, oy)
 
 
-def _gt_draw_wall_line(screen, p0, p1, ox, oy, width=3):
-    pygame.draw.line(screen, (120, 96, 44), (p0[0] + ox, p0[1] + oy),
-                     (p1[0] + ox, p1[1] + oy), width + 4)
-    pygame.draw.line(screen, (255, 205, 90), (p0[0] + ox, p0[1] + oy),
-                     (p1[0] + ox, p1[1] + oy), width)
+def _gt_bake_wall_line(target, p0, p1, width=3):
+    """把一段金色围墙画进预烤面板（逻辑坐标，与走廊其它图元同一套）"""
+    target.hi_line((120, 96, 44), p0, p1, width + 4)
+    target.hi_line((255, 205, 90), p0, p1, width)
+
+
+def _gt_bake_corridor(center_open):
+    """预烤整条金色环路走廊（外墙 / 内墙 / 同心圆 / 虚线车道 / 围墙 / 路障）
+
+    这些图元铺满整块战斗区，逐帧按倍率重画等于每帧重传一整屏贴图（3x 下 ~14MB）；
+    而它们逐帧完全一样，只有「中央是否开启」这一种变化。所以按那个状态预烤一次，
+    之后每帧只剩一次贴图。没有预烤缓存时（关掉显卡路径的对比模式）退回 1x 逐帧重画。
+    """
+    def build(target, k):
+        target.hi_rect((34, 31, 28),
+                       (GT_OUTER, GT_OUTER, GT_OUTER_RIGHT - GT_OUTER,
+                        GT_OUTER_BOTTOM - GT_OUTER))
+        target.hi_rect((10, 10, 18),
+                       (GT_IL, GT_IT, GT_IR - GT_IL, GT_IB - GT_IT))
+        cx, cy = int(GT_CENTER[0]), int(GT_CENTER[1])
+        for r, col in ((120, (30, 28, 40)), (84, (34, 32, 46)), (52, (40, 36, 52))):
+            target.hi_circle(col, (cx, cy), r, 1)
+        target.hi_circle((70, 62, 60), (cx, cy), 26, 1)
+        lane_color = (92, 80, 56)
+        dash = 10
+        x0, x1 = int(GT_OUTER), int(GT_OUTER_RIGHT)
+        for side_y in (GT_IT - (GT_IT - GT_OUTER) / 3.0,
+                       GT_IT - (GT_IT - GT_OUTER) / 3.0 * 2.0,
+                       GT_IB + (GT_OUTER_BOTTOM - GT_IB) / 3.0,
+                       GT_IB + (GT_OUTER_BOTTOM - GT_IB) / 3.0 * 2.0):
+            y = int(side_y)
+            x = x0
+            while x < x1:
+                target.hi_line(lane_color, (x, y), (min(x + dash, x1), y), 1)
+                x += dash * 2
+        y0, y1 = int(GT_IT), int(GT_IB)
+        for side_x in (GT_IL - (GT_IL - GT_OUTER) / 3.0,
+                       GT_IL - (GT_IL - GT_OUTER) / 3.0 * 2.0,
+                       GT_IR + (GT_OUTER_RIGHT - GT_IR) / 3.0,
+                       GT_IR + (GT_OUTER_RIGHT - GT_IR) / 3.0 * 2.0):
+            x = int(side_x)
+            y = y0
+            while y < y1:
+                target.hi_line(lane_color, (x, y), (x, min(y + dash, y1)), 1)
+                y += dash * 2
+        for p0, p1 in (((GT_OUTER, GT_OUTER), (GT_OUTER_RIGHT, GT_OUTER)),
+                       ((GT_OUTER_RIGHT, GT_OUTER), (GT_OUTER_RIGHT, GT_OUTER_BOTTOM)),
+                       ((GT_OUTER_RIGHT, GT_OUTER_BOTTOM), (GT_OUTER, GT_OUTER_BOTTOM)),
+                       ((GT_OUTER, GT_OUTER_BOTTOM), (GT_OUTER, GT_OUTER)),
+                       ((GT_IL, GT_IT), (GT_IR, GT_IT)),
+                       ((GT_IR, GT_IT), (GT_IR, GT_IB)),
+                       ((GT_IR, GT_IB), (GT_IL, GT_IB)),
+                       ((GT_IL, GT_IB), (GT_IL, GT_IT))):
+            _gt_bake_wall_line(target, p0, p1)
+        if not center_open:
+            by = int(GT_BARRIER_Y)
+            bx0, bx1 = int(GT_OUTER), int(GT_IL)
+            target.hi_rect((110, 56, 38), (bx0, by - 10, bx1 - bx0, 20))
+            for i in range(bx0, bx1, 16):
+                target.hi_line((70, 34, 24), (i, by + 8),
+                               (min(i + 12, bx1), by - 8), 2)
+            target.hi_rect((255, 150, 70), (bx0, by - 10, bx1 - bx0, 20), 2)
+            mid_x = (bx0 + bx1) // 2
+            target.hi_circle((64, 22, 14), (mid_x, by), 11)
+            target.hi_circle((255, 190, 90), (mid_x, by), 11, 2)
+        if not center_open:
+            gx = int(GT_IL)
+            target.hi_rect((60, 52, 46), (gx - 3, GT_ENTRANCE_Y0, 6,
+                                          GT_ENTRANCE_Y1 - GT_ENTRANCE_Y0))
+    return build
 
 
 def _gt_draw_corridor(screen, state, ox, oy):
     now = pygame.time.get_ticks()
     pulse = 0.5 + 0.5 * math.sin(now * 0.004)
-    outer = pygame.Rect(int(GT_OUTER + ox), int(GT_OUTER + oy),
-                        int(GT_OUTER_RIGHT - GT_OUTER), int(GT_OUTER_BOTTOM - GT_OUTER))
-    inner = pygame.Rect(int(GT_IL + ox), int(GT_IT + oy),
-                        int(GT_IR - GT_IL), int(GT_IB - GT_IT))
-    pygame.draw.rect(screen, (34, 31, 28), outer)
-    pygame.draw.rect(screen, (10, 10, 18), inner)
-    cx, cy = int(GT_CENTER[0] + ox), int(GT_CENTER[1] + oy)
-    for r, col in ((120, (30, 28, 40)), (84, (34, 32, 46)), (52, (40, 36, 52))):
-        pygame.draw.circle(screen, col, (cx, cy), r, 1)
-    pygame.draw.circle(screen, (70, 62, 60), (cx, cy), 26, 1)
-    lane_color = (92, 80, 56)
-    dash = 10
-    for side_y in (GT_IT - (GT_IT - GT_OUTER) / 3.0,
-                   GT_IT - (GT_IT - GT_OUTER) / 3.0 * 2.0,
-                   GT_IB + (GT_OUTER_BOTTOM - GT_IB) / 3.0,
-                   GT_IB + (GT_OUTER_BOTTOM - GT_IB) / 3.0 * 2.0):
-        y = int(side_y + oy)
-        x0, x1 = int(GT_OUTER + ox), int(GT_OUTER_RIGHT + ox)
-        x = x0
-        while x < x1:
-            pygame.draw.line(screen, lane_color, (x, y), (min(x + dash, x1), y), 1)
-            x += dash * 2
-    for side_x in (GT_IL - (GT_IL - GT_OUTER) / 3.0,
-                   GT_IL - (GT_IL - GT_OUTER) / 3.0 * 2.0,
-                   GT_IR + (GT_OUTER_RIGHT - GT_IR) / 3.0,
-                   GT_IR + (GT_OUTER_RIGHT - GT_IR) / 3.0 * 2.0):
-        x = int(side_x + ox)
-        y0, y1 = int(GT_IT + oy), int(GT_IB + oy)
-        y = y0
-        while y < y1:
-            pygame.draw.line(screen, lane_color, (x, y), (x, min(y + dash, y1)), 1)
-            y += dash * 2
-    _gt_draw_wall_line(screen, (GT_OUTER, GT_OUTER), (GT_OUTER_RIGHT, GT_OUTER), ox, oy)
-    _gt_draw_wall_line(screen, (GT_OUTER_RIGHT, GT_OUTER), (GT_OUTER_RIGHT, GT_OUTER_BOTTOM), ox, oy)
-    _gt_draw_wall_line(screen, (GT_OUTER_RIGHT, GT_OUTER_BOTTOM), (GT_OUTER, GT_OUTER_BOTTOM), ox, oy)
-    _gt_draw_wall_line(screen, (GT_OUTER, GT_OUTER_BOTTOM), (GT_OUTER, GT_OUTER), ox, oy)
-    _gt_draw_wall_line(screen, (GT_IL, GT_IT), (GT_IR, GT_IT), ox, oy)
-    _gt_draw_wall_line(screen, (GT_IR, GT_IT), (GT_IR, GT_IB), ox, oy)
-    _gt_draw_wall_line(screen, (GT_IR, GT_IB), (GT_IL, GT_IB), ox, oy)
-    _gt_draw_wall_line(screen, (GT_IL, GT_IB), (GT_IL, GT_IT), ox, oy)
-    if not state.get("center_open"):
+    center_open = bool(state.get("center_open"))
+    hires.baked_entity(screen, ("gt_corridor", center_open), (ox, oy),
+                       (cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
+                       _gt_bake_corridor(center_open))
+    if not center_open:
         by = int(GT_BARRIER_Y + oy)
         bx0, bx1 = int(GT_OUTER + ox), int(GT_IL + ox)
-        pygame.draw.rect(screen, (110, 56, 38), (bx0, by - 10, bx1 - bx0, 20))
-        for i in range(bx0, bx1, 16):
-            pygame.draw.line(screen, (70, 34, 24), (i, by + 8),
-                             (min(i + 12, bx1), by - 8), 2)
-        pygame.draw.rect(screen, (255, 150, 70), (bx0, by - 10, bx1 - bx0, 20), 2)
         mid_x = (bx0 + bx1) // 2
-        pygame.draw.circle(screen, (64, 22, 14), (mid_x, by), 11)
-        pygame.draw.circle(screen, (255, 190, 90), (mid_x, by), 11, 2)
         warn = _get_font(15).render("!", True, (255, 215, 130))
         screen.blit(warn, (mid_x - warn.get_width() // 2,
                            by - warn.get_height() // 2))
-    if state.get("center_open"):
-        _gt_draw_entrance(screen, ox, oy, now, pulse)
     else:
-        gy0 = int(GT_ENTRANCE_Y0 + oy)
-        gy1 = int(GT_ENTRANCE_Y1 + oy)
-        gx = int(GT_IL + ox)
-        pygame.draw.rect(screen, (60, 52, 46), (gx - 3, gy0, 6, gy1 - gy0))
+        _gt_draw_entrance(screen, ox, oy, now, pulse)
 
 
 def _gt_draw_entrance(screen, ox, oy, now, pulse):
     gy0 = int(GT_ENTRANCE_Y0 + oy)
     gy1 = int(GT_ENTRANCE_Y1 + oy)
     gx = int(GT_IL + ox)
-    pygame.draw.rect(screen, (10, 10, 18), (gx - 3, gy0, 6, gy1 - gy0))
+    # 底槽 / 透光条 / 上下描边与箭头，按原绘制顺序各占一块面板：透光条要盖住底槽、
+    # 描边又要压在透光条上，分开提交才能保住这个先后关系
+    fx = hires.entity_effect(screen, (gx - 3, gy0), (6, gy1 - gy0))
+    fx.rect((10, 10, 18), (gx - 3, gy0, 6, gy1 - gy0))
+    fx.commit()
     alpha = 90 + int(120 * pulse)
-    layer = pygame.Surface((int(GT_CENTER[0] - GT_IL) + 8, gy1 - gy0), pygame.SRCALPHA)
-    layer.fill((120, 230, 255, alpha))
-    screen.blit(layer, (gx - 3, gy0))
-    pygame.draw.line(screen, (255, 205, 90), (gx - 6, gy0), (gx + 4, gy0), 3)
-    pygame.draw.line(screen, (255, 205, 90), (gx - 6, gy1), (gx + 4, gy1), 3)
+    hires.entity_rect(screen, (120, 230, 255, alpha),
+                      (gx - 3, gy0, int(GT_CENTER[0] - GT_IL) + 8, gy1 - gy0))
     mid_y = gy0 + (gy1 - gy0) // 2
+    fx = hires.entity_effect(screen, (gx - 64, gy0 - 3), (68, gy1 - gy0 + 6))
+    fx.line((255, 205, 90), (gx - 6, gy0), (gx + 4, gy0), 3)
+    fx.line((255, 205, 90), (gx - 6, gy1), (gx + 4, gy1), 3)
     for i in range(3):
         x = gx - 22 - i * 14
-        pygame.draw.polygon(screen, (160, 240, 255),
-                            [(x + 8, mid_y - 8), (x + 8, mid_y + 8), (x, mid_y)])
+        fx.polygon((160, 240, 255),
+                   [(x + 8, mid_y - 8), (x + 8, mid_y + 8), (x, mid_y)])
+    fx.commit()
 
 
 def _gt_draw_terminals(screen, state, ox, oy):
@@ -1035,38 +1057,42 @@ def _gt_draw_terminals(screen, state, ox, oy):
         x, y = int(t["x"] + ox), int(t["y"] + oy)
         if t["solved"]:
             r = 16
-            pygame.draw.rect(screen, (30, 74, 50), (x - r, y - r, r * 2, r * 2))
-            pygame.draw.rect(screen, (110, 230, 150), (x - r, y - r, r * 2, r * 2), 2)
-            pygame.draw.line(screen, (170, 255, 190), (x - 8, y), (x - 2, y + 7), 3)
-            pygame.draw.line(screen, (170, 255, 190), (x - 2, y + 7), (x + 9, y - 8), 3)
+            fx = hires.entity_effect(screen, (x - r - 3, y - r - 3),
+                                     (r * 2 + 6, r * 2 + 6))
+            fx.rect((30, 74, 50), (x - r, y - r, r * 2, r * 2))
+            fx.rect((110, 230, 150), (x - r, y - r, r * 2, r * 2), 2)
+            fx.line((170, 255, 190), (x - 8, y), (x - 2, y + 7), 3)
+            fx.line((170, 255, 190), (x - 2, y + 7), (x + 9, y - 8), 3)
+            fx.commit()
             continue
         if t["final"]:
             r = 21 + int(3 * pulse)
-            glow = pygame.Surface((r * 2 + 12, r * 2 + 12), pygame.SRCALPHA)
-            pygame.draw.circle(glow, (255, 220, 110, 70), (r + 6, r + 6), r + 4)
-            screen.blit(glow, (x - r - 6, y - r - 6))
-            pygame.draw.rect(screen, (70, 56, 26), (x - r, y - r, r * 2, r * 2))
-            pygame.draw.rect(screen, (255, 210, 90), (x - r, y - r, r * 2, r * 2), 3)
+            hires.entity_circle(screen, (255, 220, 110, 70), (x, y), r + 4)
+            fx = hires.entity_effect(screen, (x - r - 4, y - r - 4),
+                                     (r * 2 + 8, r * 2 + 8))
+            fx.rect((70, 56, 26), (x - r, y - r, r * 2, r * 2))
+            fx.rect((255, 210, 90), (x - r, y - r, r * 2, r * 2), 3)
             points = []
             for k in range(10):
                 a = -math.pi / 2 + k * math.pi / 5
                 rad = r - 4 if k % 2 == 0 else (r - 4) * 0.42
                 points.append((x + math.cos(a) * rad, y + math.sin(a) * rad))
-            pygame.draw.polygon(screen, (255, 235, 150), points)
+            fx.polygon((255, 235, 150), points)
+            fx.commit()
             label = _get_font(13).render("DEVICE", True, (255, 225, 130))
             screen.blit(label, (x - label.get_width() // 2, y - r - 24))
-            beam = pygame.Surface((5, 26), pygame.SRCALPHA)
-            beam.fill((255, 220, 120, 90))
-            screen.blit(beam, (x - 2, y - r - 26))
+            hires.entity_rect(screen, (255, 220, 120, 90),
+                              (x - 2, y - r - 26, 5, 26))
         else:
             r = 15
-            pygame.draw.rect(screen, (26, 60, 66), (x - r, y - r, r * 2, r * 2))
-            pygame.draw.rect(screen, (90, 220, 235), (x - r, y - r, r * 2, r * 2), 2)
-            pygame.draw.circle(screen, (140, 240, 250), (x, y), int(5 + 2 * pulse))
+            fx = hires.entity_effect(screen, (x - r - 2, y - r - 2),
+                                     (r * 2 + 4, r * 2 + 4))
+            fx.rect((26, 60, 66), (x - r, y - r, r * 2, r * 2))
+            fx.rect((90, 220, 235), (x - r, y - r, r * 2, r * 2), 2)
+            fx.circle((140, 240, 250), (x, y), int(5 + 2 * pulse))
+            fx.commit()
             tr = int(GT_TOUCH_RADIUS)
-            ring = pygame.Surface((tr * 2, tr * 2), pygame.SRCALPHA)
-            pygame.draw.circle(ring, (110, 225, 240, 70), (tr, tr), tr, 1)
-            screen.blit(ring, (x - tr, y - tr))
+            hires.entity_circle(screen, (110, 225, 240, 70), (x, y), tr, 1)
 
 
 def _gt_draw_goldor_marker(screen, boss, ox, oy):
@@ -1074,10 +1100,11 @@ def _gt_draw_goldor_marker(screen, boss, ox, oy):
     pulse = 0.5 + 0.5 * math.sin(now * 0.01)
     x, y = int(boss.x + ox), int(boss.y + oy)
     r = int(30 + 8 * pulse)
-    ring = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-    pygame.draw.circle(ring, (255, 60, 50, 40), (r, r), r)
-    pygame.draw.circle(ring, (255, 90, 70, 180), (r, r), r, 2)
-    screen.blit(ring, (x - r, y - r))
+    fx = hires.entity_effect(screen, (x - r - 1, y - r - 1),
+                             (r * 2 + 2, r * 2 + 2))
+    fx.circle((255, 60, 50, 40), (x, y), r)
+    fx.circle((255, 90, 70, 180), (x, y), r, 2)
+    fx.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -1089,18 +1116,20 @@ def _gt_draw_foreground(screen, boss, ox, oy):
         return
     warn = state.get("warning", 0.0)
     if state.get("caught_active"):
-        layer = pygame.Surface((cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
-                               pygame.SRCALPHA)
-        layer.fill((255, 40, 30, 110))
-        screen.blit(layer, (ox, oy))
+        hires.fg_rect(screen, (255, 40, 30, 110),
+                      (ox, oy, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
     elif warn > 0.05:
         alpha = int(110 * warn)
-        layer = pygame.Surface((cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
-                               pygame.SRCALPHA)
-        layer.fill((255, 30, 20, alpha))
-        screen.blit(layer, (ox, oy))
-        pygame.draw.rect(screen, (255, 60, 40),
-                         (ox, oy, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT), 4)
+        hires.fg_rect(screen, (255, 30, 20, alpha),
+                      (ox, oy, cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT))
+        # 红框按四条 4px 色块铺：整屏描边若走面板要按倍率烘一块 24MB 的贴图
+        for bar in ((ox, oy, cfg.BATTLE_AREA_WIDTH, 4),
+                    (ox, oy + cfg.BATTLE_AREA_HEIGHT - 4,
+                     cfg.BATTLE_AREA_WIDTH, 4),
+                    (ox, oy + 4, 4, cfg.BATTLE_AREA_HEIGHT - 8),
+                    (ox + cfg.BATTLE_AREA_WIDTH - 4, oy + 4,
+                     4, cfg.BATTLE_AREA_HEIGHT - 8)):
+            hires.fg_rect(screen, (255, 60, 40), bar)
         if warn > 0.6:
             font = _get_font(20)
             t = font.render("GOLDOR 接近！", True, (255, 110, 90))
@@ -1130,11 +1159,10 @@ def _gt_draw_foreground(screen, boss, ox, oy):
         cx, cy = int(GT_CENTER[0] + ox), int(GT_CENTER[1] + oy)
         prog = min(1.0, state["enter_timer"] / 70.0)
         r = int(20 + 220 * prog)
-        layer = pygame.Surface((cfg.BATTLE_AREA_WIDTH, cfg.BATTLE_AREA_HEIGHT),
-                               pygame.SRCALPHA)
-        pygame.draw.circle(layer, (255, 230, 140, int(160 * (1.0 - prog))),
-                           (cx, cy), r, 3)
-        screen.blit(layer, (ox, oy))
+        # 旧实现把整幅战斗区面板再按 (ox, oy) 贴一次，圆心因此多吃了一次偏移；
+        # 这里保持同样的落点，改清晰度的同时不动位置
+        hires.entity_circle(screen, (255, 230, 140, int(160 * (1.0 - prog))),
+                            (cx + ox, cy + oy), r, 3, fg=True)
         font = _get_font(24)
         t = font.render("PURSUIT COMPLETE", True, (255, 240, 170))
         screen.blit(t, (ox + (cfg.BATTLE_AREA_WIDTH - t.get_width()) // 2,
