@@ -1,60 +1,78 @@
 # -*- coding: utf-8 -*-
-"""本站本地预览服务器：多线程 + 自动挑选空闲端口 + 自动打开浏览器。
+"""官网（web/）本地预览服务。
 
 用法：
-    python web/serve.py            # 从 8000 起挑一个空闲端口
-    python web/serve.py 8080       # 指定起始端口
-启动后会自动在默认浏览器打开本站。
+    python web/serve.py          # 默认 8100 端口
+    python web/serve.py 8200     # 指定端口
+
+特点：
+  · 以 web/ 为站点根
+  · 页面 / 样式 / 脚本 / 数据带 no-cache：每次都回服务器确认，内容变了立刻可见，
+    没变就是 304，不重复传输（no-store 会让浏览器每次翻页都重下字体，见下）
+  · 字体给一段真实缓存期：否则翻页时 5.2MB 的中文字体要重下一遍，
+    字体到位前文字先用回退字形，会看到一次字形跳变
+  · 多线程，图鉴 / 曲目页的 fetch 不会被单线程阻塞
 """
+import http.server
 import os
+import socketserver
 import sys
-import threading
-import time
-import webbrowser
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-HOST = "127.0.0.1"  # 仅本机访问；用 127.0.0.1 而非 localhost，规避 IPv6 解析问题
-START_PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+ROOT = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_PORT = 8100
 
 
-class PreviewHandler(SimpleHTTPRequestHandler):
-    """预览专用处理器：显式禁用浏览器缓存。
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=ROOT, **kwargs)
 
-    静态资源只带 Last-Modified，浏览器会按"启发式缓存"把旧图留到数小时后才回源，
-    导致重跑 tools/build_assets.py 之后刷新仍看到上一版立绘。
-    """
+    # 字体：给一段真实缓存期。中文字体有 5MB 级，若每次翻页都重下，
+    # 会出现「文字先用回退字形渲染、字体到位后再跳一次」的观感。
+    FONT_EXT = (".ttf", ".otf", ".woff", ".woff2")
+    FONT_MAX_AGE = 600
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store, must-revalidate")
+        path = self.path.split("?")[0].split("#")[0].lower()
+        if path.endswith(self.FONT_EXT):
+            self.send_header("Cache-Control", "public, max-age=%d" % self.FONT_MAX_AGE)
+        else:
+            # no-cache 而不是 no-store：允许存下来，但每次使用前回服务器确认。
+            # 内容没变就是 304（无响应体），改了立刻生效，两头都占。
+            self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 
+    def log_message(self, fmt, *args):
+        sys.stderr.write("  %s\n" % (fmt % args))
 
-def make_server(host, start, tries=40):
-    """在 [start, start+tries) 里找到可用端口并绑定。"""
-    for port in range(start, start + tries):
+
+class Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+def main():
+    port = DEFAULT_PORT
+    if len(sys.argv) > 1:
         try:
-            return ThreadingHTTPServer((host, port), PreviewHandler), port
-        except OSError:
-            continue
-    raise SystemExit("未找到可用端口。")
+            port = int(sys.argv[1])
+        except ValueError:
+            print("端口必须是数字，收到：%s" % sys.argv[1])
+            return 1
 
+    url = "http://127.0.0.1:%d/" % port
+    print("东方天空街 · 新官网预览")
+    print("站点根目录：%s" % ROOT)
+    print("地址：%s" % url)
+    print("提示：请用 127.0.0.1 而不是 localhost，避免 IPv6 解析问题。")
+    print("按 Ctrl+C 停止。\n")
 
-def open_browser(url):
-    time.sleep(0.8)
-    try:
-        webbrowser.open(url)
-    except Exception:
-        pass
+    with Server(("127.0.0.1", port), Handler) as httpd:
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\n已停止。")
+    return 0
 
 
 if __name__ == "__main__":
-    # 以脚本所在目录（web/）为站点根，脚本可能以相对或绝对路径启动
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    server, port = make_server(HOST, START_PORT)
-    url = "http://%s:%d" % (HOST, port)
-    print("站点已启动： %s （关闭此窗口或 Ctrl+C 停止）" % url, flush=True)
-    threading.Thread(target=open_browser, args=(url,), daemon=True).start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n已停止。", flush=True)
+    sys.exit(main())

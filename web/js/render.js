@@ -1,7 +1,7 @@
 /* ============================================================================
    数据页渲染：关卡 / 人物 / 曲目
    数据源放在 data/*.json，页面只留骨架；Boss 介绍在 data/bosses.json，按 id 并进来。
-   注意：这些页需要经由本地 HTTP 服务访问（python web-new/serve.py）。
+   注意：这些页需要经由本地 HTTP 服务访问（python web/serve.py）。
    ========================================================================== */
 (function () {
   'use strict';
@@ -29,7 +29,7 @@
       '<h3>数据没能加载</h3>' +
       '<p style="margin-top:12px;color:var(--ink-dim)">' + esc(err.message) + '</p>' +
       '<p style="margin-top:12px;color:var(--ink-dim)">本页用 fetch 读取 <code>data/*.json</code>，' +
-      '需要经由本地 HTTP 服务访问。请在项目根目录执行 <code>python web-new/serve.py</code>，' +
+      '需要经由本地 HTTP 服务访问。请在项目根目录执行 <code>python web/serve.py</code>，' +
       '再打开 <code>http://127.0.0.1:8100</code>。</p>' +
       '</div></div>';
   }

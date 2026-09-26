@@ -1,108 +1,100 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>角色 · 东方天空街</title>
-  <meta name="description" content="东方天空街的角色与 Boss 图鉴。">
-  <link rel="stylesheet" href="css/style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>人物 | 東方天空街 Touhou Sky Street</title>
+<meta name="description" content="東方天空街的人物：四位自机（魔法使 Mage、弓手 Archer、重装 Tank、冰焰 Frozen Blaze）与全部十七位 Boss，含立绘、介绍与各自特征。Boss 立绘使用游戏里的「另一版」套组。">
+<meta name="theme-color" content="#04060e">
+<script>try{if(sessionStorage.getItem("warp-card")){document.documentElement.classList.add("warp-in");setTimeout(function(){document.documentElement.classList.remove("warp-in")},3000)}}catch(e){}</script>
+<link rel="icon" href="assets/img/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+<link rel="stylesheet" href="css/site.css">
 </head>
-<body>
-  <header class="site-header">
-    <div class="container nav">
-      <a class="nav-brand" href="index.html"><span class="brand-cn">東方天空街</span><span class="brand-en">TOUHOU SKY STREET</span></a>
-      <nav class="nav-links">
-        <a href="index.html">首页</a>
-        <a href="gameplay.html">玩法</a>
-        <a href="characters.html">角色</a>
-        <a href="items.html">物品图鉴</a>
-        <a href="gallery.html">画廊</a>
-        <a href="ost.html">OST</a>
-        <a href="download.html">下载</a>
-        <a href="about.html">关于</a>
-      </nav>
-    </div>
-  </header>
+<body data-page="characters">
+<canvas id="danmaku" aria-hidden="true"></canvas>
 
-  <section class="hero">
-    <span class="kicker">Characters</span>
-    <h1>角色与 Boss</h1>
-    <p class="lead">四位自机、六大舞台，与一路上的对手。</p>
+<header class="site-nav">
+  <div class="wrap">
+    <a class="brand" href="index.html">
+      <span class="cn">東方天空街</span>
+      <span class="en">Touhou Sky Street</span>
+    </a>
+    <nav class="nav-list" aria-label="主导航">
+      <a href="download.html" data-card-no="Start Game" data-card-cn="下载与运行" data-card-en="Download &amp; Run">Start Game<span class="cn">下载</span></a>
+      <a href="gameplay.html" data-card-no="How to Play" data-card-cn="玩法" data-card-en="Keys &middot; Systems &middot; Practice">How to Play<span class="cn">玩法</span></a>
+      <a href="characters.html" data-card-no="Characters" data-card-cn="自机与对手" data-card-en="4 Players &middot; 17 Bosses">Characters<span class="cn">人物</span></a>
+      <a href="stages.html" data-card-no="Stages" data-card-cn="七段上升的路" data-card-en="01 &ndash; EX">Stages<span class="cn">舞台</span></a>
+      <a href="items.html" data-card-no="Item Index" data-card-cn="物品图鉴" data-card-en="61 Items">Items<span class="cn">图鉴</span></a>
+      <a href="music.html" data-card-no="Music Room" data-card-cn="音乐室" data-card-en="Sound Track">Music Room<span class="cn">曲目</span></a>
+      <a href="about.html" data-card-no="About" data-card-cn="关于本作" data-card-en="Touhou Sky Street">About<span class="cn">关于</span></a>
+    </nav>
+  </div>
+</header>
+
+<main class="deck">
+  <div class="page-head">
+    <div class="bg" style="background-image:url('assets/img/shot/character.webp')"></div>
+    <div class="wrap">
+      <div class="tag kicker">Characters</div>
+      <h1>自机与对手</h1>
+      <span class="en">Players &amp; Bosses</span>
+      <p class="lead">站在你这边的四位，和挡在路上的十七位。自机共用同一套判定与炸弹规则，差别在立绘、战斗形象与自机弹的形状；对手按面数从上往下排，立绘全部取自游戏里的「另一版」套组。</p>
+    </div>
+  </div>
+
+  <nav class="cast-nav" aria-label="人物页内跳转">
+    <div class="wrap" id="castNav"></div>
+  </nav>
+
+  <section class="cast-block" id="cast-players">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">自机</div>
+        <div>
+          <h2>四位，四种弹道</h2>
+          <span class="en">Player Characters</span>
+          <p>选谁出征，就等于选了一条弹幕形状。出征前选一位，她会一路跟你到第六面——连剧情对话里的名牌都跟着换。</p>
+        </div>
+      </div>
+    </div>
+    <div id="charaList"></div>
   </section>
 
-  <section class="section">
-    <div class="container">
-      <div class="section-head reveal">
-        <div class="section-seal">四位自机<span class="en">PLAYABLE</span></div>
-        <p>出征前从四位自机中选一位。四位的自机弹各不相同——弹条数、扩散角、固定弹是否穿透、有没有追踪弹都按机体分开；弓手的箭从同一点射出，中间那支每隔四秒会变成命中炸开一圈的爆裂箭。自机弹的贴图还会朝自己的飞行方向转正，扇形散开的箭各指各的弹道，出征前不妨各试一把。</p>
+  <section class="cast-block" id="cast-bosses">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">对手</div>
+        <div>
+          <h2>十七位对手</h2>
+          <span class="en">Bosses</span>
+          <p>从蛛网一路排到王座，一位一行。The Watcher 在第三面与第五面各登场一次，这里只立一张，另一处登场记在条目里。</p>
+        </div>
       </div>
-      <div class="chara-grid reveal">
-        <figure class="chara">
-          <img src="assets/gallery/mage.webp" alt="魔法使 Mage" loading="lazy">
-          <figcaption>
-            <span class="chara-name" style="color:#50c8ff;">魔法使 Mage</span>
-            <span class="chara-title">Mage · 魔法使</span>
-            <p>以寒霜镰刀与魔导之力贯穿弹幕的魔法使。指尖凝霜成刃，Hyperion 一出鞘，整条地下城走廊都会安静下来。</p>
-          </figcaption>
-        </figure>
-        <figure class="chara">
-          <img src="assets/gallery/archer.webp" alt="弓手 Archer" loading="lazy">
-          <figcaption>
-            <span class="chara-name" style="color:#c060ff;">弓手 Archer</span>
-            <span class="chara-title">Archer · 弓手</span>
-            <p>眼里只有一条弹道的弓手。拉满弓弦的那一瞬，敌机的位置、弹幕的缝隙、风的走向，全在计算之内。</p>
-          </figcaption>
-        </figure>
-        <figure class="chara">
-          <img src="assets/gallery/berserk.webp" alt="狂战士 Berserk" loading="lazy">
-          <figcaption>
-            <span class="chara-name" style="color:#ff5848;">狂战士 Berserk</span>
-            <span class="chara-title">Berserker · 狂战士</span>
-            <p>以肉身冲进弹幕里的狂战士。越是被逼到角落越是兴奋，贴着敌机打是她的习惯。</p>
-          </figcaption>
-        </figure>
-        <figure class="chara">
-          <img src="assets/gallery/tank.webp" alt="重装 Tank" loading="lazy">
-          <figcaption>
-            <span class="chara-name" style="color:#d0d0d8;">重装 Tank</span>
-            <span class="chara-title">Tank · 重装</span>
-            <p>把像素方块当铠甲披在身上的重装。慢，但不会被推走：她站在哪里，哪里就是安全线。</p>
-          </figcaption>
-        </figure>
-      </div>
-
-      <div class="section-head reveal" style="margin-top:52px;">
-        <div class="section-seal">六大舞台<span class="en">STAGES</span></div>
-        <p>沿天空街一路攀升的猎场。</p>
-      </div>
-      <ul class="stage-list reveal">
-        <li><span class="st">STAGE 01</span><div><h3>蜘蛛的巢穴 Spider's Den</h3><p>蛛网与巢穴交织的第一舞台。Boss：<strong>Arachne</strong>（蛛后）。</p></div></li>
-        <li><span class="st">STAGE 02</span><div><h3>末地最底层 Dragon's Nest</h3><p>巨龙栖息的末地深处。道中 Boss：<strong>End Stone Protector</strong>；关底 Boss：<strong>Ender Dragon</strong>。</p></div></li>
-        <li><span class="st">STAGE 03</span><div><h3>地下墓穴 The Catacombs Floor 1</h3><p>地下墓穴的第一层。道中 Boss：<strong>The Watcher</strong>；关底 Boss：<strong>Bonzo</strong>。</p></div></li>
-        <li><span class="st">STAGE 04</span><div><h3>地下墓穴深处 The Catacombs</h3><p>向墓穴深处推进的一段路。道中 Boss：<strong>Scarf</strong>；关底 Boss：<strong>Sadan</strong>。</p></div></li>
-        <li><span class="st">STAGE 05</span><div><h3>凋零之厅 The Wither Lords</h3><p>凋零王朝的大本营，接连不断的 Boss 车轮战。Boss：<strong>The Watcher</strong>、<strong>The Professor</strong>、<strong>Thorn</strong>、<strong>Livid</strong>、<strong>Maxor</strong>、<strong>Storm</strong>、<strong>Goldor</strong>、<strong>Necron</strong>。</p></div></li>
-        <li><span class="st">STAGE 06</span><div><h3>最终进军 Final Approach</h3><p>通往凋零之王王座的最后一段路。Boss：<strong>The Wither King</strong>（Kaeman）。</p></div></li>
-      </ul>
-
-      <div class="prose reveal" style="margin-top:48px;">
-        <h2>立绘与图鉴</h2>
-        <p>自机与 Boss 的立绘可前往<a href="gallery.html">画廊</a>浏览；Boss 还可在游戏设置里切换「新版 / 另一版」两套立绘。</p>
-        <ul>
-          <li>自机战斗形象：关卡内为站立 / 移动两张贴图，出征前可在「选择自机」界面预览。</li>
-          <li>Boss 符卡列表：可在游戏的「符卡练习」模式中选择查看。</li>
-          <li>Boss 掉落物品：见 <a href="items.html">物品图鉴</a>。</li>
-          <li>符卡台词与详细人物设定仍在整理中，将随后续版本补充。</li>
-        </ul>
-      </div>
+      <div id="bossList"></div>
     </div>
   </section>
+</main>
 
-  <footer class="site-footer">
-    <div class="container foot">
-      <span>© 2026 Touhou Sky Street 制作组 · 東方Project 同人作品</span>
-      <span>基于 Hypixel Skyblock 的二次创作 · 素材来源与许可见<a href="about.html">关于</a></span>
-    </div>
-  </footer>
-  <script src="js/site.js"></script>
+<footer class="site-foot">
+  <div class="wrap">
+    <span>&copy; <span data-year>2026</span> 東方天空街 Touhou Sky Street 制作组</span>
+    <span>东方 Project 同人二次创作 · 非商业作品</span>
+    <span class="copy"><a href="about.html">关于与素材许可</a></span>
+  </div>
+</footer>
+
+<div class="title-card" id="warp" aria-hidden="true">
+  <div class="inner">
+    <div class="no"></div>
+    <div class="cn"></div>
+    <div class="en"></div>
+  </div>
+</div>
+<script src="js/warp-in.js"></script>
+
+<script src="js/danmaku.js"></script>
+<script src="js/site.js"></script>
+<script src="js/render.js"></script>
 </body>
 </html>

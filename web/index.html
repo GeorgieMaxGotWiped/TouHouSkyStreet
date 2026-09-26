@@ -1,144 +1,303 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>东方天空街 ~ Touhou Sky Street | 官方网站</title>
-  <meta name="description" content="基于 Hypixel Skyblock 的东方 Project 同人弹幕射击游戏「东方天空街 ~ Touhou Sky Street」官方网站。">
-  <link rel="stylesheet" href="css/style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>東方天空街 ~ Touhou Sky Street</title>
+<meta name="description" content="東方天空街 Touhou Sky Street —— 基于 Hypixel Skyblock 的东方 Project 同人弹幕射击游戏。四自机、六面加 Ex 面、61 件物品。">
+<meta name="theme-color" content="#04060e">
+<script>try{if(sessionStorage.getItem("warp-card")){document.documentElement.classList.add("warp-in");setTimeout(function(){document.documentElement.classList.remove("warp-in")},3000)}}catch(e){}</script>
+<link rel="icon" href="assets/img/favicon-32.png">
+<link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+<link rel="stylesheet" href="css/site.css">
 </head>
-<body>
-  <header class="site-header">
-    <div class="container nav">
-      <a class="nav-brand" href="index.html">
-        <span class="brand-cn">東方天空街</span>
-        <span class="brand-en">TOUHOU SKY STREET</span>
-      </a>
-      <nav class="nav-links">
-        <a href="index.html">首页</a>
-        <a href="gameplay.html">玩法</a>
-        <a href="characters.html">角色</a>
-        <a href="items.html">物品图鉴</a>
-        <a href="gallery.html">画廊</a>
-        <a href="ost.html">OST</a>
-        <a href="download.html">下载</a>
-        <a href="about.html">关于</a>
-      </nav>
-    </div>
-  </header>
+<body class="is-title">
+<canvas id="danmaku" aria-hidden="true"></canvas>
 
-  <section class="title-screen">
-    <div class="title-bg"><img src="assets/img/hero.webp" alt="" aria-hidden="true"></div>
-    <div class="container title-plate">
-      <span class="kicker">東方Project 同人 · 弹幕射击</span>
-      <h1 class="title-en">Touhou Sky Street</h1>
-      <h2 class="title-cn">東方天空街</h2>
-      <div class="title-rule"></div>
-      <p class="title-note">基于 Hypixel Skyblock 的东方 Project 同人弹幕射击游戏。四位自机、六重舞台，收集 Skyblock 风物品，在弹幕与符卡的交错中，抵达天空街的尽头。</p>
-      <a class="menu-link" href="download.html">◆ 进入下载</a>
-      <div class="title-facts">
-        <span class="fact"><b>6</b> 舞台</span>
-        <span class="fact"><b>4</b> 自机</span>
-        <span class="fact"><b>61</b> 收集物</span>
-        <span class="fact"><b>4</b> 难度</span>
+<h1 class="sr-only">東方天空街 Touhou Sky Street 官方网站</h1>
+
+<section class="title-screen">
+  <div class="wrap">
+    <div class="title-fallback">
+      <div class="cn">東方天空街</div>
+      <div class="en">Touhou Sky Street</div>
+    </div>
+  </div>
+
+  <nav class="menu title-menu" aria-label="主导航">
+      <a class="menu-row" href="download.html"
+         data-card-no="Start Game" data-card-cn="下载与运行" data-card-en="Download &amp; Run">Start Game<span class="cn">下载</span></a>
+      <a class="menu-row" href="gameplay.html"
+         data-card-no="How to Play" data-card-cn="玩法" data-card-en="Keys &middot; Systems &middot; Practice">How to Play<span class="cn">玩法</span></a>
+      <a class="menu-row" href="characters.html"
+         data-card-no="Characters" data-card-cn="自机与对手" data-card-en="4 Players &middot; 17 Bosses">Characters<span class="cn">人物</span></a>
+      <a class="menu-row" href="stages.html"
+         data-card-no="Stages" data-card-cn="七段上升的路" data-card-en="01 &ndash; EX">Stages<span class="cn">舞台</span></a>
+      <a class="menu-row" href="items.html"
+         data-card-no="Item Index" data-card-cn="物品图鉴" data-card-en="61 Items">Items<span class="cn">图鉴</span></a>
+      <a class="menu-row" href="music.html"
+         data-card-no="Music Room" data-card-cn="音乐室" data-card-en="Sound Track">Music Room<span class="cn">曲目</span></a>
+      <a class="menu-row" href="about.html"
+         data-card-no="About" data-card-cn="关于本作" data-card-en="Touhou Sky Street">About<span class="cn">关于</span></a>
+  </nav>
+
+  <div class="title-meta">
+    <div class="wrap">
+      <span class="keys"><b>↑ ↓</b> 选择　<b>Enter</b> 确定　<b>1-7</b> 直选</span>
+      <span class="ver">v1.6.0 &middot; 官方网站</span>
+    </div>
+  </div>
+</section>
+
+<main class="deck">
+
+  <section class="section" id="prologue">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">序</div>
+        <div>
+          <h2>这里是天空街</h2>
+          <span class="en">Prologue</span>
+        </div>
+      </div>
+      <p class="lede">
+        一座浮在夜空里的城，由方块堆起来，被云托着，一直往上长。<br>
+        你要做的只有一件事：<strong>从最下面那一面开始，一路打上去</strong>。<br>
+        <span class="dim">这是东方 Project 的同人二次创作，把 Hypixel Skyblock 的收集与成长塞进弹幕射击的骨架里——六面正篇加一面 Ex，四位自机，六十一件可以捡、可以买、可以重铸的物品。没有剧情铺垫要你读完，进来就是弹幕。</span>
+      </p>
+
+      <div class="facts">
+        <div><b>7</b><span>面（六面 + EX）</span></div>
+        <div><b>4</b><span>位自机</span></div>
+        <div><b>61</b><span>件物品</span></div>
+        <div><b>4</b><span>档难度 · 1 档开放</span></div>
       </div>
     </div>
   </section>
 
-  <section class="section">
-    <div class="container intro reveal">
-      <div class="no">序</div>
-      <p>这里是「<strong>東方天空街</strong>」—— 一座漂浮在夜空中的魔都。魔法、道具与弹幕相互交错，而你，将一路向上。<br>本作是东方 Project 的同人二次创作，将 <strong>Hypixel Skyblock</strong> 的收集成长与东方弹幕相融，做出属于我们自己的天空街。</p>
-    </div>
-  </section>
-
-  <section class="section">
-    <div class="container">
-      <div class="section-head reveal">
-        <div class="section-seal">游戏特色<span class="en">FEATURES</span></div>
-        <p>弹幕为骨，收集成长为肉。</p>
-      </div>
-      <div class="feature-list reveal">
-        <div class="feature"><span class="no">一</span><div><h3>弹幕射击</h3><p>以高速移动与弹幕回避为核心的射击玩法。观察敌人的攻击规律，在密集的弹幕中寻找安全路线，同时抓住机会进行攻击。</p></div></div>
-        <div class="feature"><span class="no">二</span><div><h3>四位自机</h3><p>出征前可以选择魔法使 Mage、弓手 Archer、狂战士 Berserk 与重装 Tank 四位自机，各自拥有独立的立绘、战斗形象与自机弹（弹条数、扩散、穿透与追踪弹都有差）。</p></div></div>
-        <div class="feature"><span class="no">三</span><div><h3>装备系统</h3><p>在冒险过程中获得各种装备与道具。不同装备拥有不同的属性与效果，玩家可以根据自身的战斗需求进行搭配。</p></div></div>
-        <div class="feature"><span class="no">四</span><div><h3>关卡挑战</h3><p>穿越多个关卡，击败沿途敌人并挑战各关卡 Boss。随着游戏进程推进，弹幕与敌人的攻击方式将逐渐变得更加复杂。</p></div></div>
-        <div class="feature"><span class="no">五</span><div><h3>Boss 战</h3><p>每位 Boss 都拥有独立设计的弹幕与符卡。通过观察、练习与熟悉攻击规律，寻找突破强敌的方法。</p></div></div>
-        <div class="feature"><span class="no">六</span><div><h3>收集与成长</h3><p>战斗中获得的装备、道具与资源将成为继续冒险的重要助力。探索不同的搭配方式，逐渐强化自己的战斗能力。</p></div></div>
-        <div class="feature"><span class="no">七</span><div><h3>画面表现</h3><p>文字、立绘、地面与弹幕按渲染倍率原生绘制，最高支持 4x 输出分辨率与无边框全屏，在高分屏上依旧锐利。</p></div></div>
+  <section class="section" id="stages">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">舞台</div>
+        <div>
+          <h2>七段上升的路</h2>
+          <span class="en">Stages</span>
+          <p>从蛛网、末地、墓穴，一路打到凋零之王的王座。越往下，弹幕越不讲道理。</p>
+        </div>
       </div>
     </div>
-  </section>
-
-  <section class="section">
-    <div class="container reveal">
-      <div class="section-head">
-        <div class="section-seal">六幕舞台<span class="en">STAGES</span></div>
-        <p>沿天空街一路攀升的猎场。</p>
-      </div>
-      <ul class="stage-list">
-        <li><span class="st">STAGE 01</span><div><h3>蜘蛛的巢穴 Spider's Den</h3><p>蛛网与巢穴交织的第一舞台。Boss：Arachne（蛛后）。</p></div></li>
-        <li><span class="st">STAGE 02</span><div><h3>末地最底层 Dragon's Nest</h3><p>巨龙栖息的末地深处。道中 Boss：End Stone Protector；关底 Boss：Ender Dragon。</p></div></li>
-        <li><span class="st">STAGE 03</span><div><h3>地下墓穴 The Catacombs Floor 1</h3><p>地下墓穴的第一层。道中 Boss：The Watcher；关底 Boss：Bonzo。</p></div></li>
-        <li><span class="st">STAGE 04</span><div><h3>地下墓穴深处 The Catacombs</h3><p>向墓穴深处推进的一段路。道中 Boss：Scarf；关底 Boss：Sadan。</p></div></li>
-        <li><span class="st">STAGE 05</span><div><h3>凋零之厅 The Wither Lords</h3><p>凋零王朝的大本营，接连不断的 Boss 车轮战。Boss：The Watcher / The Professor / Thorn / Livid / Maxor / Storm / Goldor / Necron。</p></div></li>
-        <li><span class="st">STAGE 06</span><div><h3>最终进军 Final Approach</h3><p>通往凋零之王王座的最后一段路。Boss：The Wither King（Kaeman）。</p></div></li>
-        <li><span class="st">STAGE EX</span><div><h3>Coming Soon</h3><p>新的舞台正在准备中。</p></div></li>
+    <div class="wrap">
+      <ul class="rail">
+        <li class="rail-card">
+          <div class="no">STAGE 01</div>
+          <h3>蜘蛛巢穴的圣所</h3>
+          <div class="en">Spider&#39;s Den</div>
+          <ul class="bosses"><li>蜘蛛女王 Arachne</li></ul>
+        </li>
+        <li class="rail-card">
+          <div class="no">STAGE 02</div>
+          <h3>末地最底层</h3>
+          <div class="en">Dragon&#39;s Nest</div>
+          <ul class="bosses"><li>末影石守卫</li><li>末影龙</li></ul>
+        </li>
+        <li class="rail-card">
+          <div class="no">STAGE 03</div>
+          <h3>地下墓穴</h3>
+          <div class="en">The Catacombs Floor 1</div>
+          <ul class="bosses"><li>The Watcher</li><li>邦佐 Bonzo</li></ul>
+        </li>
+        <li class="rail-card">
+          <div class="no">STAGE 04</div>
+          <h3>地下墓穴深处</h3>
+          <div class="en">The Catacombs</div>
+          <ul class="bosses"><li>Scarf</li><li>萨丹 Sadan</li></ul>
+        </li>
+        <li class="rail-card">
+          <div class="no">STAGE 05</div>
+          <h3>凋零之厅</h3>
+          <div class="en">Hall of the Wither Lords</div>
+          <ul class="bosses"><li>八位凋零领主连战 Boss Rush</li><li>The Watcher / The Professor</li><li>Thorn / Livid / Maxor</li><li>Storm / Goldor / Necron</li></ul>
+        </li>
+        <li class="rail-card">
+          <div class="no">STAGE 06</div>
+          <h3>最终进军</h3>
+          <div class="en">Final Approach</div>
+          <ul class="bosses"><li>凋零之王 Kaeman</li></ul>
+        </li>
+        <li class="rail-card">
+          <div class="no">STAGE EX</div>
+          <h3>裂隙</h3>
+          <div class="en">The Rift</div>
+          <ul class="bosses"><li>Wizardman</li><li>前市长 Barry</li></ul>
+        </li>
       </ul>
+      <p class="rail-hint">共 7 段 · 横向滚动或拖动查看全部　→</p>
     </div>
   </section>
 
-  <section class="section">
-    <div class="container reveal">
-      <div class="section-head">
-        <div class="section-seal">实机截图<span class="en">SCREENSHOTS</span></div>
-        <p>开发期预览，正式宣传图制作中。</p>
+  <section class="section" id="characters">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">自机</div>
+        <div>
+          <h2>四位，四种弹道</h2>
+          <span class="en">Characters</span>
+          <p>立绘、战斗形象与自机弹各不相同。选谁出征，就等于选了一条弹幕形状。</p>
+        </div>
       </div>
-      <div class="screens">
-        <figure class="screen"><img src="assets/img/gameplay-1.png" alt="第 2 关关卡开始实机" loading="lazy"><figcaption>第 2 关 · 末地最底层</figcaption></figure>
-        <figure class="screen"><img src="assets/img/gameplay-2.png" alt="第 3 关实机" loading="lazy"><figcaption>第 3 关 · 地下墓穴 Floor 1</figcaption></figure>
-        <figure class="screen"><img src="assets/img/chara-select.webp" alt="选择自机界面" loading="lazy"><figcaption>出征前 · 选择自机</figcaption></figure>
-        <figure class="screen"><img src="assets/img/difficulty.webp" alt="选择难度界面" loading="lazy"><figcaption>出征前 · 选择难度</figcaption></figure>
-        <figure class="screen"><img src="assets/img/loadout.png" alt="出征装备界面" loading="lazy"><figcaption>出征准备 · 装备槽</figcaption></figure>
-        <figure class="screen"><img src="assets/img/shop.png" alt="休整商店" loading="lazy"><figcaption>休整阶段 · 商店</figcaption></figure>
-        <figure class="screen"><img src="assets/img/settings.webp" alt="设置界面" loading="lazy"><figcaption>设置 · 画面与显示</figcaption></figure>
+
+      <div class="chara-grid">
+        <article class="chara-card" style="--chara-color:#50c8ff">
+          <div class="portrait"><img src="assets/chara/mage.webp" alt="魔法使 Mage" loading="lazy"></div>
+          <div class="who">
+            <div class="en">Mage</div>
+            <div class="cn">魔法使</div>
+            <div class="shot">1 / 3 / 5 条自机弹，扩散两倍，固定弹可穿透。</div>
+          </div>
+        </article>
+        <article class="chara-card" style="--chara-color:#c060ff">
+          <div class="portrait"><img src="assets/chara/archer.webp" alt="弓手 Archer" loading="lazy"></div>
+          <div class="who">
+            <div class="en">Archer</div>
+            <div class="cn">弓手</div>
+            <div class="shot">所有箭从同一点收束射出，中间那支命中后炸掉周围敌弹。</div>
+          </div>
+        </article>
+        <article class="chara-card" style="--chara-color:#d0d0d8">
+          <div class="portrait"><img src="assets/chara/tank.webp" alt="重装 Tank" loading="lazy"></div>
+          <div class="who">
+            <div class="en">Tank</div>
+            <div class="cn">重装</div>
+            <div class="shot">弹道笔直向上，另带追踪弹。慢，但站得住。</div>
+          </div>
+        </article>
+        <article class="chara-card" style="--chara-color:#90b8ff">
+          <div class="portrait"><img src="assets/chara/frozen_blaze.webp" alt="冰焰 Frozen Blaze" loading="lazy"></div>
+          <div class="who">
+            <div class="en">Frozen Blaze</div>
+            <div class="cn">冰焰</div>
+            <div class="shot">扇形散射带追踪弹，默认自机，手感最接近旧版。</div>
+          </div>
+        </article>
+      </div>
+
+      <div class="cta" style="margin-top:34px">
+        <a class="btn" href="characters.html" data-card-no="Characters" data-card-cn="自机与对手" data-card-en="4 Players &middot; 17 Bosses">看看全部立绘<span class="cn">人物</span></a>
       </div>
     </div>
   </section>
 
-  <section class="section">
-    <div class="container reveal">
-      <div class="section-head">
-        <div class="section-seal">制作手记<span class="en">NOTES</span></div>
-        <p>开发进度与本作点滴。</p>
+  <section class="section" id="systems">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">系统</div>
+        <div>
+          <h2>弹幕之外的部分</h2>
+          <span class="en">Systems</span>
+        </div>
       </div>
-      <div class="log-list">
-        <div class="log-item"><span class="log-date">2026.09.14</span><p>新版内容同步：新增四位自机（Mage / Archer / Berserk / Tank）与出征前的自机选择，画廊一并更新。</p></div>
-        <div class="log-item"><span class="log-date">2026.09.13</span><p>高分辨率渲染管线与显示设置（输出分辨率 / 缩放模式 / 渲染倍率）实装，界面与关卡载入更清晰。</p></div>
-        <div class="log-item"><span class="log-date">2026.08.27</span><p>官方网站初版上线，新增图鉴数据导出（61 件物品）。</p></div>
-        <div class="log-item"><span class="log-date">2026.08.24</span><p>仓库 / 撤离 / C 技能与物品掉落系统进一步打磨。</p></div>
-        <div class="log-item"><span class="log-date">2026.08.17</span><p>第 3–6 关与 BOSS RUSH / 符卡练习逐步完成。</p></div>
+
+      <div class="feats">
+        <div class="feat"><span class="no">一</span><div>
+          <h3>符卡与非符</h3>
+          <p>每个 Boss 都是「非符阶段 → 符卡」交替推进，符卡按血量门槛触发。观察、记住、找缝隙，这是本作唯一的学习曲线。</p>
+        </div></div>
+        <div class="feat"><span class="no">二</span><div>
+          <h3>Skyblock 式物品</h3>
+          <p>六十一件物品覆盖武器、护甲、护符、消耗品、材料与重铸石，带稀有度、属性与 Lore，图标与提示框照 Skyblock 原版 GUI 的规矩来。</p>
+        </div></div>
+        <div class="feat"><span class="no">三</span><div>
+          <h3>仓库与撤离</h3>
+          <p>每面之间的休整阶段可以买卖、装备、重铸；按 B 撤离才能把这一局的物资存进本地仓库。Game Over 就什么都没了。</p>
+        </div></div>
+        <div class="feat"><span class="no">四</span><div>
+          <h3>难度与练习</h3>
+          <p>出征前先选自机、再选难度。当前开放 Easy，Normal / Hard / Lunatic 摆在列表里等解锁；另有符卡练习与 Boss Rush 单独入口。</p>
+        </div></div>
+        <div class="feat"><span class="no">五</span><div>
+          <h3>画面与高分辨率</h3>
+          <p>文字、立绘、地面与弹幕都按渲染倍率原生绘制，最高 4x 输出分辨率与无边框全屏，在高分屏上依然锐利。</p>
+        </div></div>
+        <div class="feat"><span class="no">六</span><div>
+          <h3>游戏速度自定</h3>
+          <p>战斗中 F8 减速、F9 加速、F10 回到 1.0x，范围 0.25x 到 2.0x，弹幕与时间轴整体缩放，音乐与音效保持原速。</p>
+        </div></div>
       </div>
     </div>
   </section>
 
-  <section class="section">
-    <div class="container reveal" style="border-top:1px solid var(--line);padding-top:44px;">
-      <div class="section-seal">欢迎来到天空街<span class="en">WELCOME</span></div>
-      <p style="color:var(--ink-dim);max-width:560px;margin:8px 0 26px;">Windows 10/11 · 即点即玩 · 东方 Project 同人作品</p>
-      <div class="btn-row">
-        <a class="btn btn-primary" href="download.html">下载游戏</a>
-        <a class="btn" href="gallery.html">浏览画廊</a>
+  <section class="section" id="screens">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">实机</div>
+        <div>
+          <h2>开发中的画面</h2>
+          <span class="en">Screens</span>
+          <p>以下都是开发期直接从游戏里截的整屏图，不是宣传渲染。</p>
+        </div>
+      </div>
+
+      <div class="shots">
+        <figure class="shot">
+          <img src="assets/img/shot/title.webp" alt="游戏标题画面" loading="lazy">
+          <figcaption><span class="tag">Title</span> 标题画面 · 菜单就是官网首页的出处</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="assets/img/shot/stage3.webp" alt="第三面关卡开始画面" loading="lazy">
+          <figcaption><span class="tag">Stage 03</span> 关卡开始 · 地下墓穴</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="assets/img/shot/stage5.webp" alt="第五面 Boss 对话" loading="lazy">
+          <figcaption><span class="tag">Stage 05</span> 凋零之厅 · 道中对话</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="assets/img/shot/battle.webp" alt="战斗中画面" loading="lazy">
+          <figcaption><span class="tag">Battle</span> 战斗中 · 弹幕与 HUD</figcaption>
+        </figure>
       </div>
     </div>
   </section>
 
-  <footer class="site-footer">
-    <div class="container foot">
-      <span>© 2026 Touhou Sky Street 制作组 · 東方Project 同人作品</span>
-      <span>基于 Hypixel Skyblock 的二次创作 · 素材来源与许可见<a href="about.html">关于</a></span>
+  <section class="section" id="start">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="vlabel">出发</div>
+        <div>
+          <h2>从第一面开始</h2>
+          <span class="en">Start</span>
+          <p>Windows 10 / 11，下载即玩。首次启动会自动检查依赖。</p>
+        </div>
+      </div>
+      <div class="cta">
+        <a class="btn btn-primary" href="download.html"
+           data-card-no="Start Game" data-card-cn="下载与运行" data-card-en="Download &amp; Run">下载游戏<span class="cn">Windows</span></a>
+        <a class="btn" href="gameplay.html"
+           data-card-no="How to Play" data-card-cn="玩法" data-card-en="Keys &middot; Systems &middot; Practice">先看玩法<span class="cn">操作与系统</span></a>
+      </div>
     </div>
-  </footer>
-  <script src="js/site.js"></script>
+  </section>
+
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <span>&copy; <span data-year>2026</span> 東方天空街 Touhou Sky Street 制作组</span>
+    <span>东方 Project 同人二次创作 · 非商业作品</span>
+    <span class="copy"><a href="about.html">关于与素材许可</a></span>
+  </div>
+</footer>
+
+<div class="title-card" id="warp" aria-hidden="true">
+  <div class="inner">
+    <div class="no"></div>
+    <div class="cn"></div>
+    <div class="en"></div>
+  </div>
+</div>
+<script src="js/warp-in.js"></script>
+
+<script src="js/danmaku.js"></script>
+<script src="js/site.js"></script>
+<script src="js/title.js"></script>
 </body>
 </html>

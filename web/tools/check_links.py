@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""检查 web-new/ 里所有本地引用的资源是否真的存在。
+"""检查 web/ 里所有本地引用的资源是否真的存在。
 
 用法（在项目根目录执行）：
-    python web-new/tools/check_links.py
+    python web/tools/check_links.py
 
 会检查：
   · 每个 HTML 里的 src= / href= / style 内的 url(...)
@@ -16,7 +16,7 @@ import os
 import re
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # = web-new/
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # = web/
 HTML_ATTR = re.compile(r'(?:src|href)\s*=\s*"([^"]+)"')
 CSS_URL = re.compile(r'url\(\s*[\'"]?([^\'")]+)[\'"]?\s*\)')
 JSON_IMG = re.compile(r'"([^"]*assets/[^"]+)"')
@@ -34,7 +34,7 @@ def check(ref, base_dir, origin):
     if not target:
         return None
     if target.startswith("/"):
-        # 站点根的绝对路径：当作相对 web-new/ 处理
+        # 站点根的绝对路径：当作相对 web/ 处理
         path = os.path.join(ROOT, target.lstrip("/"))
     else:
         path = os.path.normpath(os.path.join(base_dir, target))
