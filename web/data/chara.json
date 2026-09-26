@@ -24,8 +24,8 @@
    "portrait": "assets/chara/tank.webp",
    "fight": "assets/chara/tank-fight.webp",
    "intro": ["把像素方块当铠甲披在身上的重装。", "慢，但不会被推走：", "她站在哪里，哪里就是安全线。"],
-   "shot": "自机弹 1 / 2 / 3 条笔直向上，另带追踪弹。",
-   "shot_tag": "直射 · 追踪"
+   "shot": "自机弹 1 / 2 / 3 条互相平行的笔直弹道，间距比谁都宽；扔出去的是斧头，能穿透多个敌人。按住 Shift 时左右两条朝中线稍微收，另带追踪弹。",
+   "shot_tag": "斧头 · 穿透 · 追踪"
   },
   {
    "key": "frozen_blaze", "en": "Frozen Blaze", "cn": "冰焰", "label": "冰焰 Frozen Blaze", "title": "Frozen Blaze · 冰焰",

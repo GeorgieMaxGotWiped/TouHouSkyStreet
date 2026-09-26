@@ -593,10 +593,10 @@ body.is-title .deck { background: linear-gradient(to bottom, rgba(4,6,14,.92), v
    自机页
    ========================================================================== */
 .chara-full { border-top: 1px solid var(--line); padding: 64px 0; position: relative; z-index: 1; }
-.chara-full .inner { display: grid; grid-template-columns: 360px 1fr; gap: 50px; }
+.chara-full .inner { display: grid; grid-template-columns: min(600px, calc(100% - 520px)) 1fr; gap: 50px; }
 .chara-full .art { display: flex; justify-content: center; align-items: flex-end; }
 .chara-full .art img {
-  max-height: 480px; width: auto;
+  max-height: 600px; width: auto;   /* 素材构建期已归一化，这里同一个值就是同一个高度 */
   filter: drop-shadow(0 20px 34px rgba(0, 0, 0, .6));
 }
 .chara-full .idx {
@@ -661,16 +661,19 @@ body.is-title .deck { background: linear-gradient(to bottom, rgba(4,6,14,.92), v
   color: var(--ink-mute); text-transform: uppercase;
 }
 
-/* 一行一位，版式与自机那几行同源（.chara-full），只是窄一点的立绘列 */
+/* 一行一位。立绘在构建期已经归一化（tools/build_assets.py 的 _fit_portrait：墨迹拉平到画布
+   高度、底边贴齐画布底、左右居中），所以这里跟 .chara-full 用同一口径即可：同一个 max-height
+   就是同一个视觉高度，居中就是同一条中轴。列宽要放得下最宽的一张（1200×1200 → 600px 宽），
+   桌面因此是 600px；用 min() 兜底，窗口收窄时先缩列宽，文字列不低于 470px。 */
 .boss-row {
-  display: grid; grid-template-columns: 320px 1fr; gap: 46px;
+  display: grid; grid-template-columns: min(600px, calc(100% - 520px)) 1fr; gap: 50px;
   align-items: center;
   padding: 44px 0; border-top: 1px solid var(--line);
 }
 .boss-row .art { display: flex; justify-content: center; align-items: center; }
 .boss-row .art img {
-  max-height: 340px; width: auto;
-  filter: drop-shadow(0 16px 26px rgba(0, 0, 0, .6));
+  max-height: 600px; width: auto;
+  filter: drop-shadow(0 20px 34px rgba(0, 0, 0, .6));
 }
 .boss-row .idx {
   font-family: var(--font-en); font-size: 12px; letter-spacing: .3em;
@@ -905,8 +908,10 @@ html.warp-in .title-card .en { opacity: 1; transform: none; animation: none; }
   .chara-card:nth-child(n+3) { border-top: 1px solid var(--line); }
   .stage-grid { grid-template-columns: 1fr; gap: 30px; }
   .stage-id { position: static; }
-  .chara-full .inner { grid-template-columns: 280px 1fr; gap: 34px; }
-  .boss-row { grid-template-columns: 260px 1fr; gap: 32px; }
+  .chara-full .inner { grid-template-columns: min(460px, calc(100% - 364px)) 1fr; gap: 34px; }
+  .chara-full .art img { max-height: 460px; }
+  .boss-row { grid-template-columns: min(460px, calc(100% - 364px)) 1fr; gap: 34px; }
+  .boss-row .art img { max-height: 460px; }
 }
 
 @media (max-width: 860px) {
@@ -923,7 +928,8 @@ html.warp-in .title-card .en { opacity: 1; transform: none; animation: none; }
   .dl-grid { grid-template-columns: 1fr; }
   .chara-full .inner { grid-template-columns: 1fr; }
   .chara-full .art { justify-content: flex-start; }
-  .chara-full .art img { max-height: 360px; }
+  .chara-full .art img { max-height: 400px; }
+  .boss-row .art img { max-height: 400px; }
   .track-group { grid-template-columns: 1fr; gap: 14px; }
   .filters { position: static; }
   .cast-nav { position: static; }
@@ -949,7 +955,8 @@ html.warp-in .title-card .en { opacity: 1; transform: none; animation: none; }
   .boss { grid-template-columns: 96px 1fr; gap: 16px; }
   .boss-row { grid-template-columns: 1fr; gap: 20px; }
   .boss-row .art { justify-content: flex-start; }
-  .boss-row .art img { max-height: 320px; }
+  .chara-full .art img { max-height: 340px; }
+  .boss-row .art img { max-height: 340px; }
   #cast-players, .boss-group { scroll-margin-top: 76px; }
   .boss .art img { max-height: 118px; }
   .spells li { flex-wrap: wrap; gap: 6px 14px; }

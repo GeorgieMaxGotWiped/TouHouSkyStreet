@@ -59,6 +59,34 @@ def _report(label, out_path, size, src_path):
           % (label, rel, size[0], size[1], kb, os.path.relpath(src_path, ROOT).replace("\\", "/")))
 
 
+# ---------------------------------------------------------------- 立绘归一化
+
+# 立绘素材的画幅与取景都不统一：多数是 1024×1536，少数偏方（1200×1200 那几张），
+# 人物在画布里的落位也各不一样——弓手整张偏右 85px，石守卫上下留白 38/56px、身高只有画布的 92%。
+# 页面把这些图按高度缩放并排时，上面这些差别就变成「每行人物左右跳 + 个别明显偏小」。
+# 所以构建时先重排一次：墨迹拉平到画布高度、底边贴齐画布底、左右居中。
+# 画布尺寸保持不变，舞台页的小缩略图不会因此变小。
+PORTRAIT_ALPHA_MIN = 12   # 墨迹判定阈值（0-255），低于它的按柔边/杂点处理
+
+
+def _fit_portrait(src_path, alpha_min=PORTRAIT_ALPHA_MIN):
+    """把立绘重排进它原有的画布：按墨迹范围拉平大小、底边对齐、水平居中。"""
+    img = _open(src_path).convert("RGBA")
+    w, h = img.size
+    box = img.getchannel("A").point(lambda v: 255 if v > alpha_min else 0).getbbox()
+    if not box:
+        return img
+    x0, y0, x1, y1 = box
+    scale = h / float(y1 - y0)          # 让墨迹高度正好等于画布高度
+    if abs(scale - 1.0) > 0.002:
+        img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+    ink_cx = (x0 + x1) * scale / 2.0    # 缩放后墨迹的横向中心与底边
+    ink_bottom = y1 * scale
+    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    out.paste(img, (round(w / 2.0 - ink_cx), round(h - ink_bottom)), img)
+    return out
+
+
 # ---------------------------------------------------------------- 1. 首页底图
 
 def build_title():
@@ -113,7 +141,7 @@ def build_chara():
     for key, (portrait, fight) in CHARA_FILES.items():
         src = os.path.join(base, portrait)
         out = os.path.join(ASSETS, "chara", key + ".webp")
-        _report(key, out, _save_webp(_open(src).convert("RGBA"), out, quality=90, max_h=1400), src)
+        _report(key, out, _save_webp(_fit_portrait(src), out, quality=90, max_h=1400), src)
 
         src = os.path.join(base, fight)
         out = os.path.join(ASSETS, "chara", key + "-fight.webp")
@@ -155,7 +183,7 @@ def build_boss():
     for key in sorted(BOSS_ART_FILES):
         src = os.path.join(base, BOSS_ART_FILES[key])
         out = os.path.join(ASSETS, "boss", key + ".webp")
-        _report(key, out, _save_webp(_open(src).convert("RGBA"), out, quality=88, max_h=1200), src)
+        _report(key, out, _save_webp(_fit_portrait(src), out, quality=88, max_h=1200), src)
 
 
 # ---------------------------------------------------------------- 5. 物品图标
